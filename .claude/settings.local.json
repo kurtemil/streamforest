@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -o 'group-title=\"[^\"]*\"' \"c:\\\\\\\\Users\\\\\\\\Elof\\\\\\\\Documents\\\\\\\\Programmering\\\\\\\\iptv-player\\\\\\\\full-example.m3u\")",
+      "Bash(grep -A 1 \"Series: \" \"c:\\\\\\\\Users\\\\\\\\Elof\\\\\\\\Documents\\\\\\\\Programmering\\\\\\\\iptv-player\\\\\\\\full-example.m3u\")",
+      "Bash(grep -A 1 \"VOD:\" \"c:\\\\\\\\Users\\\\\\\\Elof\\\\\\\\Documents\\\\\\\\Programmering\\\\\\\\iptv-player\\\\\\\\full-example.m3u\")",
+      "Bash(grep -E \"\\(tvg-name|group-title\\)\" \"c:\\\\\\\\Users\\\\\\\\Elof\\\\\\\\Documents\\\\\\\\Programmering\\\\\\\\iptv-player\\\\\\\\full-example.m3u\")",
+      "Bash(grep -A 1 \"group-title=\\\\\"Series:\" \"c:\\\\\\\\Users\\\\\\\\Elof\\\\\\\\Documents\\\\\\\\Programmering\\\\\\\\iptv-player\\\\\\\\full-example.m3u\")",
+      "Bash(grep -A 1 'group-title=\"Sweden\"' \"c:\\\\\\\\Users\\\\\\\\Elof\\\\\\\\Documents\\\\\\\\Programmering\\\\\\\\iptv-player\\\\\\\\full-example.m3u\")",
+      "Bash(grep \"Series:\" \"c:\\\\\\\\Users\\\\\\\\Elof\\\\\\\\Documents\\\\\\\\Programmering\\\\\\\\iptv-player\\\\\\\\full-example.m3u\")",
+      "Bash(npm create *)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/)",
+      "Bash(node -e ' *)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill /PID 20460 /F)",
+      "PowerShell(Stop-Process -Id 20460 -Force)",
+      "Bash(gh auth *)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  }
+}
