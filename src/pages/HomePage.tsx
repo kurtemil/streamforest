@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { normalizeShowKey } from '@/lib/utils'
 import { Play, Film, Tv, Radio, Settings, ChevronRight } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
@@ -39,7 +40,7 @@ function ContinueCard({ channel, progress, onClick }: { channel: Channel; progre
           {channel.type === 'movie' ? (channel.movieTitle ?? channel.name) : (channel.showName ?? channel.name)}
         </p>
         <p className="text-xs text-neutral-500 mt-0.5">
-          {subtitle && `${subtitle} · `}{formatTime(progress.position)} left
+          {subtitle && `${subtitle} · `}{formatTime(progress.position)} watched
         </p>
       </div>
     </button>
@@ -58,6 +59,7 @@ function SectionHeader({ title, to }: { title: string; to: string }) {
 }
 
 export function HomePage() {
+  const navigate = useNavigate()
   const { channels, loaded, m3uUrl } = usePlaylistStore()
   const { play } = usePlayerStore()
 
@@ -168,7 +170,11 @@ export function HomePage() {
                 key={channel.id}
                 channel={channel}
                 progress={progress}
-                onClick={() => play(channel)}
+                onClick={() => {
+                  if (channel.type === 'movie') navigate(`/movies?playing=${channel.id}`)
+                  else if (channel.type === 'series') navigate(`/series?show=${encodeURIComponent(normalizeShowKey(channel.showName ?? channel.name))}&playing=${channel.id}`)
+                  play(channel)
+                }}
               />
             ))}
           </div>
@@ -181,7 +187,7 @@ export function HomePage() {
           <SectionHeader title="Recently Added Movies" to="/movies" />
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4">
             {recentMovies.map((m) => (
-              <MovieCard key={m.id} channel={m} progress={progressMap?.[m.id]} onClick={() => play(m)} />
+              <MovieCard key={m.id} channel={m} progress={progressMap?.[m.id]} onClick={() => { navigate(`/movies?playing=${m.id}`); play(m) }} />
             ))}
           </div>
         </section>
@@ -193,7 +199,7 @@ export function HomePage() {
           <SectionHeader title="Recently Added TV Shows" to="/series" />
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4">
             {recentShows.map((ch) => (
-              <MovieCard key={ch.id} channel={ch} progress={progressMap?.[ch.id]} onClick={() => play(ch)} />
+              <MovieCard key={ch.id} channel={ch} progress={progressMap?.[ch.id]} onClick={() => { navigate(`/series?show=${encodeURIComponent(normalizeShowKey(ch.showName ?? ch.name))}&playing=${ch.id}`); play(ch) }} />
             ))}
           </div>
         </section>

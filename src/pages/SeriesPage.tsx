@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Tv, ChevronRight, ChevronDown, Star, Play, Check } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
@@ -16,16 +17,7 @@ const RECENT_SHOWS = 40
 
 // ─── Data helpers ──────────────────────────────────────────────────────────────
 
-// Normalize for deduplication: lowercase + strip diacritics so e.g.
-// "Den stora hälsoresan" and "Den Stora Halsoresan" collapse to the same show.
-function normalizeShowKey(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\boch\b/g, '&').replace(/\band\b/g, '&')
-    .replace(/\s*&\s*/g, ' & ')
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/\s+/g, ' ').trim()
-}
+import { normalizeShowKey } from '@/lib/utils'
 
 type ShowEntry = { seasons: Map<number, Channel[]>; logo: string; group: string; displayName: string }
 
@@ -187,11 +179,13 @@ function ShowCard({ showName, poster, seasons, episodes, onClick }: {
 // ─── Main page ─────────────────────────────────────────────────────────────────
 
 export function SeriesPage() {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { channels } = usePlaylistStore()
   const { play } = usePlayerStore()
   const [search, setSearch] = useState('')
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
-  const [selectedShow, setSelectedShow] = useState<string | null>(null)
+  const [selectedShow, setSelectedShow] = useState<string | null>(() => searchParams.get('show'))
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null)
   const [showFavs, setShowFavs] = useState(false)
 
@@ -234,6 +228,17 @@ export function SeriesPage() {
     return names
   }, [allShowNames, showFavs, selectedGroup, search, showMap, favIds])
 
+  // Auto-play episode from URL params on initial load (e.g. page reload)
+  const didAutoPlay = useRef(false)
+  useEffect(() => {
+    if (didAutoPlay.current || !seriesChannels.length) return
+    didAutoPlay.current = true
+    const playingId = searchParams.get('playing')
+    if (!playingId) return
+    const ep = seriesChannels.find(c => c.id === playingId)
+    if (ep) play(ep)
+  }, [seriesChannels, searchParams, play])
+
   // ── Detail view data (hooks must stay outside conditionals) ───────────────
 
   const currentShowData = selectedShow ? showMap.get(selectedShow) : undefined
@@ -274,7 +279,7 @@ export function SeriesPage() {
       <div className="p-6 pb-12 animate-slide-up overflow-y-auto h-full">
         {/* Back */}
         <button
-          onClick={() => { setSelectedShow(null); setSelectedSeason(null) }}
+          onClick={() => { navigate('/series'); setSelectedShow(null); setSelectedSeason(null) }}
           className="flex items-center gap-1.5 text-neutral-400 hover:text-white text-sm mb-6 transition-colors"
         >
           <ChevronRight size={16} className="rotate-180" /> All shows
@@ -322,7 +327,7 @@ export function SeriesPage() {
               key={ep.id}
               ep={ep}
               progress={progressRecords?.[ep.id]}
-              onClick={() => play(ep)}
+              onClick={() => { navigate(`/series?show=${encodeURIComponent(selectedShow!)}&playing=${ep.id}`); play(ep) }}
             />
           ))}
         </div>
@@ -401,7 +406,7 @@ export function SeriesPage() {
                   poster={data.logo}
                   seasons={data.seasons.size}
                   episodes={allEps.length}
-                  onClick={() => { setSelectedShow(name); setSelectedSeason(null) }}
+                  onClick={() => { navigate(`/series?show=${encodeURIComponent(name)}`); setSelectedShow(name); setSelectedSeason(null) }}
                 />
               )
             })}

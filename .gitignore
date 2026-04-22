@@ -5,3 +5,4 @@ dist/
 *.m3u
 .DS_Store
 .claude/
+plan.txt

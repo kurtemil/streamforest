@@ -1,18 +1,26 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import type Hls from 'hls.js'
+import { useNavigate } from 'react-router-dom'
 import { usePlayerStore } from '@/stores/playerStore'
 import { saveProgress, getProgress } from '@/services/db'
 import { PlayerControls } from './PlayerControls'
 
 const SAVE_INTERVAL_MS = 5000
-const HLS_EXTENSIONS = /\.(m3u8)$/i
-const MKV_EXTENSION = /\.(mkv|mp4|avi|mov)$/i
+const VIDEO_EXT = /\.(mkv|mp4|avi|mov|wmv|flv|webm)$/i
 
-function isHlsUrl(url: string): boolean {
-  return HLS_EXTENSIONS.test(url) || (!MKV_EXTENSION.test(url) && !url.includes('/movie/') && !url.includes('/series/'))
+interface Track { id: number; name: string; lang: string }
+
+type VideoWithAudioTracks = HTMLVideoElement & {
+  audioTracks?: EventTarget & {
+    readonly length: number
+    [index: number]: { id: string; kind: string; label: string; language: string; enabled: boolean }
+    addEventListener(type: string, handler: EventListener): void
+    removeEventListener(type: string, handler: EventListener): void
+  }
 }
 
 export function VideoPlayer() {
+  const navigate = useNavigate()
   const { current, close } = usePlayerStore()
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
@@ -26,6 +34,10 @@ export function VideoPlayer() {
   const [volume, setVolume] = useState(1)
   const [muted, setMuted] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [audioTracks, setAudioTracks] = useState<Track[]>([])
+  const [activeAudioTrack, setActiveAudioTrack] = useState(-1)
+  const [subtitleTracks, setSubtitleTracks] = useState<Track[]>([])
+  const [activeSubtitle, setActiveSubtitle] = useState(-1)
 
   const destroyHls = useCallback(() => {
     if (hlsRef.current) {
@@ -40,6 +52,11 @@ export function VideoPlayer() {
     controlsTimerRef.current = setTimeout(() => setShowControls(false), 3500)
   }, [])
 
+  const handleClose = useCallback(() => {
+    navigate(-1)
+    close()
+  }, [navigate, close])
+
   // Load source when current changes
   useEffect(() => {
     if (!current || !videoRef.current) return
@@ -50,36 +67,73 @@ export function VideoPlayer() {
     setBuffered(0)
     destroyHls()
 
+    setAudioTracks([])
+    setActiveAudioTrack(-1)
+    setSubtitleTracks([])
+    setActiveSubtitle(-1)
+
     const load = async () => {
       const saved = await getProgress(current.id)
       const startTime = saved && !saved.completed ? saved.position : 0
 
-      if (isHlsUrl(current.url)) {
+      if (VIDEO_EXT.test(current.url)) {
+        // Direct video file — native path, fast and reliable
+        video.src = current.url
+        if (startTime > 0) {
+          video.addEventListener('loadedmetadata', () => { video.currentTime = startTime }, { once: true })
+        }
+      } else {
+        // Potential HLS stream — try HLS.js, fall back to native on any fatal error
         const HlsLib = (await import('hls.js')).default
         if (HlsLib.isSupported()) {
           const hls = new HlsLib({ startPosition: startTime })
           hlsRef.current = hls as unknown as Hls
+
+          hls.on(HlsLib.Events.ERROR, (_e: unknown, data: { fatal: boolean; details?: string }) => {
+            if (!data.fatal) return
+            hls.destroy()
+            hlsRef.current = null
+            video.src = current.url
+            if (startTime > 0) {
+              video.addEventListener('loadedmetadata', () => { video.currentTime = startTime }, { once: true })
+            }
+            video.play().catch(() => {})
+          })
+          hls.on(HlsLib.Events.MANIFEST_PARSED, () => {
+            if (hls.audioTracks.length > 0) {
+              setAudioTracks(hls.audioTracks.map(t => ({ id: t.id, name: t.name, lang: t.lang ?? '' })))
+              setActiveAudioTrack(hls.audioTrack)
+            }
+            if (hls.subtitleTracks.length > 0) {
+              setSubtitleTracks(hls.subtitleTracks.map(t => ({ id: t.id, name: t.name, lang: t.lang ?? '' })))
+              setActiveSubtitle(hls.subtitleTrack)
+            }
+          })
+          hls.on(HlsLib.Events.AUDIO_TRACKS_UPDATED, () => {
+            setAudioTracks(hls.audioTracks.map(t => ({ id: t.id, name: t.name, lang: t.lang ?? '' })))
+            setActiveAudioTrack(hls.audioTrack)
+          })
+          hls.on(HlsLib.Events.AUDIO_TRACK_SWITCHED, () => {
+            setActiveAudioTrack(hls.audioTrack)
+          })
+          hls.on(HlsLib.Events.SUBTITLE_TRACKS_UPDATED, () => {
+            setSubtitleTracks(hls.subtitleTracks.map(t => ({ id: t.id, name: t.name, lang: t.lang ?? '' })))
+          })
+          hls.on(HlsLib.Events.SUBTITLE_TRACK_SWITCH, () => {
+            setActiveSubtitle(hls.subtitleTrack)
+          })
+
           hls.loadSource(current.url)
           hls.attachMedia(video)
-          hls.on(HlsLib.Events.ERROR, (_e: unknown, data: { fatal: boolean }) => {
-            if (data.fatal) setError('Stream error — the channel may be offline')
-          })
         } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
           video.src = current.url
           video.currentTime = startTime
         } else {
           setError('HLS not supported in this browser')
         }
-      } else {
-        video.src = current.url
-        if (startTime > 0) {
-          video.addEventListener('loadedmetadata', () => {
-            video.currentTime = startTime
-          }, { once: true })
-        }
       }
 
-      video.play().catch(() => { /* autoplay blocked */ })
+      video.play().catch(() => {})
     }
 
     load()
@@ -124,19 +178,56 @@ export function VideoPlayer() {
       if (current) saveProgress(current.id, video.duration, video.duration)
     }
 
+    const syncNativeAudioTracks = () => {
+      if (hlsRef.current) return
+      const at = (video as VideoWithAudioTracks).audioTracks
+      if (!at || at.length <= 1) return
+      const tracks: Track[] = []
+      let activeIdx = 0
+      for (let i = 0; i < at.length; i++) {
+        const t = at[i]
+        tracks.push({ id: i, name: t.label || t.language || `Track ${i + 1}`, lang: t.language })
+        if (t.enabled) activeIdx = i
+      }
+      setAudioTracks(tracks)
+      setActiveAudioTrack(activeIdx)
+    }
+
+    const onNativeSubtitleChange = () => {
+      if (hlsRef.current && hlsRef.current.subtitleTracks.length > 0) return
+      const subs = Array.from(video.textTracks).filter(t => t.kind === 'subtitles' || t.kind === 'captions')
+      if (subs.length > 0) {
+        setSubtitleTracks(subs.map((t, i) => ({ id: i, name: t.label || t.language || `Track ${i + 1}`, lang: t.language })))
+      }
+    }
+
+    // video.audioTracks is a live object — read it fresh in each handler above.
+    // Capture reference once here only for addEventListener/removeEventListener symmetry.
+    const nativeAudioTracks = (video as VideoWithAudioTracks).audioTracks
+
     video.addEventListener('timeupdate', onTimeUpdate)
     video.addEventListener('durationchange', onDurationChange)
+    video.addEventListener('loadedmetadata', syncNativeAudioTracks)
+    video.addEventListener('loadeddata', syncNativeAudioTracks)
     video.addEventListener('play', onPlay)
     video.addEventListener('pause', onPause)
     video.addEventListener('volumechange', onVolumeChange)
     video.addEventListener('ended', onEnded)
+    nativeAudioTracks?.addEventListener('addtrack', syncNativeAudioTracks)
+    nativeAudioTracks?.addEventListener('change', syncNativeAudioTracks)
+    video.textTracks.addEventListener('addtrack', onNativeSubtitleChange)
     return () => {
       video.removeEventListener('timeupdate', onTimeUpdate)
       video.removeEventListener('durationchange', onDurationChange)
+      video.removeEventListener('loadedmetadata', syncNativeAudioTracks)
+      video.removeEventListener('loadeddata', syncNativeAudioTracks)
       video.removeEventListener('play', onPlay)
       video.removeEventListener('pause', onPause)
       video.removeEventListener('volumechange', onVolumeChange)
       video.removeEventListener('ended', onEnded)
+      nativeAudioTracks?.removeEventListener('addtrack', syncNativeAudioTracks)
+      nativeAudioTracks?.removeEventListener('change', syncNativeAudioTracks)
+      video.textTracks.removeEventListener('addtrack', onNativeSubtitleChange)
     }
   }, [current])
 
@@ -179,14 +270,22 @@ export function VideoPlayer() {
           }
           break
         case 'Escape':
-          if (!document.fullscreenElement) close()
+          if (!document.fullscreenElement) handleClose()
           break
       }
       resetControlsTimer()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [current, close, resetControlsTimer])
+  }, [current, handleClose, resetControlsTimer])
+
+  // Close player on browser back/forward
+  useEffect(() => {
+    if (!current) return
+    const onPop = () => close()
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [current, close])
 
   // Cleanup on unmount / close
   useEffect(() => {
@@ -197,6 +296,38 @@ export function VideoPlayer() {
       }
     }
   }, [current, destroyHls])
+
+  const selectAudioTrack = useCallback((id: number) => {
+    if (hlsRef.current) {
+      hlsRef.current.audioTrack = id
+      return
+    }
+    const video = videoRef.current as VideoWithAudioTracks
+    if (video?.audioTracks) {
+      for (let i = 0; i < video.audioTracks.length; i++) {
+        video.audioTracks[i].enabled = (i === id)
+      }
+      setActiveAudioTrack(id)
+    }
+  }, [])
+
+  const selectSubtitle = useCallback((id: number) => {
+    const hls = hlsRef.current
+    const video = videoRef.current
+    if (id === -1) {
+      if (hls) hls.subtitleTrack = -1
+      if (video) Array.from(video.textTracks).forEach(t => { t.mode = 'hidden' })
+      setActiveSubtitle(-1)
+      return
+    }
+    if (hls && hls.subtitleTracks.length > id) {
+      hls.subtitleTrack = id
+    } else if (video) {
+      const subs = Array.from(video.textTracks).filter(t => t.kind === 'subtitles' || t.kind === 'captions')
+      subs.forEach((t, i) => { t.mode = i === id ? 'showing' : 'hidden' })
+      setActiveSubtitle(id)
+    }
+  }, [])
 
   if (!current) return null
 
@@ -254,7 +385,7 @@ export function VideoPlayer() {
               <p className="text-red-400 font-medium mb-2">Playback Error</p>
               <p className="text-neutral-400 text-sm">{error}</p>
               <button
-                onClick={(e) => { e.stopPropagation(); close() }}
+                onClick={(e) => { e.stopPropagation(); handleClose() }}
                 className="mt-4 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
               >
                 Close
@@ -272,12 +403,18 @@ export function VideoPlayer() {
           buffered={buffered}
           volume={volume}
           muted={muted}
+          audioTracks={audioTracks}
+          activeAudioTrack={activeAudioTrack}
+          subtitleTracks={subtitleTracks}
+          activeSubtitle={activeSubtitle}
           onTogglePlay={togglePlay}
           onSeek={seek}
           onVolumeChange={changeVolume}
           onToggleMute={toggleMute}
+          onSelectAudioTrack={selectAudioTrack}
+          onSelectSubtitle={selectSubtitle}
           onToggleFullscreen={toggleFullscreen}
-          onClose={close}
+          onClose={handleClose}
         />
       </div>
     </div>

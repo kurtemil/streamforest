@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Film } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
@@ -14,6 +15,8 @@ const RECENT_COUNT = 40
 const cleanGroup = (t: string) => t.replace(/^VOD:\s*/, '')
 
 export function MoviesPage() {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { channels } = usePlaylistStore()
   const { play } = usePlayerStore()
   const [search, setSearch] = useState('')
@@ -21,6 +24,16 @@ export function MoviesPage() {
   const [page, setPage] = useState(1)
 
   const movies = useMemo(() => channels.filter((c) => c.type === 'movie'), [channels])
+
+  const didAutoPlay = useRef(false)
+  useEffect(() => {
+    if (didAutoPlay.current || !movies.length) return
+    didAutoPlay.current = true
+    const playingId = searchParams.get('playing')
+    if (!playingId) return
+    const movie = movies.find(m => m.id === playingId)
+    if (movie) play(movie)
+  }, [movies, searchParams, play])
 
   // Groups in M3U order (first appearance), no alphabetical sort
   const groups = useMemo(() => {
@@ -103,7 +116,7 @@ export function MoviesPage() {
           <>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
               {visible.map((m) => (
-                <MovieCard key={m.id} channel={m} progress={progressMap?.[m.id]} onClick={() => play(m)} />
+                <MovieCard key={m.id} channel={m} progress={progressMap?.[m.id]} onClick={() => { navigate(`/movies?playing=${m.id}`); play(m) }} />
               ))}
             </div>
             {visible.length < filtered.length && (

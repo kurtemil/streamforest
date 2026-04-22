@@ -1,10 +1,12 @@
-import { useRef } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import {
   Play, Pause, Volume2, VolumeX, Maximize2, X,
-  SkipBack, SkipForward,
+  SkipBack, SkipForward, Languages,
 } from 'lucide-react'
 import type { Channel } from '@/types'
 import { formatTime } from '@/lib/time'
+
+interface Track { id: number; name: string; lang: string }
 
 interface Props {
   channel: Channel
@@ -15,10 +17,16 @@ interface Props {
   buffered: number
   volume: number
   muted: boolean
+  audioTracks: Track[]
+  activeAudioTrack: number
+  subtitleTracks: Track[]
+  activeSubtitle: number
   onTogglePlay: () => void
   onSeek: (t: number) => void
   onVolumeChange: (v: number) => void
   onToggleMute: () => void
+  onSelectAudioTrack: (id: number) => void
+  onSelectSubtitle: (id: number) => void
   onToggleFullscreen: () => void
   onClose: () => void
 }
@@ -27,10 +35,17 @@ export function PlayerControls({
   channel, visible, isPlaying,
   currentTime, duration, buffered,
   volume, muted,
+  audioTracks, activeAudioTrack, subtitleTracks, activeSubtitle,
   onTogglePlay, onSeek, onVolumeChange, onToggleMute,
+  onSelectAudioTrack, onSelectSubtitle,
   onToggleFullscreen, onClose,
 }: Props) {
   const scrubberRef = useRef<HTMLDivElement>(null)
+  const [showTrackMenu, setShowTrackMenu] = useState(false)
+
+  useEffect(() => {
+    if (!visible) setShowTrackMenu(false)
+  }, [visible])
 
   const pct = duration > 0 ? (currentTime / duration) * 100 : 0
   const bufferedPct = duration > 0 ? (buffered / duration) * 100 : 0
@@ -94,20 +109,20 @@ export function PlayerControls({
             </span>
             <div
               ref={scrubberRef}
-              className="relative flex-1 h-1 group/scrub cursor-pointer"
+              className="relative flex-1 h-5 group/scrub cursor-pointer"
               onClick={handleScrubberClick}
               onMouseMove={handleScrubberDrag}
             >
               {/* Track */}
-              <div className="absolute inset-0 rounded-full bg-white/20" />
+              <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-white/20" />
               {/* Buffered */}
               <div
-                className="absolute top-0 left-0 h-full rounded-full bg-white/30 transition-[width] duration-150"
+                className="absolute left-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-white/30 transition-[width] duration-150"
                 style={{ width: `${bufferedPct}%` }}
               />
               {/* Progress */}
               <div
-                className="absolute top-0 left-0 h-full rounded-full bg-accent-500 transition-[width] duration-150"
+                className="absolute left-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-accent-500 transition-[width] duration-150"
                 style={{ width: `${pct}%` }}
               />
               {/* Thumb */}
@@ -174,12 +189,69 @@ export function PlayerControls({
             )}
           </div>
 
-          <button
-            onClick={onToggleFullscreen}
-            className="p-2 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-colors"
-          >
-            <Maximize2 size={18} />
-          </button>
+          <div className="flex items-center gap-1">
+            {(audioTracks.length > 1 || subtitleTracks.length > 0) && (
+              <div className="relative">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowTrackMenu(v => !v) }}
+                  className={`p-2 rounded-full hover:bg-white/10 transition-colors ${showTrackMenu ? 'text-accent-500' : 'text-white/80 hover:text-white'}`}
+                >
+                  <Languages size={18} />
+                </button>
+                {showTrackMenu && (
+                  <div
+                    className="absolute bottom-full right-0 mb-2 bg-black/90 backdrop-blur-sm rounded-xl p-3 min-w-44"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {audioTracks.length > 1 && (
+                      <>
+                        <p className="text-white/50 text-xs uppercase tracking-wider mb-2 px-2">Audio</p>
+                        {audioTracks.map(t => (
+                          <button
+                            key={t.id}
+                            onClick={() => { onSelectAudioTrack(t.id); setShowTrackMenu(false) }}
+                            className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-white/10 text-left text-sm transition-colors ${activeAudioTrack === t.id ? 'text-accent-500' : 'text-white/80'}`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${activeAudioTrack === t.id ? 'bg-accent-500' : 'bg-white/30'}`} />
+                            {t.name || t.lang || `Track ${t.id + 1}`}
+                          </button>
+                        ))}
+                      </>
+                    )}
+                    {subtitleTracks.length > 0 && (
+                      <>
+                        {audioTracks.length > 1 && <div className="border-t border-white/10 my-2" />}
+                        <p className="text-white/50 text-xs uppercase tracking-wider mb-2 px-2">Subtitles</p>
+                        <button
+                          onClick={() => { onSelectSubtitle(-1); setShowTrackMenu(false) }}
+                          className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-white/10 text-left text-sm transition-colors ${activeSubtitle === -1 ? 'text-accent-500' : 'text-white/80'}`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${activeSubtitle === -1 ? 'bg-accent-500' : 'bg-white/30'}`} />
+                          Off
+                        </button>
+                        {subtitleTracks.map(t => (
+                          <button
+                            key={t.id}
+                            onClick={() => { onSelectSubtitle(t.id); setShowTrackMenu(false) }}
+                            className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-white/10 text-left text-sm transition-colors ${activeSubtitle === t.id ? 'text-accent-500' : 'text-white/80'}`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${activeSubtitle === t.id ? 'bg-accent-500' : 'bg-white/30'}`} />
+                            {t.name || t.lang || `Track ${t.id + 1}`}
+                          </button>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            <button
+              onClick={onToggleFullscreen}
+              className="p-2 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-colors"
+            >
+              <Maximize2 size={18} />
+            </button>
+          </div>
         </div>
       </div>
     </div>
