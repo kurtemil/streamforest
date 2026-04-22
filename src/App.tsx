@@ -8,6 +8,7 @@ import { LiveTVPage } from '@/pages/LiveTVPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { usePlaylistStore } from '@/stores/playlistStore'
+import { PasswordGate } from '@/components/PasswordGate'
 
 export default function App() {
   const { loadFromDB, loaded } = usePlaylistStore()
@@ -28,7 +29,7 @@ export default function App() {
   }
 
   return (
-    <>
+    <PasswordGate>
       <Layout>
         <Routes>
           <Route path="/" element={<HomePage />} />
@@ -40,6 +41,6 @@ export default function App() {
         </Routes>
       </Layout>
       <VideoPlayer />
-    </>
+    </PasswordGate>
   )
 }
