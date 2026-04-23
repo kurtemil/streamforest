@@ -15,6 +15,14 @@ const FFPROBE_PATH = process.env.FFPROBE_PATH || FFMPEG_PATH.replace(/ffmpeg(\.e
 const H264_ENCODER = process.env.H264_ENCODER || 'libx264'
 const H264_PRESET = process.env.H264_PRESET || 'ultrafast'
 const FFMPEG_LOGLEVEL = process.env.FFMPEG_LOGLEVEL || 'warning'
+// Output width cap (height scales to preserve aspect ratio).
+// 720 = 1280 wide target. Drop to 960 (540p) or 640 (360p) if upload-bound.
+const VIDEO_MAX_WIDTH = Number(process.env.VIDEO_MAX_WIDTH) || 1280
+// Target video bitrate. Keep headroom below your home upload speed —
+// typical residential upload is 10-20Mbps but can drop under load.
+const VIDEO_BITRATE = process.env.VIDEO_BITRATE || '1500k'
+const VIDEO_MAX_BITRATE = process.env.VIDEO_MAX_BITRATE || '2000k'
+const AUDIO_BITRATE = process.env.AUDIO_BITRATE || '128k'
 
 function hostAllowed(targetUrl) {
   return ALLOWED_HOSTS.some((h) => targetUrl.hostname === h || targetUrl.hostname.endsWith('.' + h))
@@ -68,21 +76,20 @@ function handleTranscode(reqUrl, res) {
     // frames go in. Without this x264 buffers ~8 frames before first output
     // which adds latency and can stall Chrome's MSE buffer.
     '-tune', 'zerolatency',
-    // Scale down to max 720p keeping aspect ratio. 1080p at ultrafast is only
-    // ~2-3× realtime on a consumer CPU — a single OS hiccup drops below realtime
-    // and the MSE video buffer starves. 720p gives comfortable headroom.
-    '-vf', "scale='min(1280,iw)':-2",
-    // Cap bitrate for predictable output rate. Prevents bursts that overwhelm
-    // Chrome's buffer on high-motion scenes.
-    '-b:v', '2500k',
-    '-maxrate', '3000k',
-    '-bufsize', '6000k',
+    // Scale down cap (config-driven). Keeps encode CPU and output bandwidth
+    // within the pipeline's weakest link (often home upload to Cloudflare).
+    '-vf', `scale='min(${VIDEO_MAX_WIDTH},iw)':-2`,
+    // Cap bitrate for predictable output rate. Needs to fit inside home upload
+    // speed with headroom for audio + overhead.
+    '-b:v', VIDEO_BITRATE,
+    '-maxrate', VIDEO_MAX_BITRATE,
+    '-bufsize', `${parseInt(VIDEO_MAX_BITRATE) * 2}k`,
     '-pix_fmt', 'yuv420p',
     // Keyframe every 1 second + frag_keyframe below = one video-bearing
     // fragment every second. Keeps MSE video buffer fed continuously.
     '-force_key_frames', 'expr:gte(t,n_forced*1)',
     '-c:a', 'aac',
-    '-b:a', '192k',
+    '-b:a', AUDIO_BITRATE,
     '-ac', '2',
     '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
     '-f', 'mp4',

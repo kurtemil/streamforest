@@ -1,5 +1,5 @@
 name: StreamForest Transcode Proxy
-version: "0.1.0"
+version: "0.2.0"
 slug: streamforest_transcode
 description: HTTP proxy that transcodes AC3/DTS/EAC3 MKV streams to AAC for web playback
 url: https://github.com/kurtemil/streamforest
@@ -28,9 +28,17 @@ options:
   allowed_hosts: "iptvworld.xyz"
   h264_encoder: "h264_v4l2m2m"
   h264_preset: "ultrafast"
+  video_max_width: 1280
+  video_bitrate: "1500k"
+  video_max_bitrate: "2000k"
+  audio_bitrate: "128k"
   log_level: "warning"
 schema:
   allowed_hosts: str
   h264_encoder: list(libx264|h264_v4l2m2m|h264_nvenc|h264_qsv|h264_vaapi)
   h264_preset: list(ultrafast|superfast|veryfast|faster|fast|medium)
+  video_max_width: int(320,1920)
+  video_bitrate: str
+  video_max_bitrate: str
+  audio_bitrate: str
   log_level: list(quiet|error|warning|info|debug)
