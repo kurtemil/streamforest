@@ -3,6 +3,7 @@ import type Hls from 'hls.js'
 import { useNavigate } from 'react-router-dom'
 import { usePlayerStore } from '@/stores/playerStore'
 import { saveProgress, getProgress } from '@/services/db'
+import { mightNeedTranscode, isTranscodeProxyConfigured, needsTranscode, transcodeUrl, probeMedia } from '@/lib/transcode'
 import { PlayerControls } from './PlayerControls'
 
 const SAVE_INTERVAL_MS = 5000
@@ -26,6 +27,11 @@ export function VideoPlayer() {
   const hlsRef = useRef<Hls | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Baseline seconds baked into the source URL (for transcode-proxy resume).
+  // Real playback time = playbackOffsetRef.current + video.currentTime.
+  const playbackOffsetRef = useRef(0)
+  const isTranscodedRef = useRef(false)
+  const transcodedDurationRef = useRef<number | null>(null)
   const [showControls, setShowControls] = useState(true)
   const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
@@ -57,9 +63,41 @@ export function VideoPlayer() {
     close()
   }, [navigate, close])
 
+  const seekTo = useCallback((realTime: number) => {
+    const video = videoRef.current
+    if (!video || !current) return
+    const clamped = Math.max(0, realTime)
+    if (!isTranscodedRef.current) {
+      video.currentTime = clamped
+      return
+    }
+    // Transcoded stream: local time = real − baked-in offset.
+    // If within the buffered window, a native seek works; otherwise rebuild
+    // the source URL at the new start so ffmpeg restarts from there.
+    const offset = playbackOffsetRef.current
+    const localTime = clamped - offset
+    const buf = video.buffered
+    let inBuffered = false
+    for (let i = 0; i < buf.length; i++) {
+      if (localTime >= buf.start(i) && localTime <= buf.end(i)) {
+        inBuffered = true
+        break
+      }
+    }
+    if (localTime >= 0 && inBuffered) {
+      video.currentTime = localTime
+      return
+    }
+    playbackOffsetRef.current = clamped
+    setCurrentTime(clamped)
+    setBuffered(clamped)
+    video.src = transcodeUrl(current.url, clamped)
+    video.play().catch(() => {})
+  }, [current])
+
   // Load source when current changes
   useEffect(() => {
-    if (!current || !videoRef.current) return
+      if (!current || !videoRef.current) return
     const video = videoRef.current
     setError(null)
     setDuration(0)
@@ -77,12 +115,35 @@ export function VideoPlayer() {
       const startTime = saved && !saved.completed ? saved.position : 0
 
       if (VIDEO_EXT.test(current.url)) {
-        // Direct video file — native path, fast and reliable
-        video.src = current.url
-        if (startTime > 0) {
-          video.addEventListener('loadedmetadata', () => { video.currentTime = startTime }, { once: true })
+        // Direct video file — default to native <video> playback.
+        // Only detour through the ffmpeg proxy if the file is an MKV whose audio
+        // codec Chrome can't decode (AC3/EAC3/DTS). Probed via ffprobe to avoid
+        // forcing a re-encode on perfectly-fine AAC content.
+        const info = mightNeedTranscode(current.url) && isTranscodeProxyConfigured()
+          ? await probeMedia(current.url)
+          : null
+
+        if (usePlayerStore.getState().current !== current) return // navigated away during probe
+
+        if (info && needsTranscode(info)) {
+          isTranscodedRef.current = true
+          playbackOffsetRef.current = startTime
+          transcodedDurationRef.current = info.duration
+          if (info.duration) setDuration(info.duration)
+          video.src = transcodeUrl(current.url, startTime)
+        } else {
+          isTranscodedRef.current = false
+          playbackOffsetRef.current = 0
+          transcodedDurationRef.current = null
+          video.src = current.url
+          if (startTime > 0) {
+            video.addEventListener('loadedmetadata', () => { video.currentTime = startTime }, { once: true })
+          }
         }
       } else {
+        isTranscodedRef.current = false
+        playbackOffsetRef.current = 0
+        transcodedDurationRef.current = null
         // Potential HLS stream — try HLS.js, fall back to native on any fatal error
         const HlsLib = (await import('hls.js')).default
         if (HlsLib.isSupported()) {
@@ -148,7 +209,8 @@ export function VideoPlayer() {
     saveTimerRef.current = setInterval(() => {
       const video = videoRef.current
       if (video && video.currentTime > 0) {
-        saveProgress(current.id, video.currentTime, video.duration || 0)
+        const realTime = playbackOffsetRef.current + video.currentTime
+        saveProgress(current.id, realTime, video.duration || 0)
       }
     }, SAVE_INTERVAL_MS)
     return () => {
@@ -162,12 +224,17 @@ export function VideoPlayer() {
     if (!video) return
 
     const onTimeUpdate = () => {
-      setCurrentTime(video.currentTime)
+      const offset = playbackOffsetRef.current
+      setCurrentTime(offset + video.currentTime)
       if (video.buffered.length > 0) {
-        setBuffered(video.buffered.end(video.buffered.length - 1))
+        setBuffered(offset + video.buffered.end(video.buffered.length - 1))
       }
     }
-    const onDurationChange = () => setDuration(video.duration || 0)
+    const onDurationChange = () => {
+      if (transcodedDurationRef.current != null) return
+      const d = video.duration
+      setDuration(Number.isFinite(d) ? d : 0)
+    }
     const onPlay = () => setIsPlaying(true)
     const onPause = () => setIsPlaying(false)
     const onVolumeChange = () => {
@@ -175,7 +242,10 @@ export function VideoPlayer() {
       setMuted(video.muted)
     }
     const onEnded = () => {
-      if (current) saveProgress(current.id, video.duration, video.duration)
+      if (!current) return
+      const localDur = Number.isFinite(video.duration) ? video.duration : 0
+      const realDur = transcodedDurationRef.current ?? (playbackOffsetRef.current + localDur)
+      if (realDur > 0) saveProgress(current.id, realDur, realDur)
     }
 
     const syncNativeAudioTracks = () => {
@@ -243,14 +313,20 @@ export function VideoPlayer() {
           e.preventDefault()
           video.paused ? video.play() : video.pause()
           break
-        case 'ArrowLeft':
+        case 'ArrowLeft': {
           e.preventDefault()
-          video.currentTime = Math.max(0, video.currentTime - 10)
+          const real = playbackOffsetRef.current + video.currentTime
+          seekTo(real - 10)
           break
-        case 'ArrowRight':
+        }
+        case 'ArrowRight': {
           e.preventDefault()
-          video.currentTime = Math.min(video.duration, video.currentTime + 10)
+          const real = playbackOffsetRef.current + video.currentTime
+          const maxDur = transcodedDurationRef.current ?? video.duration
+          const target = real + 10
+          seekTo(Number.isFinite(maxDur) ? Math.min(maxDur, target) : target)
           break
+        }
         case 'ArrowUp':
           e.preventDefault()
           video.volume = Math.min(1, video.volume + 0.1)
@@ -277,7 +353,7 @@ export function VideoPlayer() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [current, handleClose, resetControlsTimer])
+  }, [current, handleClose, resetControlsTimer, seekTo])
 
   // Close player on browser back/forward
   useEffect(() => {
@@ -337,11 +413,7 @@ export function VideoPlayer() {
     v.paused ? v.play() : v.pause()
   }
 
-  const seek = (time: number) => {
-    const v = videoRef.current
-    if (!v) return
-    v.currentTime = time
-  }
+  const seek = seekTo
 
   const changeVolume = (val: number) => {
     const v = videoRef.current

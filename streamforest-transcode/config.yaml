@@ -1,0 +1,36 @@
+name: StreamForest Transcode Proxy
+version: "0.1.0"
+slug: streamforest_transcode
+description: HTTP proxy that transcodes AC3/DTS/EAC3 MKV streams to AAC for web playback
+url: https://github.com/kurtemil/streamforest
+arch:
+  - aarch64
+  - amd64
+  - armv7
+  - armhf
+startup: application
+boot: auto
+init: false
+ports:
+  "8787/tcp": 8787
+ports_description:
+  "8787/tcp": Transcode proxy HTTP port
+# V4L2 m2m hardware encoder devices on Raspberry Pi.
+# Harmless on other boards (just won't exist).
+devices:
+  - /dev/video10
+  - /dev/video11
+  - /dev/video12
+  - /dev/video13
+  - /dev/video14
+  - /dev/video15
+options:
+  allowed_hosts: "iptvworld.xyz"
+  h264_encoder: "h264_v4l2m2m"
+  h264_preset: "ultrafast"
+  log_level: "warning"
+schema:
+  allowed_hosts: str
+  h264_encoder: list(libx264|h264_v4l2m2m|h264_nvenc|h264_qsv|h264_vaapi)
+  h264_preset: list(ultrafast|superfast|veryfast|faster|fast|medium)
+  log_level: list(quiet|error|warning|info|debug)
