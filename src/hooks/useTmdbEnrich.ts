@@ -52,10 +52,13 @@ export function useTmdbEnrich(channels: Channel[]): MetaMap {
       const cached = await getTmdbMetaBulk(ids)
       if (!mounted.current) return
 
-      if (cached.size > 0) {
+      // Only expose found entries to the UI — notFound entries suppress the
+      // re-queue (cached.has(id) is true) but don't pollute the map.
+      const found = new Map([...cached].filter(([, v]) => !v.notFound))
+      if (found.size > 0) {
         setMetaMap((prev) => {
           const next = new Map(prev)
-          cached.forEach((v, k) => next.set(k, v))
+          found.forEach((v, k) => next.set(k, v))
           return next
         })
       }

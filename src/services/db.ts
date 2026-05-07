@@ -177,7 +177,7 @@ export async function removeFromWatchLater(profileId: string, contentId: string)
 // ── TMDB cache ─────────────────────────────────────────────────────────────────
 
 const TMDB_TTL_HIT     = 90 * 24 * 60 * 60 * 1000  // 90 days for found entries
-const TMDB_TTL_MISS    =  7 * 24 * 60 * 60 * 1000  //  7 days for notFound entries
+const TMDB_TTL_MISS    =  1 * 24 * 60 * 60 * 1000  //  1 day for notFound entries (retry often)
 
 export async function getTmdbMeta(id: string): Promise<TmdbMeta | undefined> {
   const rec = await db.tmdbCache.get(id)

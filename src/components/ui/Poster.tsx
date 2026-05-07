@@ -32,10 +32,12 @@ export function Poster({ src, alt, type, className = '', tmdbPosterPath, tmdbSiz
   const [currentSrc, setCurrentSrc] = useState(primarySrc || '')
   const [failed, setFailed] = useState(!primarySrc)
 
-  // When tmdbPosterPath arrives (async enrichment), swap the source
+  // When tmdbPosterPath arrives (async enrichment), swap the source and
+  // reset failure so a TMDB poster can show even if the channel logo failed earlier.
   const resolvedSrc = tmdbSrc ?? src
-  if (resolvedSrc && resolvedSrc !== currentSrc && !failed) {
+  if (resolvedSrc && resolvedSrc !== currentSrc) {
     setCurrentSrc(resolvedSrc)
+    if (failed) setFailed(false)
   }
 
   if (failed) {

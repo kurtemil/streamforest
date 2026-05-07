@@ -103,6 +103,7 @@ interface TmdbTVDetail {
 /** Best-effort title normalization before searching TMDB. */
 function normalizeForSearch(title: string): string {
   return title
+    .replace(/^(?:[A-Z]{2,3}(?:\s*[:|]\s*|\s+\|\s*))+/, '') // strip IPTV prefixes: "SE: ", "UK | ", "US: "
     .replace(/\s*\(\d{4}\)\s*$/, '')      // trailing (2023)
     .replace(/\s*\[\d{4}\]\s*$/, '')      // trailing [2023]
     .replace(/\s*\[.*?\]\s*/g, '')        // [PRE], [HD], etc.

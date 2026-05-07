@@ -32,6 +32,8 @@ interface Props {
   onToggleMute: () => void
   onSelectAudioTrack: (id: number) => void
   onSelectSubtitle: (id: number) => void
+  subtitleDelay: number
+  onSubtitleDelayChange: (delta: number) => void
   onSpeedChange: (s: number) => void
   onToggleFullscreen: () => void
   onPiP: () => void
@@ -44,6 +46,7 @@ export function PlayerControls({
   currentTime, duration, buffered,
   volume, muted,
   audioTracks, activeAudioTrack, subtitleTracks, activeSubtitle, loadingSubtitle,
+  subtitleDelay, onSubtitleDelayChange,
   playbackSpeed, pipAvailable,
   onTogglePlay, onSeek, onVolumeChange, onToggleMute,
   onSelectAudioTrack, onSelectSubtitle, onSpeedChange,
@@ -322,6 +325,29 @@ export function PlayerControls({
                             </button>
                           )
                         })}
+                        {activeSubtitle !== -1 && (
+                          <>
+                            <div className="border-t border-white/10 my-2" />
+                            <p className="text-white/50 text-xs uppercase tracking-wider mb-2 px-2">Sync</p>
+                            <div className="flex items-center gap-1 px-2">
+                              <button
+                                onClick={() => onSubtitleDelayChange(-0.5)}
+                                className="flex-1 py-1 rounded-lg bg-white/5 hover:bg-white/15 text-white/70 hover:text-white text-xs transition-colors"
+                              >
+                                −0.5s
+                              </button>
+                              <span className="w-14 text-center text-xs tabular-nums text-white/60">
+                                {subtitleDelay > 0 ? `+${subtitleDelay.toFixed(1)}s` : subtitleDelay === 0 ? '0.0s' : `${subtitleDelay.toFixed(1)}s`}
+                              </span>
+                              <button
+                                onClick={() => onSubtitleDelayChange(0.5)}
+                                className="flex-1 py-1 rounded-lg bg-white/5 hover:bg-white/15 text-white/70 hover:text-white text-xs transition-colors"
+                              >
+                                +0.5s
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </>
                     )}
                   </div>

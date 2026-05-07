@@ -85,7 +85,6 @@ export function VideoPlayer() {
   // Tracks the active VTT subtitle so we can re-attach after a src reload
   // (audio swap rebuilds video.src, which clears any addTextTrack-created list).
   const activeSubtitleRef = useRef(-1)
-  const subtitleTextTrackRef = useRef<TextTrack | null>(null)
   const subtitleAbortRef = useRef<AbortController | null>(null)
   // Stall threshold: only abort the subtitle stream if NO bytes arrive for this
   // long. As long as ffmpeg keeps producing cues we stay connected, however
@@ -112,6 +111,8 @@ export function VideoPlayer() {
   const [nextEpCountdown, setNextEpCountdown] = useState<number | null>(null)
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const nextEpisodeRef = useRef<typeof current>(null)
+  const [parsedSubtitles, setParsedSubtitles] = useState<{ start: number; end: number; text: string }[]>([])
+  const [subtitleDelay, setSubtitleDelay] = useState(0)
 
   const destroyHls = useCallback(() => {
     if (hlsRef.current) {
@@ -141,9 +142,10 @@ export function VideoPlayer() {
     return () => video.removeEventListener('loadedmetadata', onMeta)
   }, [])
 
-  // Reset minimized + clear countdown on new item
+  // Reset minimized + clear countdown + reset subtitle delay on new item
   useEffect(() => {
     setMinimized(false)
+    setSubtitleDelay(0)
     if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
     countdownIntervalRef.current = null
     setNextEpCountdown(null)
@@ -159,6 +161,16 @@ export function VideoPlayer() {
     if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
     countdownIntervalRef.current = null
     setNextEpCountdown(null)
+  }, [])
+
+  const activeCue = useMemo(() => {
+    if (!parsedSubtitles.length) return null
+    const searchTime = currentTime + subtitleDelay
+    return parsedSubtitles.find(c => c.start <= searchTime && c.end > searchTime) ?? null
+  }, [currentTime, parsedSubtitles, subtitleDelay])
+
+  const handleSubtitleDelayChange = useCallback((delta: number) => {
+    setSubtitleDelay(prev => parseFloat(Math.max(-10, Math.min(10, prev + delta)).toFixed(1)))
   }, [])
 
   const handleSpeedChange = useCallback((s: number) => {
@@ -201,19 +213,14 @@ export function VideoPlayer() {
   const detachSubtitleTrack = useCallback(() => {
     subtitleAbortRef.current?.abort()
     subtitleAbortRef.current = null
-    const track = subtitleTextTrackRef.current
-    if (track) {
-      track.mode = 'disabled'
-      while (track.cues && track.cues.length > 0) {
-        track.removeCue(track.cues[0])
-      }
-    }
-    subtitleTextTrackRef.current = null
+    setParsedSubtitles([])
   }, [])
 
-  const attachSubtitleTrack = useCallback(async (streamIndex: number, label: string, lang: string) => {
-    const video = videoRef.current
-    if (!video || !current) return
+  // Custom subtitle renderer: parse VTT into a state array of {start,end,text} with
+  // absolute file timestamps. activeCue is computed from currentTime+subtitleDelay
+  // so no re-fetch or timestamp adjustment is ever needed after a seek.
+  const attachSubtitleTrack = useCallback(async (streamIndex: number, _label: string, _lang: string) => {
+    if (!current) return
     const url = subtitleVttUrl(current.url, streamIndex)
     if (!url) return
     detachSubtitleTrack()
@@ -221,8 +228,6 @@ export function VideoPlayer() {
     subtitleAbortRef.current = ctrl
     setLoadingSubtitle(streamIndex)
 
-    // Stall detection: abort only if NO bytes for STALL_MS. While ffmpeg is
-    // producing cues we keep streaming, however long it takes.
     let lastByteAt = Date.now()
     let stalled = false
     const stallTimer = setInterval(() => {
@@ -243,18 +248,9 @@ export function VideoPlayer() {
       const reader = res.body.getReader()
       const decoder = new TextDecoder('utf-8')
       let buffer = ''
-      let track: TextTrack | null = null
       let cueCount = 0
-
-      const ensureTrack = () => {
-        if (track) return track
-        track = video.addTextTrack('subtitles', label, lang || '')
-        track.mode = 'showing'
-        subtitleTextTrackRef.current = track
-        // First cue arrived — drop the spinner; cues will keep streaming in.
-        setLoadingSubtitle((cur) => (cur === streamIndex ? null : cur))
-        return track
-      }
+      let gotFirst = false
+      const pending: { start: number; end: number; text: string }[] = []
 
       const flush = (final: boolean) => {
         let idx
@@ -262,36 +258,37 @@ export function VideoPlayer() {
           const block = buffer.slice(0, idx)
           buffer = buffer.slice(idx + 2)
           const cue = parseVttBlock(block)
-          if (cue) { ensureTrack().addCue(cue); cueCount++ }
+          if (cue) {
+            pending.push({ start: cue.startTime, end: cue.endTime, text: cue.text })
+            cueCount++
+          }
         }
         if (final && buffer.length > 0) {
           const cue = parseVttBlock(buffer)
-          if (cue) { ensureTrack().addCue(cue); cueCount++ }
+          if (cue) { pending.push({ start: cue.startTime, end: cue.endTime, text: cue.text }); cueCount++ }
           buffer = ''
+        }
+        if (pending.length >= 20 || (final && pending.length > 0)) {
+          const batch = pending.splice(0)
+          if (!gotFirst) {
+            gotFirst = true
+            setLoadingSubtitle((cur) => (cur === streamIndex ? null : cur))
+          }
+          setParsedSubtitles(prev => [...prev, ...batch])
         }
       }
 
       while (true) {
         const { done, value } = await reader.read()
-        if (done) {
-          buffer += decoder.decode()
-          flush(true)
-          break
-        }
+        if (done) { buffer += decoder.decode(); flush(true); break }
         lastByteAt = Date.now()
-        // Normalize CRLF/CR → LF as bytes arrive (each chunk is independent
-        // for normalization since CR alone collapses to LF too).
         buffer += decoder.decode(value, { stream: true }).replace(/\r\n?/g, '\n')
         flush(false)
       }
 
-      if (cueCount === 0) {
-        throw new Error('Subtitle stream had no readable cues')
-      }
+      if (cueCount === 0) throw new Error('Subtitle stream had no readable cues')
     } catch (err) {
       const aborted = (err as { name?: string }).name === 'AbortError'
-      // Silent only on user-initiated abort (track switch / unmount). A stall
-      // is also an AbortError but we mark it via `stalled` to surface it.
       if (aborted && !stalled) return
       const msg = stalled
         ? 'Subtitle extraction stalled — no data from proxy in 30 s'
@@ -334,6 +331,10 @@ export function VideoPlayer() {
     playbackOffsetRef.current = clamped
     setCurrentTime(clamped)
     setBuffered(clamped)
+    // Clear any next-episode countdown — we seeked away from the end
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
+    countdownIntervalRef.current = null
+    setNextEpCountdown(null)
     video.src = transcodeUrl(current.url, {
       startSeconds: clamped,
       audioIndex: audioStreamIndexRef.current,
@@ -567,9 +568,11 @@ export function VideoPlayer() {
         saveProgress(profileId, current.id, realDur, realDur)
           .then((entry) => pushProgress(entry))
       }
-      // Start next-episode countdown for series
+      // Only start countdown when genuinely near the end — guards against
+      // spurious 'ended' events browsers fire when video.src is replaced mid-seek.
+      const isNearEnd = localDur > 0 && video.currentTime >= localDur * 0.85
       const next = nextEpisodeRef.current
-      if (next) {
+      if (next && isNearEnd) {
         setNextEpCountdown(10)
         countdownIntervalRef.current = setInterval(() => {
           setNextEpCountdown((n) => {
@@ -876,6 +879,15 @@ export function VideoPlayer() {
           </div>
         )}
 
+        {/* Custom subtitle overlay — absolute-timestamp cues, no re-fetch on seek */}
+        {!minimized && activeCue && (
+          <div className="absolute bottom-20 left-0 right-0 flex justify-center pointer-events-none z-10 px-8">
+            <div className="bg-black/75 text-white text-base font-medium px-3 py-1.5 rounded text-center max-w-2xl whitespace-pre-wrap leading-snug">
+              {activeCue.text.replace(/<[^>]+>/g, '').trim()}
+            </div>
+          </div>
+        )}
+
         {!minimized && (
           <PlayerControls
             channel={current}
@@ -899,6 +911,8 @@ export function VideoPlayer() {
             onToggleMute={toggleMute}
             onSelectAudioTrack={selectAudioTrack}
             onSelectSubtitle={selectSubtitle}
+            subtitleDelay={subtitleDelay}
+            onSubtitleDelayChange={handleSubtitleDelayChange}
             onSpeedChange={handleSpeedChange}
             onToggleFullscreen={toggleFullscreen}
             onPiP={handlePiP}
