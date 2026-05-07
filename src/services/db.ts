@@ -72,6 +72,10 @@ export async function saveProgress(id: string, position: number, duration: numbe
   await db.watchProgress.put({ id, position, duration, lastWatched: Date.now(), completed })
 }
 
+export async function clearProgress(id: string) {
+  await db.watchProgress.delete(id)
+}
+
 export async function getRecentlyWatched(limit = 20): Promise<WatchProgress[]> {
   return db.watchProgress.orderBy('lastWatched').reverse().limit(limit).toArray()
 }

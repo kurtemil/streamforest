@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import type Hls from 'hls.js'
 import { useNavigate } from 'react-router-dom'
 import { usePlayerStore } from '@/stores/playerStore'
-import { saveProgress, getProgress } from '@/services/db'
+import { saveProgress, getProgress, clearProgress } from '@/services/db'
 import {
   isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, probeMedia, pickProxyMode,
   subtitleVttUrl, audioStreamLabel, subtitleStreamLabel,
@@ -308,6 +308,10 @@ export function VideoPlayer() {
 
       const saved = await getProgress(current.id)
       const startTime = saved && !saved.completed ? saved.position : 0
+      // Replay of a finished item: drop the completed flag right now so the
+      // "seen" check disappears immediately. Next save tick (5 s in) will
+      // record fresh position/duration.
+      if (saved?.completed) await clearProgress(current.id)
 
       const isVideoFile = current.type === 'movie' || current.type === 'series' || VIDEO_EXT.test(current.url)
 
