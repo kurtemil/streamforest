@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
-import type { Channel, WatchProgress, Favorite, PlaylistMeta, WatchLater, TmdbMeta } from '@/types'
+import type { Channel, WatchProgress, Favorite, PlaylistMeta, WatchLater, TmdbMeta, EpgProgram } from '@/types'
 
 class AppDB extends Dexie {
   channels!: EntityTable<Channel, 'id'>
@@ -8,6 +8,7 @@ class AppDB extends Dexie {
   playlistMeta!: EntityTable<PlaylistMeta, 'id'>
   watchLater!: EntityTable<WatchLater, 'id'>
   tmdbCache!: EntityTable<TmdbMeta, 'id'>
+  epgPrograms!: EntityTable<EpgProgram, 'id'>
 
   constructor() {
     super('StreamForestDB')
@@ -59,6 +60,15 @@ class AppDB extends Dexie {
       playlistMeta: 'id',
       watchLater: 'id, profileId, contentId, kind, addedAt',
       tmdbCache: 'id, contentType, tmdbId, cachedAt',
+    })
+    this.version(6).stores({
+      channels: 'id, type, groupTitle, showName, season, sortIndex',
+      watchProgress: 'id, profileId, channelId, lastWatched, completed',
+      favorites: 'id, kind, addedAt',
+      playlistMeta: 'id',
+      watchLater: 'id, profileId, contentId, kind, addedAt',
+      tmdbCache: 'id, contentType, tmdbId, cachedAt',
+      epgPrograms: 'id, channelId, start, end',
     })
   }
 }
@@ -203,4 +213,34 @@ export async function getTmdbMetaBulk(ids: string[]): Promise<Map<string, TmdbMe
 
 export async function saveTmdbMeta(meta: TmdbMeta): Promise<void> {
   await db.tmdbCache.put(meta)
+}
+
+// ── EPG cache ──────────────────────────────────────────────────────────────────
+
+const EPG_SAVE_CHUNK = 5000
+
+export async function saveEpgPrograms(programs: EpgProgram[]): Promise<void> {
+  await db.epgPrograms.clear()
+  for (let i = 0; i < programs.length; i += EPG_SAVE_CHUNK) {
+    await db.epgPrograms.bulkPut(programs.slice(i, i + EPG_SAVE_CHUNK))
+  }
+}
+
+export async function loadEpgFromDB(): Promise<Map<string, EpgProgram[]>> {
+  const now = Date.now()
+  // Drop programs that ended more than 2 hours ago
+  const rows = await db.epgPrograms.where('end').above(now - 2 * 60 * 60 * 1000).toArray()
+  const map = new Map<string, EpgProgram[]>()
+  for (const p of rows) {
+    const list = map.get(p.channelId) ?? []
+    list.push(p)
+    map.set(p.channelId, list)
+  }
+  // Sort each channel's programs by start time
+  map.forEach((list) => list.sort((a, b) => a.start - b.start))
+  return map
+}
+
+export async function clearEpgPrograms(): Promise<void> {
+  await db.epgPrograms.clear()
 }

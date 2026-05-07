@@ -132,12 +132,13 @@ export function parseM3ULines(lines: string[]): Channel[] {
       const name = commaIdx >= 0 ? metaLine.slice(commaIdx + 1).trim() : ''
       const logo = attr(metaLine, 'tvg-logo')
       const groupTitle = attr(metaLine, 'group-title')
+      const tvgId = attr(metaLine, 'tvg-id')
 
       if (name.startsWith('-=') && name.endsWith('=-')) continue
 
       const type = detectType(groupTitle, url)
       const id = makeId(url, type)
-      const base: Channel = { id, name, url, logo, groupTitle, type, sortIndex: sortIndex++ }
+      const base: Channel = { id, name, url, logo, groupTitle, type, sortIndex: sortIndex++, ...(tvgId ? { tvgId } : {}) }
 
       if (type === 'series') {
         let parsed = parseSeries(name)

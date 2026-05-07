@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
-import { Settings, RefreshCw, Trash2, Check, AlertCircle, Download, Database, ChevronDown, EyeOff, Shield, Users } from 'lucide-react'
+import { Settings, RefreshCw, Trash2, Check, AlertCircle, Download, Database, ChevronDown, EyeOff, Shield, Users, Tv } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
+import { useEpgStore } from '@/stores/epgStore'
 import { getPlaylistMeta, clearPlaylist } from '@/services/db'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useExclusionsStore, type ContentType } from '@/stores/exclusionsStore'
@@ -175,6 +176,51 @@ function KidGroupPanel({
   )
 }
 
+function EpgSection({ m3uUrl }: { m3uUrl: string }) {
+  const { status, lastFetched, error: epgMsg, refresh: refreshEpg } = useEpgStore()
+  const loading   = status === 'loading'
+  const hasError  = status === 'error'
+  const label     = loading ? 'Loading…' : lastFetched ? 'Refresh Guide' : 'Load Guide Data'
+
+  return (
+    <section className="mb-8">
+      <div className="flex items-center gap-2.5 mb-4">
+        <Tv size={16} className="text-neutral-400" />
+        <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider">TV Guide (EPG)</h2>
+      </div>
+      <div className="bg-white/[0.03] rounded-xl p-4 ring-1 ring-white/8 flex items-center gap-4">
+        <div className="flex-1 min-w-0">
+          {lastFetched && !loading ? (
+            <p className="text-sm text-white">
+              Guide loaded — <span className="text-neutral-400">{new Date(lastFetched).toLocaleString()}</span>
+            </p>
+          ) : (
+            <p className="text-sm text-neutral-400">
+              {loading ? 'Parsing guide data, this takes a moment…' : 'No guide data. Load EPG to see what\'s on in Live TV.'}
+            </p>
+          )}
+          {epgMsg && loading && (
+            <p className="text-xs text-neutral-500 mt-1">{epgMsg}</p>
+          )}
+          {epgMsg && hasError && (
+            <p className="text-xs text-red-400 mt-1 flex items-center gap-1.5">
+              <AlertCircle size={11} /> {epgMsg}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={() => m3uUrl && refreshEpg(m3uUrl)}
+          disabled={loading || !m3uUrl}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors shrink-0"
+        >
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          {label}
+        </button>
+      </div>
+    </section>
+  )
+}
+
 export function SettingsPage() {
   const { m3uUrl, setM3uUrl, refresh, fetching, progress, error, loadFromDB, channels } = usePlaylistStore()
   const { excluded, toggle, setAll } = useExclusionsStore()
@@ -344,6 +390,9 @@ export function SettingsPage() {
           </div>
         </div>
       </section>
+
+      {/* Guide Data (EPG) */}
+      <EpgSection m3uUrl={m3uUrl} />
 
       {/* Hidden Groups — admin + parent */}
       {channels.length > 0 && (

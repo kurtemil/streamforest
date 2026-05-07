@@ -8,6 +8,7 @@ export interface Channel {
   groupTitle: string
   type: ContentType
   sortIndex: number   // position in M3U file — used to preserve original order
+  tvgId?: string      // tvg-id from M3U — links to XMLTV EPG data
   // Series
   showName?: string
   season?: number
@@ -16,6 +17,16 @@ export interface Channel {
   // Movie
   year?: number
   movieTitle?: string
+}
+
+export interface EpgProgram {
+  id: string          // `${channelId}_${start}`
+  channelId: string   // matches Channel.tvgId
+  title: string
+  start: number       // ms since epoch
+  end: number         // ms since epoch
+  description?: string
+  category?: string
 }
 
 export interface WatchProgress {

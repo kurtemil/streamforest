@@ -1,27 +1,179 @@
-import { useState, useMemo } from 'react'
-import { Radio } from 'lucide-react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
+import { Radio, RefreshCw, Clock, ChevronRight, AlertCircle } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
+import { useEpgStore } from '@/stores/epgStore'
 import { useActiveExclusions } from '@/hooks/useActiveExclusions'
 import { SearchBar } from '@/components/ui/SearchBar'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { GroupSidebar } from '@/components/ui/GroupSidebar'
+import type { Channel, EpgProgram } from '@/types'
 
-const RECENT_COUNT = 60
+const RECENT_COUNT = 80
+
+function formatTime(ms: number): string {
+  const d = new Date(ms)
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function formatDuration(ms: number): string {
+  const min = Math.ceil(ms / 60000)
+  if (min < 60) return `${min}m`
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return m === 0 ? `${h}h` : `${h}h ${m}m`
+}
+
+// ── Channel row ────────────────────────────────────────────────────────────────
+
+interface ChannelRowProps {
+  channel: Channel
+  programs: EpgProgram[]
+  onPlay: () => void
+}
+
+function ChannelRow({ channel, programs, onPlay }: ChannelRowProps) {
+  const now = Date.now()
+  const current = programs.find(p => p.start <= now && p.end > now) ?? null
+  const next    = programs.find(p => p.start > now) ?? null
+
+  const pct = current
+    ? Math.min(100, ((now - current.start) / (current.end - current.start)) * 100)
+    : 0
+  const remaining = current ? current.end - now : null
+
+  return (
+    <button
+      onClick={onPlay}
+      className="group w-full flex items-stretch gap-0 rounded-xl ring-1 ring-white/5 hover:ring-accent-600/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all duration-150 overflow-hidden text-left"
+    >
+      {/* Left: channel identity */}
+      <div className="w-44 shrink-0 flex flex-col items-center justify-center gap-1.5 px-4 py-3 border-r border-white/5">
+        <div className="w-16 h-10 rounded-md bg-surface-300 flex items-center justify-center overflow-hidden shrink-0">
+          {channel.logo ? (
+            <img
+              src={channel.logo}
+              alt={channel.name}
+              className="max-w-full max-h-full object-contain p-1"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+              loading="lazy"
+            />
+          ) : (
+            <Radio size={16} className="text-neutral-600" />
+          )}
+        </div>
+        <p className="text-[11px] text-neutral-400 group-hover:text-neutral-200 text-center leading-tight line-clamp-2 transition-colors max-w-full">
+          {channel.name}
+        </p>
+        <span className="flex items-center gap-1 text-[9px] font-semibold text-red-400/80 tracking-wider">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+          LIVE
+        </span>
+      </div>
+
+      {/* Right: EPG strip */}
+      <div className="flex-1 min-w-0 flex flex-col justify-center px-4 py-3 gap-1.5">
+        {current ? (
+          <>
+            <div className="flex items-baseline gap-3 min-w-0">
+              <p className="text-sm font-semibold text-white truncate flex-1 min-w-0">
+                {current.title}
+              </p>
+              {remaining !== null && (
+                <span className="text-xs text-neutral-500 shrink-0 tabular-nums">
+                  {formatDuration(remaining)} left
+                </span>
+              )}
+              {next && (
+                <div className="flex items-center gap-1.5 shrink-0 max-w-[200px]">
+                  <ChevronRight size={12} className="text-neutral-600" />
+                  <p className="text-xs text-neutral-500 truncate">{next.title}</p>
+                  <span className="text-xs text-neutral-600 shrink-0">{formatTime(next.start)}</span>
+                </div>
+              )}
+            </div>
+            <div className="h-0.5 rounded-full bg-white/8 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-accent-500 transition-[width] duration-1000"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            {current.category && (
+              <p className="text-[10px] text-neutral-600 truncate">{current.category}</p>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-neutral-600 italic">No guide data</p>
+        )}
+      </div>
+    </button>
+  )
+}
+
+// ── EPG status bar ─────────────────────────────────────────────────────────────
+
+function EpgStatusBar({ m3uUrl }: { m3uUrl: string }) {
+  const { status, lastFetched, error, refresh, isStale } = useEpgStore()
+  const stale = isStale()
+
+  const handleRefresh = useCallback(() => {
+    if (m3uUrl) refresh(m3uUrl)
+  }, [m3uUrl, refresh])
+
+  if (status === 'ready' && !stale) return null
+
+  return (
+    <div className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm mb-4 ${
+      error
+        ? 'bg-red-500/10 ring-1 ring-red-500/20 text-red-300'
+        : 'bg-white/[0.03] ring-1 ring-white/8 text-neutral-400'
+    }`}>
+      {error ? (
+        <AlertCircle size={14} className="shrink-0 text-red-400" />
+      ) : (
+        <Clock size={14} className="shrink-0" />
+      )}
+      <span className="flex-1 min-w-0 truncate">
+        {error
+          ? `EPG error: ${error}`
+          : lastFetched
+          ? `Guide data is ${Math.floor((Date.now() - lastFetched) / 3600000)}h old`
+          : 'No guide data loaded yet'}
+      </span>
+      {m3uUrl && (
+        <button
+          onClick={handleRefresh}
+          disabled={status === 'loading'}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/8 hover:bg-white/15 text-white/70 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-wait shrink-0"
+        >
+          <RefreshCw size={12} className={status === 'loading' ? 'animate-spin' : ''} />
+          {status === 'loading' ? 'Loading…' : 'Load EPG'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ── Page ───────────────────────────────────────────────────────────────────────
 
 export function LiveTVPage() {
-  const { channels } = usePlaylistStore()
+  const { channels, m3uUrl } = usePlaylistStore()
   const { play } = usePlayerStore()
+  const { programs, loadFromDB } = useEpgStore()
   const [search, setSearch] = useState('')
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
-
   const { live: excludedLive } = useActiveExclusions()
+
+  useEffect(() => {
+    loadFromDB()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const live = useMemo(
     () => channels.filter((c) => c.type === 'live' && !excludedLive.has(c.groupTitle)),
     [channels, excludedLive]
   )
 
-  // Groups in M3U order
   const groups = useMemo(() => {
     const seen = new Set<string>()
     const counts = new Map<string, number>()
@@ -32,7 +184,7 @@ export function LiveTVPage() {
     return Array.from(seen).map((title) => ({ title, count: counts.get(title) ?? 0 }))
   }, [live])
 
-  const filtered = useMemo(() => {
+  const filtered = useMemo((): Channel[] => {
     if (search.trim()) {
       const q = search.toLowerCase()
       return live.filter((c) => c.name.toLowerCase().includes(q))
@@ -44,7 +196,11 @@ export function LiveTVPage() {
   if (live.length === 0) {
     return (
       <div className="p-8">
-        <EmptyState icon={<Radio size={40} />} title="No live channels yet" description="Download your playlist in Settings to see live TV here." />
+        <EmptyState
+          icon={<Radio size={40} />}
+          title="No live channels yet"
+          description="Download your playlist in Settings to see live TV here."
+        />
       </div>
     )
   }
@@ -56,7 +212,8 @@ export function LiveTVPage() {
 
   return (
     <div className="flex h-full overflow-hidden">
-      <div className="p-4 pt-6 overflow-y-auto scrollbar-hide border-r border-white/5">
+      {/* Left sidebar: groups */}
+      <div className="p-4 pt-6 overflow-y-auto scrollbar-hide border-r border-white/5 shrink-0">
         <GroupSidebar
           groups={groups}
           selected={selectedGroup}
@@ -65,45 +222,35 @@ export function LiveTVPage() {
         />
       </div>
 
+      {/* Main content */}
       <div className="flex-1 overflow-y-auto p-6 pb-12 min-w-0">
+        {/* Header */}
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-xl font-bold text-white">{heading}</h1>
           <div className="flex items-center gap-3">
             <p className="text-neutral-500 text-sm">{filtered.length} channels</p>
             <div className="w-52">
-              <SearchBar value={search} onChange={(v) => { setSearch(v); setSelectedGroup(null) }} placeholder="Search channels…" />
+              <SearchBar
+                value={search}
+                onChange={(v) => { setSearch(v); setSelectedGroup(null) }}
+                placeholder="Search channels…"
+              />
             </div>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3">
+        {/* EPG status / refresh prompt */}
+        <EpgStatusBar m3uUrl={m3uUrl} />
+
+        {/* Channel rows */}
+        <div className="flex flex-col gap-1.5">
           {filtered.map((ch) => (
-            <button
+            <ChannelRow
               key={ch.id}
-              onClick={() => play(ch)}
-              className="group flex flex-col items-center gap-2.5 p-3 rounded-xl bg-white/3 hover:bg-white/8 ring-1 ring-white/5 hover:ring-accent-600/40 transition-all duration-200 animate-fade-in"
-            >
-              <div className="w-16 h-10 rounded-md overflow-hidden bg-[#1e1e1e] flex items-center justify-center">
-                {ch.logo ? (
-                  <img
-                    src={ch.logo}
-                    alt={ch.name}
-                    className="max-w-full max-h-full object-contain p-1"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-                    loading="lazy"
-                  />
-                ) : (
-                  <Radio size={18} className="text-neutral-600" />
-                )}
-              </div>
-              <p className="text-xs text-neutral-300 group-hover:text-white text-center leading-tight line-clamp-2 transition-colors">
-                {ch.name}
-              </p>
-              <span className="flex items-center gap-1 text-[10px] text-red-400/80">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                LIVE
-              </span>
-            </button>
+              channel={ch}
+              programs={ch.tvgId ? (programs.get(ch.tvgId) ?? []) : []}
+              onPlay={() => play(ch)}
+            />
           ))}
         </div>
       </div>
