@@ -117,9 +117,19 @@ export function VideoPlayer() {
   }, [])
 
   const handleClose = useCallback(() => {
+    const video = videoRef.current
+    if (current && current.type !== 'live' && video && video.currentTime > 0) {
+      const profileId = useProfileStore.getState().activeProfileId
+      if (profileId) {
+        const realTime = playbackOffsetRef.current + video.currentTime
+        const dur = transcodedDurationRef.current ?? (Number.isFinite(video.duration) ? video.duration : 0)
+        saveProgress(profileId, current.id, realTime, dur)
+          .then((entry) => pushProgress(entry))
+      }
+    }
     navigate(-1)
     close()
-  }, [navigate, close])
+  }, [navigate, close, current])
 
   const flashSubtitleNotice = useCallback((msg: string) => {
     if (subtitleNoticeTimerRef.current) clearTimeout(subtitleNoticeTimerRef.current)

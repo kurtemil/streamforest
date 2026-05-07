@@ -51,3 +51,40 @@ export interface PlaylistMeta {
   seriesCount: number
   liveCount: number
 }
+
+// ── TMDB ──────────────────────────────────────────────────────────────────────
+
+export interface TmdbCastMember {
+  name: string
+  character: string
+  profilePath: string | null
+}
+
+export interface TmdbSimilarItem {
+  tmdbId: number
+  title: string
+  posterPath: string | null
+  year: number | null
+}
+
+/** Cached metadata record. Keyed by channel.id (movies) or normalizedShowKey (series). */
+export interface TmdbMeta {
+  /** Lookup key: channel.id for movies, normalizeShowKey(showName) for series. */
+  id: string
+  contentType: 'movie' | 'tv'
+  tmdbId: number
+  title: string
+  overview: string
+  posterPath: string | null
+  backdropPath: string | null
+  year: number | null
+  rating: number        // vote_average 0–10
+  ratingCount: number
+  genres: string[]
+  runtime: number | null  // minutes (movie only; tv = episode runtime avg)
+  cast: TmdbCastMember[]
+  director: string | null // movie only
+  similar: TmdbSimilarItem[]
+  cachedAt: number
+  notFound?: true       // searched but no result — skip retrying until TTL expires
+}

@@ -13,8 +13,10 @@ import { SearchBar } from '@/components/ui/SearchBar'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { GroupSidebar } from '@/components/ui/GroupSidebar'
 import { ProgressRing } from '@/components/ui/ProgressRing'
-import type { Channel } from '@/types'
+import type { Channel, TmdbMeta } from '@/types'
 import { formatTime } from '@/lib/time'
+import { useTmdbEnrich } from '@/hooks/useTmdbEnrich'
+import { backdropUrl, posterUrl } from '@/services/tmdb'
 
 const RECENT_SHOWS = 40
 
@@ -157,14 +159,16 @@ function EpisodeRow({ ep, progress, onClick }: {
 
 // ─── Show card ─────────────────────────────────────────────────────────────────
 
-function ShowCard({ showName, poster, seasons, episodes, isWatchLater, onClick, onWatchLater }: {
+function ShowCard({ showName, poster, seasons, episodes, isWatchLater, tmdbMeta, onClick, onWatchLater }: {
   showName: string; poster: string; seasons: number; episodes: number
-  isWatchLater?: boolean; onClick: () => void; onWatchLater?: (e: React.MouseEvent) => void
+  isWatchLater?: boolean; tmdbMeta?: TmdbMeta; onClick: () => void; onWatchLater?: (e: React.MouseEvent) => void
 }) {
+  const rating = tmdbMeta && !tmdbMeta.notFound && tmdbMeta.rating > 0 ? tmdbMeta.rating : null
+
   return (
-    <button onClick={onClick} className="group text-left animate-fade-in">
-      <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-[#1a1a1a] ring-1 ring-white/5 group-hover:ring-accent-600/50 transition-all duration-200 group-hover:scale-[1.02] group-hover:shadow-xl group-hover:shadow-black/60">
-        <Poster src={poster} alt={showName} type="series" className="w-full h-full" />
+    <button onClick={onClick} className="group text-left w-full">
+      <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-surface-300 ring-1 ring-white/5 group-hover:ring-accent-600/50 transition-all duration-200 group-hover:scale-[1.02] shadow-card group-hover:shadow-card-hover">
+        <Poster src={poster} alt={showName} type="series" className="w-full h-full" tmdbPosterPath={tmdbMeta?.posterPath} />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
           <div className="w-11 h-11 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center ring-2 ring-white/30">
@@ -184,11 +188,25 @@ function ShowCard({ showName, poster, seasons, episodes, isWatchLater, onClick, 
             <Bookmark size={13} fill={isWatchLater ? 'white' : 'none'} className="text-white" />
           </button>
         )}
-        <div className="absolute bottom-0 left-0 right-0 p-2">
-          <p className="text-xs text-neutral-300">{seasons}S · {episodes}ep</p>
+        {rating !== null ? (
+          <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-sm rounded-full px-1.5 py-0.5 ring-1 ring-white/15">
+            <Star size={9} fill="#f59e0b" className="text-warn-500 shrink-0" />
+            <span className="text-micro font-semibold text-white">{rating.toFixed(1)}</span>
+          </div>
+        ) : (
+          <div className="absolute bottom-0 left-0 right-0 p-2">
+            <p className="text-xs text-neutral-300">{seasons}S · {episodes}ep</p>
+          </div>
+        )}
+      </div>
+      <div className="mt-2 px-0.5">
+        <p className="text-body text-white font-medium leading-tight line-clamp-2">{tmdbMeta?.title ?? showName}</p>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          {tmdbMeta?.year && <span className="text-caption text-neutral-500">{tmdbMeta.year}</span>}
+          {tmdbMeta?.genres?.[0] && <span className="text-caption text-neutral-600 truncate">{tmdbMeta.genres[0]}</span>}
+          {!tmdbMeta && <span className="text-caption text-neutral-600">{seasons}S · {episodes}ep</span>}
         </div>
       </div>
-      <p className="mt-2 px-0.5 text-sm text-white font-medium leading-tight line-clamp-2">{showName}</p>
     </button>
   )
 }
@@ -270,6 +288,20 @@ export function SeriesPage() {
     return names
   }, [allShowNames, showFavs, selectedGroup, search, showMap, favIds])
 
+  // Representative channels for TMDB enrichment (one per visible show + selected show)
+  const enrichChannels = useMemo(() => {
+    const keys = [...visibleShowNames]
+    if (selectedShow && !visibleShowNames.includes(selectedShow)) keys.push(selectedShow)
+    return keys.flatMap((key) => {
+      const entry = showMap.get(key)
+      if (!entry) return []
+      const firstSeason = Array.from(entry.seasons.values())[0]
+      return firstSeason?.[0] ? [firstSeason[0]] : []
+    })
+  }, [visibleShowNames, showMap, selectedShow])
+
+  const tmdbMap = useTmdbEnrich(enrichChannels)
+
   // Auto-play episode from URL params on initial load (e.g. page reload)
   const didAutoPlay = useRef(false)
   useEffect(() => {
@@ -315,75 +347,120 @@ export function SeriesPage() {
     const isFav = favIds.has(selectedShow)
     const isWL = watchLaterIds?.has(selectedShow) ?? false
     const totalEps = Array.from(seasons.values()).reduce((a, b) => a + b.length, 0)
+    const showTmdb = tmdbMap.get(selectedShow)
 
     const episodes = seasons.get(autoSeason) ?? []
 
-    return (
-      <div className="p-6 pb-12 animate-slide-up overflow-y-auto h-full">
-        {/* Back */}
-        <button
-          onClick={() => navigate('/series')}
-          className="flex items-center gap-1.5 text-neutral-400 hover:text-white text-sm mb-6 transition-colors"
-        >
-          <ChevronRight size={16} className="rotate-180" /> All shows
-        </button>
+    const backdrop = backdropUrl(showTmdb?.backdropPath ?? null, 1280)
+    const poster = posterUrl(showTmdb?.posterPath ?? null, 342)
 
-        {/* Hero */}
-        <div className="flex gap-6 mb-8">
-          <div className="w-28 aspect-[2/3] rounded-lg overflow-hidden shrink-0 ring-1 ring-white/10">
-            <Poster src={logo} alt={selectedShow} type="series" className="w-full h-full" />
-          </div>
-          <div className="flex flex-col justify-end gap-3">
-            <h1 className="text-3xl font-bold text-white leading-tight">{showData.displayName}</h1>
-            <p className="text-neutral-400 text-sm">
-              {sortedSeasons.length} season{sortedSeasons.length !== 1 ? 's' : ''} · {totalEps} episodes
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => toggleFavorite(selectedShow, 'series')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                  isFav
-                    ? 'bg-accent-600/30 text-accent-400 ring-1 ring-accent-600/50'
-                    : 'bg-white/5 text-neutral-400 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <Star size={12} fill={isFav ? 'currentColor' : 'none'} />
-                {isFav ? 'Favorited' : 'Add to Favorites'}
-              </button>
-              <button
-                onClick={(e) => toggleWatchLater(e, selectedShow)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                  isWL
-                    ? 'bg-accent-600/30 text-accent-400 ring-1 ring-accent-600/50'
-                    : 'bg-white/5 text-neutral-400 hover:text-white hover:bg-white/10'
-                }`}
-              >
-                <Bookmark size={12} fill={isWL ? 'currentColor' : 'none'} />
-                {isWL ? 'In Watch Later' : 'Watch Later'}
-              </button>
+    return (
+      <div className="overflow-y-auto h-full flex flex-col">
+        {/* Backdrop header */}
+        <div className="relative h-64 shrink-0 overflow-hidden bg-surface-300">
+          {backdrop && (
+            <img src={backdrop} alt="" aria-hidden="true" className="w-full h-full object-cover" decoding="async" />
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-surface-100 via-surface-100/40 to-transparent" />
+          <button
+            onClick={() => navigate('/series')}
+            className="absolute top-4 left-4 flex items-center gap-1.5 text-neutral-300 hover:text-white text-sm transition-colors bg-black/50 backdrop-blur-sm rounded-full px-3 py-1.5 ring-1 ring-white/15"
+          >
+            <ChevronRight size={14} className="rotate-180" /> All shows
+          </button>
+        </div>
+
+        {/* Scrollable content */}
+        <div className="flex-1 px-6 pb-12 -mt-16 relative">
+          {/* Poster + title row */}
+          <div className="flex gap-5 items-end mb-6">
+            <div className="w-24 aspect-[2/3] rounded-lg overflow-hidden shrink-0 ring-1 ring-white/15 shadow-cinema bg-surface-300">
+              <img
+                src={poster ?? logo}
+                alt={showData.displayName}
+                className="w-full h-full object-cover"
+                decoding="async"
+                onError={(e) => { (e.target as HTMLImageElement).src = logo }}
+              />
+            </div>
+            <div className="flex-1 min-w-0 pb-1">
+              <h1 className="text-heading-xl text-white leading-tight mb-1">{showTmdb?.title ?? showData.displayName}</h1>
+              <div className="flex items-center gap-3 flex-wrap text-caption text-neutral-400">
+                <span>{sortedSeasons.length}S · {totalEps} ep</span>
+                {showTmdb?.year && <span>{showTmdb.year}</span>}
+                {showTmdb?.rating && showTmdb.rating > 0 && (
+                  <span className="flex items-center gap-1">
+                    <Star size={11} fill="#f59e0b" className="text-warn-500" />
+                    {showTmdb.rating.toFixed(1)}
+                  </span>
+                )}
+                {showTmdb?.genres?.slice(0, 3).map((g) => (
+                  <span key={g} className="px-1.5 py-0.5 rounded-full ring-1 ring-white/15 text-neutral-500">{g}</span>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Season selector + episodes */}
-        <div className="flex items-center gap-3 mb-4">
-          <SeasonDropdown
-            seasons={sortedSeasons}
-            selected={autoSeason}
-            onChange={(s) => setSelectedSeason(s)}
-          />
-          <span className="text-neutral-500 text-sm">{episodes.length} episodes</span>
-        </div>
+          {/* CTAs */}
+          <div className="flex gap-3 mb-5">
+            {episodes[0] && (
+              <button
+                onClick={() => { navigate(`/series?show=${encodeURIComponent(selectedShow!)}&playing=${episodes[0].id}`); play(episodes[0]) }}
+                className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-100 rounded-lg text-black font-semibold text-body transition-all active:scale-95"
+              >
+                <Play size={16} fill="black" />
+                Play
+              </button>
+            )}
+            <button
+              onClick={(e) => toggleWatchLater(e, selectedShow)}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-body transition-all active:scale-95 ring-1 ${
+                isWL
+                  ? 'bg-accent-600/20 ring-accent-600/40 text-accent-400'
+                  : 'bg-white/8 ring-white/15 text-neutral-300 hover:bg-white/12'
+              }`}
+            >
+              <Bookmark size={15} fill={isWL ? 'currentColor' : 'none'} />
+              {isWL ? 'Saved' : 'Watch Later'}
+            </button>
+            <button
+              onClick={() => toggleFavorite(selectedShow, 'series')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-body transition-all active:scale-95 ring-1 ${
+                isFav
+                  ? 'bg-warn-500/15 ring-warn-500/30 text-warn-400'
+                  : 'bg-white/8 ring-white/15 text-neutral-300 hover:bg-white/12'
+              }`}
+            >
+              <Star size={15} fill={isFav ? 'currentColor' : 'none'} />
+              {isFav ? 'Favorited' : 'Favorite'}
+            </button>
+          </div>
 
-        <div className="flex flex-col divide-y divide-white/5">
-          {episodes.map((ep) => (
-            <EpisodeRow
-              key={ep.id}
-              ep={ep}
-              progress={progressRecords?.[ep.id]}
-              onClick={() => { navigate(`/series?show=${encodeURIComponent(selectedShow!)}&playing=${ep.id}`); play(ep) }}
+          {/* Overview */}
+          {showTmdb?.overview && (
+            <p className="text-body text-neutral-300 leading-relaxed mb-6">{showTmdb.overview}</p>
+          )}
+
+          {/* Season selector + episodes */}
+          <div className="flex items-center gap-3 mb-4">
+            <SeasonDropdown
+              seasons={sortedSeasons}
+              selected={autoSeason}
+              onChange={(s) => setSelectedSeason(s)}
             />
-          ))}
+            <span className="text-neutral-500 text-sm">{episodes.length} episodes</span>
+          </div>
+
+          <div className="flex flex-col divide-y divide-white/5">
+            {episodes.map((ep) => (
+              <EpisodeRow
+                key={ep.id}
+                ep={ep}
+                progress={progressRecords?.[ep.id]}
+                onClick={() => { navigate(`/series?show=${encodeURIComponent(selectedShow!)}&playing=${ep.id}`); play(ep) }}
+              />
+            ))}
+          </div>
         </div>
       </div>
     )
@@ -461,6 +538,7 @@ export function SeriesPage() {
                   seasons={data.seasons.size}
                   episodes={allEps.length}
                   isWatchLater={watchLaterIds?.has(name)}
+                  tmdbMeta={tmdbMap.get(name)}
                   onClick={() => navigate(`/series?show=${encodeURIComponent(name)}`)}
                   onWatchLater={(e) => toggleWatchLater(e, name)}
                 />

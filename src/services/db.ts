@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie'
-import type { Channel, WatchProgress, Favorite, PlaylistMeta, WatchLater } from '@/types'
+import type { Channel, WatchProgress, Favorite, PlaylistMeta, WatchLater, TmdbMeta } from '@/types'
 
 class AppDB extends Dexie {
   channels!: EntityTable<Channel, 'id'>
@@ -7,6 +7,7 @@ class AppDB extends Dexie {
   favorites!: EntityTable<Favorite, 'id'>
   playlistMeta!: EntityTable<PlaylistMeta, 'id'>
   watchLater!: EntityTable<WatchLater, 'id'>
+  tmdbCache!: EntityTable<TmdbMeta, 'id'>
 
   constructor() {
     super('StreamForestDB')
@@ -22,7 +23,6 @@ class AppDB extends Dexie {
       favorites: 'id, kind, addedAt',
       playlistMeta: 'id',
     })
-    // v3 adds per-profile watch progress (migrate existing rows to 'elof')
     this.version(3).stores({
       channels: 'id, type, groupTitle, showName, season, sortIndex',
       watchProgress: 'id, profileId, channelId, lastWatched, completed',
@@ -45,13 +45,20 @@ class AppDB extends Dexie {
         )
       }
     })
-    // v4 adds per-profile watch later list
     this.version(4).stores({
       channels: 'id, type, groupTitle, showName, season, sortIndex',
       watchProgress: 'id, profileId, channelId, lastWatched, completed',
       favorites: 'id, kind, addedAt',
       playlistMeta: 'id',
       watchLater: 'id, profileId, contentId, kind, addedAt',
+    })
+    this.version(5).stores({
+      channels: 'id, type, groupTitle, showName, season, sortIndex',
+      watchProgress: 'id, profileId, channelId, lastWatched, completed',
+      favorites: 'id, kind, addedAt',
+      playlistMeta: 'id',
+      watchLater: 'id, profileId, contentId, kind, addedAt',
+      tmdbCache: 'id, contentType, tmdbId, cachedAt',
     })
   }
 }
@@ -165,4 +172,35 @@ export async function addToWatchLater(
 
 export async function removeFromWatchLater(profileId: string, contentId: string) {
   await db.watchLater.delete(`${profileId}:${contentId}`)
+}
+
+// ── TMDB cache ─────────────────────────────────────────────────────────────────
+
+const TMDB_TTL_HIT     = 90 * 24 * 60 * 60 * 1000  // 90 days for found entries
+const TMDB_TTL_MISS    =  7 * 24 * 60 * 60 * 1000  //  7 days for notFound entries
+
+export async function getTmdbMeta(id: string): Promise<TmdbMeta | undefined> {
+  const rec = await db.tmdbCache.get(id)
+  if (!rec) return undefined
+  const ttl = rec.notFound ? TMDB_TTL_MISS : TMDB_TTL_HIT
+  if (Date.now() - rec.cachedAt > ttl) {
+    await db.tmdbCache.delete(id)
+    return undefined
+  }
+  return rec
+}
+
+export async function getTmdbMetaBulk(ids: string[]): Promise<Map<string, TmdbMeta>> {
+  const rows = await db.tmdbCache.where('id').anyOf(ids).toArray()
+  const now = Date.now()
+  const result = new Map<string, TmdbMeta>()
+  for (const rec of rows) {
+    const ttl = rec.notFound ? TMDB_TTL_MISS : TMDB_TTL_HIT
+    if (now - rec.cachedAt <= ttl) result.set(rec.id, rec)
+  }
+  return result
+}
+
+export async function saveTmdbMeta(meta: TmdbMeta): Promise<void> {
+  await db.tmdbCache.put(meta)
 }

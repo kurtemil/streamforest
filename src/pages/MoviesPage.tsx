@@ -12,9 +12,11 @@ import { MovieCard } from '@/components/movies/MovieCard'
 import { SearchBar } from '@/components/ui/SearchBar'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { GroupSidebar } from '@/components/ui/GroupSidebar'
+import { VirtualPosterGrid } from '@/ui'
+import { useTmdbEnrich } from '@/hooks/useTmdbEnrich'
 
-const PAGE_SIZE = 60
-const RECENT_COUNT = 40
+const RECENT_COUNT = 200          // when no group/search is active, show the 200 most recent
+const ENRICH_LIMIT = 200          // max items to enrich per view
 const cleanGroup = (t: string) => t.replace(/^VOD:\s*/, '')
 
 export function MoviesPage() {
@@ -24,7 +26,6 @@ export function MoviesPage() {
   const { play } = usePlayerStore()
   const [search, setSearch] = useState('')
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
-  const [page, setPage] = useState(1)
 
   const { activeProfileId } = useProfileStore()
   const { movie: excludedMovies } = useActiveExclusions()
@@ -63,14 +64,16 @@ export function MoviesPage() {
     return movies.slice(0, RECENT_COUNT)
   }, [movies, selectedGroup, search])
 
-  const visible = useMemo(() => filtered.slice(0, page * PAGE_SIZE), [filtered, page])
-
+  // Watch progress is now queried for the entire filtered set (cheap — just an indexed lookup
+  // on a small id list). We could narrow to the rendered window if perf becomes an issue.
   const progressMap = useLiveQuery(async () => {
     if (!activeProfileId) return {}
-    const profileIds = visible.map((m) => `${activeProfileId}:${m.id}`)
+    const profileIds = filtered.map((m) => `${activeProfileId}:${m.id}`)
     const rows = await db.watchProgress.where('id').anyOf(profileIds).toArray()
     return Object.fromEntries(rows.map((r) => [r.channelId, r]))
-  }, [visible, activeProfileId])
+  }, [filtered, activeProfileId])
+
+  const tmdbMap = useTmdbEnrich(filtered.slice(0, ENRICH_LIMIT))
 
   const watchLaterSet = useLiveQuery(async () => {
     if (!activeProfileId) return new Set<string>()
@@ -92,7 +95,6 @@ export function MoviesPage() {
 
   const handleGroupSelect = (g: string | null) => {
     setSelectedGroup(g)
-    setPage(1)
     setSearch('')
   }
 
@@ -116,7 +118,7 @@ export function MoviesPage() {
 
   return (
     <div className="flex h-full overflow-hidden">
-      <div className="p-4 pt-6 overflow-y-auto scrollbar-hide border-r border-white/5">
+      <div className="p-4 pt-6 overflow-y-auto scrollbar-hide border-r border-white/5 shrink-0">
         <GroupSidebar
           groups={groups}
           selected={selectedGroup}
@@ -126,39 +128,38 @@ export function MoviesPage() {
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto p-6 pb-12 min-w-0">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-xl font-bold text-white">{heading}</h1>
+      <div className="flex-1 flex flex-col min-w-0 min-h-0">
+        <div className="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
+          <h1 className="text-heading-xl text-white">{heading}</h1>
           <div className="flex items-center gap-3">
-            <p className="text-neutral-500 text-sm">{filtered.length} titles</p>
+            <p className="text-neutral-500 text-caption">{filtered.length.toLocaleString()} titles</p>
             <div className="w-52">
-              <SearchBar value={search} onChange={(v) => { setSearch(v); setPage(1) }} placeholder="Search movies…" />
+              <SearchBar value={search} onChange={setSearch} placeholder="Search movies…" />
             </div>
           </div>
         </div>
 
-        {visible.length === 0 ? (
-          <EmptyState icon={<Film size={36} />} title="No results" description="Try a different search term." />
+        {filtered.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center">
+            <EmptyState icon={<Film size={36} />} title="No results" description="Try a different search term." />
+          </div>
         ) : (
-          <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-              {visible.map((m) => (
-                <MovieCard key={m.id} channel={m} progress={progressMap?.[m.id]}
+          <div className="flex-1 min-h-0 px-6 pb-6">
+            <VirtualPosterGrid
+              items={filtered}
+              getKey={(m) => m.id}
+              renderItem={(m) => (
+                <MovieCard
+                  channel={m}
+                  progress={progressMap?.[m.id]}
                   isWatchLater={watchLaterSet?.has(m.id)}
+                  tmdbMeta={tmdbMap.get(m.id)}
                   onClick={() => { navigate(`/movies?playing=${m.id}`); play(m) }}
                   onWatchLater={(e) => toggleWatchLater(m.id, e)}
                 />
-              ))}
-            </div>
-            {visible.length < filtered.length && (
-              <button
-                onClick={() => setPage((p) => p + 1)}
-                className="mt-8 mx-auto block px-6 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white text-sm transition-colors"
-              >
-                Show more ({filtered.length - visible.length} remaining)
-              </button>
-            )}
-          </>
+              )}
+            />
+          </div>
         )}
       </div>
     </div>

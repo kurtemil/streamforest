@@ -1,0 +1,47 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   StreamForest design tokens
+   Tailwind handles most of the system; this file holds CSS variables that
+   Tailwind can't express cleanly (motion easings, layered backgrounds, ramps).
+   ───────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Motion easings */
+  --ease-out:        cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out:     cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring:     cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-snappy:     cubic-bezier(0.25, 0.46, 0.45, 0.94);
+
+  /* Durations */
+  --dur-instant: 100ms;
+  --dur-fast:    180ms;
+  --dur-base:    260ms;
+  --dur-slow:    420ms;
+  --dur-cinema:  720ms;
+
+  /* Hero gradient overlays (used on cinematic backdrops) */
+  --hero-overlay-vertical:
+    linear-gradient(to top,
+      rgba(7, 7, 8, 0.96) 0%,
+      rgba(7, 7, 8, 0.78) 30%,
+      rgba(7, 7, 8, 0.32) 60%,
+      rgba(7, 7, 8, 0.05) 100%);
+
+  --hero-overlay-horizontal:
+    linear-gradient(to right,
+      rgba(7, 7, 8, 0.92) 0%,
+      rgba(7, 7, 8, 0.55) 35%,
+      rgba(7, 7, 8, 0.05) 70%);
+
+  /* Glass surfaces */
+  --glass-1: rgba(255, 255, 255, 0.03);
+  --glass-2: rgba(255, 255, 255, 0.06);
+  --glass-3: rgba(255, 255, 255, 0.10);
+  --glass-stroke: rgba(255, 255, 255, 0.08);
+
+  /* Shimmer skeleton background */
+  --shimmer-bg:
+    linear-gradient(90deg,
+      rgba(255, 255, 255, 0.04) 0%,
+      rgba(255, 255, 255, 0.09) 50%,
+      rgba(255, 255, 255, 0.04) 100%);
+}

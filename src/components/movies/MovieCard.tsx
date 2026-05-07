@@ -1,28 +1,39 @@
-import { Play, Check, Bookmark } from 'lucide-react'
+import { Play, Check, Bookmark, Star } from 'lucide-react'
 import { Poster } from '@/components/ui/Poster'
 import { ProgressRing } from '@/components/ui/ProgressRing'
-import type { Channel, WatchProgress } from '@/types'
+import type { Channel, WatchProgress, TmdbMeta } from '@/types'
 
 interface Props {
   channel: Channel
   progress?: WatchProgress
   isWatchLater?: boolean
+  tmdbMeta?: TmdbMeta
   onClick: () => void
   onWatchLater?: (e: React.MouseEvent) => void
 }
 
-export function MovieCard({ channel, progress, isWatchLater, onClick, onWatchLater }: Props) {
+export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, onClick, onWatchLater }: Props) {
   const pct = progress && progress.duration > 0
     ? Math.round((progress.position / progress.duration) * 100)
     : 0
 
+  const displayTitle = tmdbMeta?.title ?? channel.movieTitle ?? channel.showName ?? channel.name
+  const displayYear  = tmdbMeta?.year  ?? channel.year
+  const rating       = tmdbMeta && !tmdbMeta.notFound && tmdbMeta.rating > 0 ? tmdbMeta.rating : null
+
   return (
-    <button onClick={onClick} className="group text-left animate-fade-in">
-      <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-[#1a1a1a] ring-1 ring-white/5 group-hover:ring-accent-600/50 transition-all duration-200 group-hover:scale-[1.02] group-hover:shadow-xl group-hover:shadow-black/60">
-        <Poster src={channel.logo} alt={channel.name} type="movie" className="w-full h-full" />
+    <button onClick={onClick} className="group text-left w-full">
+      <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-surface-300 ring-1 ring-white/5 group-hover:ring-accent-600/50 transition-all duration-200 group-hover:scale-[1.02] shadow-card group-hover:shadow-card-hover">
+        <Poster
+          src={channel.logo}
+          alt={displayTitle}
+          type={channel.type}
+          className="w-full h-full"
+          tmdbPosterPath={tmdbMeta?.posterPath}
+        />
 
+        {/* Hover overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
           <div className="w-11 h-11 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center ring-2 ring-white/30">
             <Play size={18} fill="white" className="text-white ml-0.5" />
@@ -44,32 +55,42 @@ export function MovieCard({ channel, progress, isWatchLater, onClick, onWatchLat
           </button>
         )}
 
-        {progress?.completed && (
+        {/* Rating chip */}
+        {rating !== null && (
+          <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-sm rounded-full px-1.5 py-0.5 ring-1 ring-white/15">
+            <Star size={9} fill="#f59e0b" className="text-warn-500 shrink-0" />
+            <span className="text-micro font-semibold text-white">{rating.toFixed(1)}</span>
+          </div>
+        )}
+
+        {/* Completed badge */}
+        {progress?.completed && !rating && (
           <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-accent-600 flex items-center justify-center">
             <Check size={12} className="text-white" />
           </div>
         )}
 
+        {/* Progress bar + ring */}
         {!progress?.completed && pct > 0 && (
-          <div className="absolute bottom-2 right-2">
-            <ProgressRing pct={pct} size={30} stroke={2.5} />
-          </div>
-        )}
-
-        {!progress?.completed && pct > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/10">
-            <div className="h-full bg-accent-500" style={{ width: `${pct}%` }} />
-          </div>
+          <>
+            <div className="absolute bottom-2 right-2">
+              <ProgressRing pct={pct} size={30} stroke={2.5} />
+            </div>
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/10">
+              <div className="h-full bg-accent-500" style={{ width: `${pct}%` }} />
+            </div>
+          </>
         )}
       </div>
 
       <div className="mt-2 px-0.5">
-        <p className="text-sm text-white font-medium leading-tight line-clamp-2">
-          {channel.movieTitle ?? channel.name}
-        </p>
-        {channel.year && (
-          <p className="text-xs text-neutral-500 mt-0.5">{channel.year}</p>
-        )}
+        <p className="text-body text-white font-medium leading-tight line-clamp-2">{displayTitle}</p>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          {displayYear && <span className="text-caption text-neutral-500">{displayYear}</span>}
+          {tmdbMeta?.genres?.[0] && (
+            <span className="text-caption text-neutral-600 truncate">{tmdbMeta.genres[0]}</span>
+          )}
+        </div>
       </div>
     </button>
   )

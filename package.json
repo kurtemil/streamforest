@@ -9,8 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@tanstack/react-virtual": "^3.13.24",
+    "blurhash": "^2.0.5",
     "dexie": "^4.0.10",
     "dexie-react-hooks": "^1.1.7",
+    "framer-motion": "^12.38.0",
     "hls.js": "^1.5.15",
     "lucide-react": "^1.8.0",
     "react": "^18.3.1",
