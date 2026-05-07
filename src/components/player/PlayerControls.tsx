@@ -1,12 +1,14 @@
 import { useRef, useState, useEffect } from 'react'
 import {
-  Play, Pause, Volume2, VolumeX, Maximize2, X,
-  SkipBack, SkipForward, Languages, Loader2,
+  Play, Pause, Volume2, VolumeX, Maximize2, Minimize2, X,
+  SkipBack, SkipForward, Languages, Loader2, PictureInPicture2,
 } from 'lucide-react'
 import type { Channel } from '@/types'
 import { formatTime } from '@/lib/time'
 
 interface Track { id: number; name: string; lang: string }
+
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
 interface Props {
   channel: Channel
@@ -22,13 +24,18 @@ interface Props {
   subtitleTracks: Track[]
   activeSubtitle: number
   loadingSubtitle: number | null
+  playbackSpeed: number
+  pipAvailable: boolean
   onTogglePlay: () => void
   onSeek: (t: number) => void
   onVolumeChange: (v: number) => void
   onToggleMute: () => void
   onSelectAudioTrack: (id: number) => void
   onSelectSubtitle: (id: number) => void
+  onSpeedChange: (s: number) => void
   onToggleFullscreen: () => void
+  onPiP: () => void
+  onMinimize: () => void
   onClose: () => void
 }
 
@@ -37,32 +44,43 @@ export function PlayerControls({
   currentTime, duration, buffered,
   volume, muted,
   audioTracks, activeAudioTrack, subtitleTracks, activeSubtitle, loadingSubtitle,
+  playbackSpeed, pipAvailable,
   onTogglePlay, onSeek, onVolumeChange, onToggleMute,
-  onSelectAudioTrack, onSelectSubtitle,
-  onToggleFullscreen, onClose,
+  onSelectAudioTrack, onSelectSubtitle, onSpeedChange,
+  onToggleFullscreen, onPiP, onMinimize, onClose,
 }: Props) {
   const scrubberRef = useRef<HTMLDivElement>(null)
   const [showTrackMenu, setShowTrackMenu] = useState(false)
+  const [showSpeedMenu, setShowSpeedMenu] = useState(false)
+  const [hoverTime, setHoverTime] = useState<number | null>(null)
+  const [hoverPct, setHoverPct] = useState(0)
 
   useEffect(() => {
-    if (!visible) setShowTrackMenu(false)
+    if (!visible) { setShowTrackMenu(false); setShowSpeedMenu(false) }
   }, [visible])
 
   const pct = duration > 0 ? (currentTime / duration) * 100 : 0
   const bufferedPct = duration > 0 ? (buffered / duration) * 100 : 0
   const isLive = channel.type === 'live'
 
-  const handleScrubberClick = (e: React.MouseEvent) => {
-    if (!scrubberRef.current || duration === 0) return
-    e.stopPropagation()
+  const getScrubRatio = (e: React.MouseEvent) => {
+    if (!scrubberRef.current || duration === 0) return null
     const rect = scrubberRef.current.getBoundingClientRect()
-    const ratio = (e.clientX - rect.left) / rect.width
-    onSeek(Math.max(0, Math.min(duration, ratio * duration)))
+    return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
   }
 
-  const handleScrubberDrag = (e: React.MouseEvent) => {
-    if (e.buttons !== 1) return
-    handleScrubberClick(e)
+  const handleScrubberClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const ratio = getScrubRatio(e)
+    if (ratio !== null) onSeek(ratio * duration)
+  }
+
+  const handleScrubberMouseMove = (e: React.MouseEvent) => {
+    const ratio = getScrubRatio(e)
+    if (ratio === null) return
+    setHoverTime(ratio * duration)
+    setHoverPct(ratio * 100)
+    if (e.buttons === 1) onSeek(ratio * duration)
   }
 
   const title = channel.type === 'series'
@@ -73,8 +91,7 @@ export function PlayerControls({
 
   return (
     <div
-      className={`absolute inset-0 flex flex-col justify-between transition-opacity duration-300 ${visible ? 'opacity-100' : 'opacity-0'}`}
-      style={{ pointerEvents: visible ? 'auto' : 'none' }}
+      className={`absolute inset-0 flex flex-col justify-between transition-opacity duration-300 ${visible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
     >
       {/* Top bar */}
       <div
@@ -88,12 +105,21 @@ export function PlayerControls({
             <p className="text-neutral-400 text-xs mt-0.5">{channel.groupTitle}</p>
           )}
         </div>
-        <button
-          onClick={onClose}
-          className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
-        >
-          <X size={20} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={onMinimize}
+            className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
+            title="Minimize"
+          >
+            <Minimize2 size={18} />
+          </button>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
+          >
+            <X size={20} />
+          </button>
+        </div>
       </div>
 
       {/* Bottom controls */}
@@ -102,7 +128,7 @@ export function PlayerControls({
         style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%)' }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Scrubber (hidden for live) */}
+        {/* Scrubber */}
         {!isLive && (
           <div className="flex items-center gap-3">
             <span className="text-white/70 text-xs tabular-nums w-11 text-right shrink-0">
@@ -112,8 +138,18 @@ export function PlayerControls({
               ref={scrubberRef}
               className="relative flex-1 h-5 group/scrub cursor-pointer"
               onClick={handleScrubberClick}
-              onMouseMove={handleScrubberDrag}
+              onMouseMove={handleScrubberMouseMove}
+              onMouseLeave={() => setHoverTime(null)}
             >
+              {/* Hover time tooltip */}
+              {hoverTime !== null && duration > 0 && (
+                <div
+                  className="absolute bottom-full mb-2 -translate-x-1/2 bg-black/90 text-white text-xs font-medium px-2 py-1 rounded pointer-events-none whitespace-nowrap"
+                  style={{ left: `${hoverPct}%` }}
+                >
+                  {formatTime(hoverTime)}
+                </div>
+              )}
               {/* Track */}
               <div className="absolute left-0 right-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-white/20" />
               {/* Buffered */}
@@ -123,7 +159,7 @@ export function PlayerControls({
               />
               {/* Progress */}
               <div
-                className="absolute left-0 top-1/2 -translate-y-1/2 h-1 rounded-full bg-accent-500 transition-[width] duration-150"
+                className="absolute left-0 top-1/2 -translate-y-1/2 h-1 group-hover/scrub:h-1.5 rounded-full bg-accent-500 transition-all duration-100"
                 style={{ width: `${pct}%` }}
               />
               {/* Thumb */}
@@ -138,10 +174,10 @@ export function PlayerControls({
           </div>
         )}
 
-        {/* Buttons */}
+        {/* Buttons row */}
         <div className="flex items-center justify-between">
+          {/* Left cluster */}
           <div className="flex items-center gap-1">
-            {/* Play/Pause */}
             {!isLive && (
               <button
                 onClick={() => onSeek(Math.max(0, currentTime - 10))}
@@ -190,18 +226,55 @@ export function PlayerControls({
             )}
           </div>
 
+          {/* Right cluster */}
           <div className="flex items-center gap-1">
+            {/* Speed */}
+            {!isLive && (
+              <div className="relative">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowSpeedMenu(v => !v); setShowTrackMenu(false) }}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    showSpeedMenu || playbackSpeed !== 1
+                      ? 'text-accent-400 bg-accent-600/20'
+                      : 'text-white/70 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  {playbackSpeed === 1 ? '1×' : `${playbackSpeed}×`}
+                </button>
+                {showSpeedMenu && (
+                  <div
+                    className="absolute bottom-full right-0 mb-2 bg-black/90 backdrop-blur-sm rounded-xl py-1.5 min-w-[5rem] shadow-2xl shadow-black/60 ring-1 ring-white/10"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {SPEEDS.map(s => (
+                      <button
+                        key={s}
+                        onClick={() => { onSpeedChange(s); setShowSpeedMenu(false) }}
+                        className={`flex items-center justify-between w-full px-3 py-1.5 text-sm transition-colors ${
+                          s === playbackSpeed ? 'text-accent-400' : 'text-white/80 hover:text-white hover:bg-white/5'
+                        }`}
+                      >
+                        {s}×
+                        {s === playbackSpeed && <span className="w-1.5 h-1.5 rounded-full bg-accent-500 ml-2" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Audio / Subtitle tracks */}
             {(audioTracks.length > 1 || subtitleTracks.length > 0) && (
               <div className="relative">
                 <button
-                  onClick={(e) => { e.stopPropagation(); setShowTrackMenu(v => !v) }}
+                  onClick={(e) => { e.stopPropagation(); setShowTrackMenu(v => !v); setShowSpeedMenu(false) }}
                   className={`p-2 rounded-full hover:bg-white/10 transition-colors ${showTrackMenu ? 'text-accent-500' : 'text-white/80 hover:text-white'}`}
                 >
                   <Languages size={18} />
                 </button>
                 {showTrackMenu && (
                   <div
-                    className="absolute bottom-full right-0 mb-2 bg-black/90 backdrop-blur-sm rounded-xl p-3 min-w-44"
+                    className="absolute bottom-full right-0 mb-2 bg-black/90 backdrop-blur-sm rounded-xl p-3 min-w-44 shadow-2xl shadow-black/60 ring-1 ring-white/10"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {audioTracks.length > 1 && (
@@ -255,6 +328,18 @@ export function PlayerControls({
                 )}
               </div>
             )}
+
+            {/* PiP */}
+            {pipAvailable && (
+              <button
+                onClick={onPiP}
+                className="p-2 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-colors"
+                title="Picture in Picture"
+              >
+                <PictureInPicture2 size={18} />
+              </button>
+            )}
+
             <button
               onClick={onToggleFullscreen}
               className="p-2 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-colors"

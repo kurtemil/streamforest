@@ -1,7 +1,9 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react'
 import type Hls from 'hls.js'
+import { Play, Pause, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { usePlayerStore } from '@/stores/playerStore'
+import { usePlaylistStore } from '@/stores/playlistStore'
 import { saveProgress, getProgress, clearProgress } from '@/services/db'
 import { pushProgress, deleteRemoteProgress } from '@/services/sync'
 import { useProfileStore } from '@/stores/profileStore'
@@ -10,6 +12,7 @@ import {
   subtitleVttUrl, audioStreamLabel, subtitleStreamLabel,
 } from '@/lib/transcode'
 import type { ProxyMode } from '@/lib/transcode'
+import { normalizeShowKey } from '@/lib/utils'
 import { PlayerControls } from './PlayerControls'
 
 const SAVE_INTERVAL_MS = 5000
@@ -60,7 +63,8 @@ type VideoWithAudioTracks = HTMLVideoElement & {
 
 export function VideoPlayer() {
   const navigate = useNavigate()
-  const { current, close } = usePlayerStore()
+  const { current, play, close } = usePlayerStore()
+  const { channels } = usePlaylistStore()
   const activeProfileId = useProfileStore((s) => s.activeProfileId)
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
@@ -102,6 +106,12 @@ export function VideoPlayer() {
   const [loadingSubtitle, setLoadingSubtitle] = useState<number | null>(null)
   const [subtitleNotice, setSubtitleNotice] = useState<string | null>(null)
   const subtitleNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [minimized, setMinimized] = useState(false)
+  const [playbackSpeed, setPlaybackSpeed] = useState(1)
+  const playbackSpeedRef = useRef(1)
+  const [nextEpCountdown, setNextEpCountdown] = useState<number | null>(null)
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const nextEpisodeRef = useRef<typeof current>(null)
 
   const destroyHls = useCallback(() => {
     if (hlsRef.current) {
@@ -110,10 +120,61 @@ export function VideoPlayer() {
     }
   }, [])
 
+  const nextEpisode = useMemo(() => {
+    if (!current || current.type !== 'series') return null
+    const showKey = normalizeShowKey(current.showName ?? current.name)
+    const showEps = channels
+      .filter(c => c.type === 'series' && normalizeShowKey(c.showName ?? c.name) === showKey)
+      .sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0))
+    const idx = showEps.findIndex(c => c.id === current.id)
+    return idx !== -1 && idx < showEps.length - 1 ? showEps[idx + 1] : null
+  }, [current, channels])
+
+  useEffect(() => { nextEpisodeRef.current = nextEpisode }, [nextEpisode])
+
+  // Re-apply playback speed after every source load (browser resets to 1× on src change)
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    const onMeta = () => { video.playbackRate = playbackSpeedRef.current }
+    video.addEventListener('loadedmetadata', onMeta)
+    return () => video.removeEventListener('loadedmetadata', onMeta)
+  }, [])
+
+  // Reset minimized + clear countdown on new item
+  useEffect(() => {
+    setMinimized(false)
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
+    countdownIntervalRef.current = null
+    setNextEpCountdown(null)
+  }, [current?.id])
+
   const resetControlsTimer = useCallback(() => {
     setShowControls(true)
     if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current)
     controlsTimerRef.current = setTimeout(() => setShowControls(false), 3500)
+  }, [])
+
+  const clearCountdown = useCallback(() => {
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
+    countdownIntervalRef.current = null
+    setNextEpCountdown(null)
+  }, [])
+
+  const handleSpeedChange = useCallback((s: number) => {
+    playbackSpeedRef.current = s
+    setPlaybackSpeed(s)
+    if (videoRef.current) videoRef.current.playbackRate = s
+  }, [])
+
+  const handlePiP = useCallback(async () => {
+    const video = videoRef.current
+    if (!video) return
+    if (document.pictureInPictureElement) {
+      await document.exitPictureInPicture().catch(() => {})
+    } else {
+      await video.requestPictureInPicture().catch(() => {})
+    }
   }, [])
 
   const handleClose = useCallback(() => {
@@ -506,6 +567,22 @@ export function VideoPlayer() {
         saveProgress(profileId, current.id, realDur, realDur)
           .then((entry) => pushProgress(entry))
       }
+      // Start next-episode countdown for series
+      const next = nextEpisodeRef.current
+      if (next) {
+        setNextEpCountdown(10)
+        countdownIntervalRef.current = setInterval(() => {
+          setNextEpCountdown((n) => {
+            if (n === null || n <= 1) {
+              clearInterval(countdownIntervalRef.current!)
+              countdownIntervalRef.current = null
+              if (n === 1) usePlayerStore.getState().play(next)
+              return null
+            }
+            return n - 1
+          })
+        }, 1000)
+      }
     }
 
     const syncNativeAudioTracks = () => {
@@ -730,8 +807,6 @@ export function VideoPlayer() {
     v.paused ? v.play() : v.pause()
   }
 
-  const seek = seekTo
-
   const changeVolume = (val: number) => {
     const v = videoRef.current
     if (!v) return
@@ -755,20 +830,30 @@ export function VideoPlayer() {
     }
   }
 
+  const pipAvailable = typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && (document as Document & { pictureInPictureEnabled: boolean }).pictureInPictureEnabled
+
+  const miniTitle = current.type === 'series'
+    ? `S${String(current.season).padStart(2, '0')}E${String(current.episode).padStart(2, '0')} · ${current.showName ?? current.name}`
+    : current.movieTitle ?? current.name
+
   return (
-    <div className="fixed inset-0 z-50 bg-black flex flex-col animate-fade-in">
+    <div className={`fixed z-50 transition-all duration-300 ${
+      minimized
+        ? 'bottom-4 right-4 w-72 rounded-2xl overflow-hidden bg-black shadow-cinema ring-1 ring-white/10'
+        : 'inset-0 bg-black flex flex-col animate-fade-in'
+    }`}>
       <div
-        className="relative flex-1 group cursor-pointer"
-        onMouseMove={resetControlsTimer}
-        onClick={togglePlay}
+        className={`relative ${minimized ? 'aspect-video' : 'flex-1'} group cursor-pointer`}
+        onMouseMove={minimized ? undefined : resetControlsTimer}
+        onClick={minimized ? () => setMinimized(false) : togglePlay}
       >
         <video
           ref={videoRef}
-          className="w-full h-full object-contain"
+          className="absolute inset-0 w-full h-full object-contain"
           playsInline
         />
 
-        {error && (
+        {!minimized && error && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="bg-surface-50 rounded-xl p-6 max-w-sm text-center">
               <p className="text-red-400 font-medium mb-2">Playback Error</p>
@@ -783,7 +868,7 @@ export function VideoPlayer() {
           </div>
         )}
 
-        {subtitleNotice && (
+        {!minimized && subtitleNotice && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 max-w-md z-10 pointer-events-none">
             <div className="bg-black/80 backdrop-blur-sm border border-red-500/30 text-red-200 text-sm rounded-lg px-4 py-2 shadow-lg">
               {subtitleNotice}
@@ -791,29 +876,94 @@ export function VideoPlayer() {
           </div>
         )}
 
-        <PlayerControls
-          channel={current}
-          visible={showControls}
-          isPlaying={isPlaying}
-          currentTime={currentTime}
-          duration={duration}
-          buffered={buffered}
-          volume={volume}
-          muted={muted}
-          audioTracks={audioTracks}
-          activeAudioTrack={activeAudioTrack}
-          subtitleTracks={subtitleTracks}
-          activeSubtitle={activeSubtitle}
-          loadingSubtitle={loadingSubtitle}
-          onTogglePlay={togglePlay}
-          onSeek={seek}
-          onVolumeChange={changeVolume}
-          onToggleMute={toggleMute}
-          onSelectAudioTrack={selectAudioTrack}
-          onSelectSubtitle={selectSubtitle}
-          onToggleFullscreen={toggleFullscreen}
-          onClose={handleClose}
-        />
+        {!minimized && (
+          <PlayerControls
+            channel={current}
+            visible={showControls}
+            isPlaying={isPlaying}
+            currentTime={currentTime}
+            duration={duration}
+            buffered={buffered}
+            volume={volume}
+            muted={muted}
+            audioTracks={audioTracks}
+            activeAudioTrack={activeAudioTrack}
+            subtitleTracks={subtitleTracks}
+            activeSubtitle={activeSubtitle}
+            loadingSubtitle={loadingSubtitle}
+            playbackSpeed={playbackSpeed}
+            pipAvailable={pipAvailable}
+            onTogglePlay={togglePlay}
+            onSeek={seekTo}
+            onVolumeChange={changeVolume}
+            onToggleMute={toggleMute}
+            onSelectAudioTrack={selectAudioTrack}
+            onSelectSubtitle={selectSubtitle}
+            onSpeedChange={handleSpeedChange}
+            onToggleFullscreen={toggleFullscreen}
+            onPiP={handlePiP}
+            onMinimize={() => setMinimized(true)}
+            onClose={handleClose}
+          />
+        )}
+
+        {/* Next episode countdown */}
+        {!minimized && nextEpCountdown !== null && nextEpisode && (
+          <div
+            className="absolute bottom-24 right-6 z-10"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="bg-black/85 backdrop-blur-sm rounded-xl p-4 ring-1 ring-white/15 max-w-xs text-right">
+              <p className="text-white/50 text-xs mb-1">Next episode in {nextEpCountdown}s</p>
+              <p className="text-white text-sm font-medium leading-snug">
+                S{String(nextEpisode.season).padStart(2, '0')}E{String(nextEpisode.episode).padStart(2, '0')}
+                {nextEpisode.episodeTitle ? ` · ${nextEpisode.episodeTitle}` : ''}
+              </p>
+              {/* Countdown progress bar */}
+              <div className="mt-2 h-0.5 rounded-full bg-white/15">
+                <div
+                  className="h-full rounded-full bg-accent-500 transition-[width] duration-1000"
+                  style={{ width: `${((10 - nextEpCountdown) / 10) * 100}%` }}
+                />
+              </div>
+              <div className="flex gap-2 mt-3 justify-end">
+                <button
+                  onClick={clearCountdown}
+                  className="text-xs text-white/60 hover:text-white px-2 py-1 rounded hover:bg-white/10 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => { clearCountdown(); play(nextEpisode) }}
+                  className="text-xs text-white bg-accent-600 hover:bg-accent-500 px-3 py-1.5 rounded-lg transition-colors font-medium"
+                >
+                  Play now
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Mini-player overlay controls */}
+        {minimized && (
+          <div
+            className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent opacity-0 hover:opacity-100 transition-opacity"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-2 pb-2 pt-4">
+              <button
+                onClick={togglePlay}
+                className="text-white/90 hover:text-white p-1 transition-colors shrink-0"
+              >
+                {isPlaying ? <Pause size={14} fill="white" className="text-white" /> : <Play size={14} fill="white" className="text-white" />}
+              </button>
+              <p className="text-white text-xs flex-1 truncate min-w-0">{miniTitle}</p>
+              <button onClick={handleClose} className="text-white/60 hover:text-white p-1 transition-colors shrink-0">
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
