@@ -17,6 +17,17 @@ export function epgUrlFromM3u(m3uUrl: string): string | null {
   }
 }
 
+/** Normalize a channel display-name for fuzzy matching: strip decorators, lowercase. */
+export function normalizeChannelName(name: string): string {
+  return name
+    .replace(/\[.*?\]/g, '')
+    .replace(/\(.*?\)/g, '')
+    .replace(/\*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+}
+
 // ── XMLTV timestamp parser ─────────────────────────────────────────────────────
 
 function parseXmltvTime(ts: string): number {
@@ -43,6 +54,17 @@ function extractTag(xml: string, tag: string): string {
   return m ? m[1].replace(/<[^>]+>/g, '').trim() : ''
 }
 
+function extractAllTags(xml: string, tag: string): string[] {
+  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'gi')
+  const results: string[] = []
+  let match: RegExpExecArray | null
+  while ((match = re.exec(xml)) !== null) {
+    const text = match[1].replace(/<[^>]+>/g, '').trim()
+    if (text) results.push(text)
+  }
+  return results
+}
+
 function parseProgrammeBlock(block: string): EpgProgram | null {
   const headerEnd = block.indexOf('>')
   if (headerEnd === -1) return null
@@ -66,20 +88,29 @@ function parseProgrammeBlock(block: string): EpgProgram | null {
   return { id: `${channelId}_${start}`, channelId, title, start, end, description, category }
 }
 
+function parseChannelBlock(block: string): { id: string; names: string[] } | null {
+  const headerEnd = block.indexOf('>')
+  if (headerEnd === -1) return null
+  const attrs = block.slice('<channel'.length, headerEnd)
+  const id = extractAttr(attrs, 'id')
+  if (!id) return null
+  const names = extractAllTags(block, 'display-name')
+  if (names.length === 0) return null
+  return { id, names }
+}
+
 // ── Main fetch function ────────────────────────────────────────────────────────
 
 /**
- * Streams the XMLTV response and parses <programme> elements incrementally.
- * The file can be 50MB+, so we never load it all into memory — we process
- * each complete <programme>...</programme> block as it arrives and discard it.
+ * Streams the XMLTV response and parses <channel> and <programme> elements
+ * incrementally. The file can be 50MB+, so we never load it all into memory.
+ * Returns both the program list and a normalizedName→channelId map built from
+ * <channel> display-names, used as a fallback when M3U channels have no tvg-id.
  */
 export async function fetchAndParseEpg(
-  m3uUrl: string,
+  epgUrl: string,
   onProgress?: (count: number) => void,
-): Promise<EpgProgram[]> {
-  const epgUrl = epgUrlFromM3u(m3uUrl)
-  if (!epgUrl) throw new Error('Cannot derive EPG URL — M3U URL must contain username & password params')
-
+): Promise<{ programs: EpgProgram[]; displayNameMap: Map<string, string> }> {
   const res = await fetch(proxyUrl(epgUrl))
   if (!res.ok) throw new Error(`EPG fetch failed with status ${res.status}`)
   if (!res.body) throw new Error('EPG response had no body')
@@ -92,6 +123,7 @@ export async function fetchAndParseEpg(
   const decoder = new TextDecoder('utf-8')
   let buffer    = ''
   const programs: EpgProgram[] = []
+  const displayNameMap = new Map<string, string>() // normalizedName → channelId
   let processed = 0
 
   while (true) {
@@ -99,38 +131,54 @@ export async function fetchAndParseEpg(
     if (done) break
     buffer += decoder.decode(value, { stream: true })
 
-    // Find and process every complete <programme>...</programme> in the current buffer
     let searchFrom = 0
     while (true) {
-      const openIdx = buffer.indexOf('<programme', searchFrom)
-      if (openIdx === -1) break
-      const closeIdx = buffer.indexOf('</programme>', openIdx)
-      if (closeIdx === -1) break   // block not yet complete — wait for next chunk
+      const chIdx = buffer.indexOf('<channel ', searchFrom)
+      const prIdx = buffer.indexOf('<programme', searchFrom)
 
-      const block = buffer.slice(openIdx, closeIdx + 12 /* </programme> */)
-      const prog  = parseProgrammeBlock(block)
-      if (prog && prog.end >= keepFrom && prog.start <= keepTo) {
-        programs.push(prog)
-        processed++
-        if (processed % 500 === 0) onProgress?.(processed)
+      if (chIdx === -1 && prIdx === -1) break
+
+      if (chIdx !== -1 && (prIdx === -1 || chIdx < prIdx)) {
+        // Process <channel> block first (it appears before <programme> in XMLTV)
+        const closeIdx = buffer.indexOf('</channel>', chIdx)
+        if (closeIdx === -1) break  // incomplete — wait for next chunk
+        const block = buffer.slice(chIdx, closeIdx + 10 /* </channel> */)
+        const ch = parseChannelBlock(block)
+        if (ch) {
+          for (const name of ch.names) {
+            displayNameMap.set(normalizeChannelName(name), ch.id)
+          }
+        }
+        searchFrom = closeIdx + 10
+      } else {
+        // Process <programme> block
+        const openIdx = prIdx!
+        const closeIdx = buffer.indexOf('</programme>', openIdx)
+        if (closeIdx === -1) break  // incomplete — wait for next chunk
+        const block = buffer.slice(openIdx, closeIdx + 12 /* </programme> */)
+        const prog  = parseProgrammeBlock(block)
+        if (prog && prog.end >= keepFrom && prog.start <= keepTo) {
+          programs.push(prog)
+          processed++
+          if (processed % 500 === 0) onProgress?.(processed)
+        }
+        searchFrom = closeIdx + 12
       }
-      searchFrom = closeIdx + 12
     }
 
-    // Discard everything up to the last processed close tag; keep the tail
-    // (which may contain the beginning of the next <programme> block).
     if (searchFrom > 0) {
       buffer = buffer.slice(searchFrom)
     }
 
-    // Safety valve: if the buffer somehow grows past 1 MB without a closing tag
-    // (e.g. a very long <desc>), skip forward to the next opening tag.
+    // Safety valve: skip past a stuck block larger than 1 MB
     if (buffer.length > 1_000_000) {
-      const next = buffer.indexOf('<programme', 1)
+      const nextCh = buffer.indexOf('<channel ', 1)
+      const nextPr = buffer.indexOf('<programme', 1)
+      const next = nextCh !== -1 && (nextPr === -1 || nextCh < nextPr) ? nextCh : nextPr
       buffer = next !== -1 ? buffer.slice(next) : ''
     }
   }
 
   onProgress?.(programs.length)
-  return programs
+  return { programs, displayNameMap }
 }

@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { Settings, RefreshCw, Trash2, Check, AlertCircle, Download, Database, ChevronDown, EyeOff, Shield, Users, Tv } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { useEpgStore } from '@/stores/epgStore'
+import { epgUrlFromM3u } from '@/services/epg'
 import { getPlaylistMeta, clearPlaylist } from '@/services/db'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useExclusionsStore, type ContentType } from '@/stores/exclusionsStore'
@@ -177,10 +178,15 @@ function KidGroupPanel({
 }
 
 function EpgSection({ m3uUrl }: { m3uUrl: string }) {
-  const { status, lastFetched, error: epgMsg, refresh: refreshEpg } = useEpgStore()
-  const loading   = status === 'loading'
-  const hasError  = status === 'error'
-  const label     = loading ? 'Loading…' : lastFetched ? 'Refresh Guide' : 'Load Guide Data'
+  const { status, lastFetched, error, progress, epgUrl, setEpgUrl, resolveUrl, refresh: refreshEpg } = useEpgStore()
+  const loading  = status === 'loading'
+  const hasError = status === 'error'
+  const label    = loading ? 'Loading…' : lastFetched ? 'Refresh Guide' : 'Load Guide Data'
+
+  // Pre-populate from M3U URL if the field is empty
+  const derivedUrl = epgUrlFromM3u(m3uUrl) ?? ''
+  const displayUrl = epgUrl || derivedUrl
+  const resolvedUrl = resolveUrl(m3uUrl)
 
   return (
     <section className="mb-8">
@@ -188,34 +194,48 @@ function EpgSection({ m3uUrl }: { m3uUrl: string }) {
         <Tv size={16} className="text-neutral-400" />
         <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider">TV Guide (EPG)</h2>
       </div>
-      <div className="bg-white/[0.03] rounded-xl p-4 ring-1 ring-white/8 flex items-center gap-4">
-        <div className="flex-1 min-w-0">
-          {lastFetched && !loading ? (
-            <p className="text-sm text-white">
-              Guide loaded — <span className="text-neutral-400">{new Date(lastFetched).toLocaleString()}</span>
-            </p>
-          ) : (
-            <p className="text-sm text-neutral-400">
-              {loading ? 'Parsing guide data, this takes a moment…' : 'No guide data. Load EPG to see what\'s on in Live TV.'}
-            </p>
-          )}
-          {epgMsg && loading && (
-            <p className="text-xs text-neutral-500 mt-1">{epgMsg}</p>
-          )}
-          {epgMsg && hasError && (
-            <p className="text-xs text-red-400 mt-1 flex items-center gap-1.5">
-              <AlertCircle size={11} /> {epgMsg}
-            </p>
+      <div className="bg-white/[0.03] rounded-xl p-4 ring-1 ring-white/8 flex flex-col gap-3">
+        {/* EPG URL input */}
+        <div>
+          <label className="block text-xs text-neutral-500 mb-1.5">EPG URL (XMLTV)</label>
+          <input
+            type="url"
+            value={displayUrl}
+            onChange={(e) => setEpgUrl(e.target.value)}
+            placeholder={derivedUrl || 'http://provider.com/xmltv.php?username=…&password=…'}
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 font-mono focus:outline-none focus:border-accent-500/60 focus:bg-white/8 transition-colors"
+          />
+          {!derivedUrl && !epgUrl && (
+            <p className="text-xs text-neutral-600 mt-1">Enter your provider's XMLTV URL above.</p>
           )}
         </div>
-        <button
-          onClick={() => m3uUrl && refreshEpg(m3uUrl)}
-          disabled={loading || !m3uUrl}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors shrink-0"
-        >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          {label}
-        </button>
+
+        {/* Status + action row */}
+        <div className="flex items-center gap-3">
+          <div className="flex-1 min-w-0 text-sm">
+            {loading ? (
+              <span className="text-neutral-400">{progress ?? 'Loading…'}</span>
+            ) : hasError ? (
+              <span className="text-red-400 flex items-center gap-1.5">
+                <AlertCircle size={13} className="shrink-0" /> {error}
+              </span>
+            ) : lastFetched ? (
+              <span className="text-neutral-400">
+                Last loaded: {new Date(lastFetched).toLocaleString()}
+              </span>
+            ) : (
+              <span className="text-neutral-600">No guide data loaded yet.</span>
+            )}
+          </div>
+          <button
+            onClick={() => refreshEpg(m3uUrl)}
+            disabled={loading || !resolvedUrl}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors shrink-0"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            {label}
+          </button>
+        </div>
       </div>
     </section>
   )

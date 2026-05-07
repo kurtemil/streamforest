@@ -1,6 +1,8 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { Channel, WatchProgress, Favorite, PlaylistMeta, WatchLater, TmdbMeta, EpgProgram } from '@/types'
 
+interface EpgChannelName { id: string; channelId: string }
+
 class AppDB extends Dexie {
   channels!: EntityTable<Channel, 'id'>
   watchProgress!: EntityTable<WatchProgress, 'id'>
@@ -9,6 +11,7 @@ class AppDB extends Dexie {
   watchLater!: EntityTable<WatchLater, 'id'>
   tmdbCache!: EntityTable<TmdbMeta, 'id'>
   epgPrograms!: EntityTable<EpgProgram, 'id'>
+  epgChannelNames!: EntityTable<EpgChannelName, 'id'>
 
   constructor() {
     super('StreamForestDB')
@@ -69,6 +72,16 @@ class AppDB extends Dexie {
       watchLater: 'id, profileId, contentId, kind, addedAt',
       tmdbCache: 'id, contentType, tmdbId, cachedAt',
       epgPrograms: 'id, channelId, start, end',
+    })
+    this.version(7).stores({
+      channels: 'id, type, groupTitle, showName, season, sortIndex',
+      watchProgress: 'id, profileId, channelId, lastWatched, completed',
+      favorites: 'id, kind, addedAt',
+      playlistMeta: 'id',
+      watchLater: 'id, profileId, contentId, kind, addedAt',
+      tmdbCache: 'id, contentType, tmdbId, cachedAt',
+      epgPrograms: 'id, channelId, start, end',
+      epgChannelNames: 'id',
     })
   }
 }
@@ -243,4 +256,17 @@ export async function loadEpgFromDB(): Promise<Map<string, EpgProgram[]>> {
 
 export async function clearEpgPrograms(): Promise<void> {
   await db.epgPrograms.clear()
+}
+
+export async function saveEpgChannelNames(map: Map<string, string>): Promise<void> {
+  await db.epgChannelNames.clear()
+  const rows = Array.from(map.entries()).map(([id, channelId]) => ({ id, channelId }))
+  for (let i = 0; i < rows.length; i += EPG_SAVE_CHUNK) {
+    await db.epgChannelNames.bulkPut(rows.slice(i, i + EPG_SAVE_CHUNK))
+  }
+}
+
+export async function loadEpgChannelNames(): Promise<Map<string, string>> {
+  const rows = await db.epgChannelNames.toArray()
+  return new Map(rows.map((r) => [r.id, r.channelId]))
 }

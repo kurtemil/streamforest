@@ -113,14 +113,17 @@ function ChannelRow({ channel, programs, onPlay }: ChannelRowProps) {
 // ── EPG status bar ─────────────────────────────────────────────────────────────
 
 function EpgStatusBar({ m3uUrl }: { m3uUrl: string }) {
-  const { status, lastFetched, error, refresh, isStale } = useEpgStore()
+  const { status, lastFetched, error, progress, refresh, resolveUrl, isStale } = useEpgStore()
   const stale = isStale()
+  const loading = status === 'loading'
+  const canLoad = !!resolveUrl(m3uUrl)
+  const epgReady = status === 'ready' && !stale
 
   const handleRefresh = useCallback(() => {
-    if (m3uUrl) refresh(m3uUrl)
+    refresh(m3uUrl)
   }, [m3uUrl, refresh])
 
-  if (status === 'ready' && !stale) return null
+  if (epgReady) return null
 
   return (
     <div className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm mb-4 ${
@@ -134,21 +137,26 @@ function EpgStatusBar({ m3uUrl }: { m3uUrl: string }) {
         <Clock size={14} className="shrink-0" />
       )}
       <span className="flex-1 min-w-0 truncate">
-        {error
+        {loading && progress
+          ? progress
+          : error
           ? `EPG error: ${error}`
           : lastFetched
           ? `Guide data is ${Math.floor((Date.now() - lastFetched) / 3600000)}h old`
           : 'No guide data loaded yet'}
       </span>
-      {m3uUrl && (
+      {canLoad && (
         <button
           onClick={handleRefresh}
-          disabled={status === 'loading'}
+          disabled={loading}
           className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/8 hover:bg-white/15 text-white/70 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-wait shrink-0"
         >
-          <RefreshCw size={12} className={status === 'loading' ? 'animate-spin' : ''} />
-          {status === 'loading' ? 'Loading…' : 'Load EPG'}
+          <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+          {loading ? 'Loading…' : 'Load EPG'}
         </button>
+      )}
+      {!canLoad && !loading && (
+        <span className="text-xs text-neutral-600 shrink-0">Set EPG URL in Settings</span>
       )}
     </div>
   )
@@ -159,7 +167,7 @@ function EpgStatusBar({ m3uUrl }: { m3uUrl: string }) {
 export function LiveTVPage() {
   const { channels, m3uUrl } = usePlaylistStore()
   const { play } = usePlayerStore()
-  const { programs, loadFromDB } = useEpgStore()
+  const { programs, loadFromDB, resolveByName } = useEpgStore()
   const [search, setSearch] = useState('')
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
   const { live: excludedLive } = useActiveExclusions()
@@ -173,6 +181,7 @@ export function LiveTVPage() {
     () => channels.filter((c) => c.type === 'live' && !excludedLive.has(c.groupTitle)),
     [channels, excludedLive]
   )
+
 
   const groups = useMemo(() => {
     const seen = new Set<string>()
@@ -244,14 +253,17 @@ export function LiveTVPage() {
 
         {/* Channel rows */}
         <div className="flex flex-col gap-1.5">
-          {filtered.map((ch) => (
-            <ChannelRow
-              key={ch.id}
-              channel={ch}
-              programs={ch.tvgId ? (programs.get(ch.tvgId) ?? []) : []}
-              onPlay={() => play(ch)}
-            />
-          ))}
+          {filtered.map((ch) => {
+            const epgId = ch.tvgId || resolveByName(ch.name) || ''
+            return (
+              <ChannelRow
+                key={ch.id}
+                channel={ch}
+                programs={epgId ? (programs.get(epgId) ?? []) : []}
+                onPlay={() => play(ch)}
+              />
+            )
+          })}
         </div>
       </div>
     </div>
