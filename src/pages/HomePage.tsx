@@ -2,15 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useNavigate } from 'react-router-dom'
 import { normalizeShowKey } from '@/lib/utils'
-import { Play, Film, Tv, Radio, Settings, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { Play, Film, Tv, Radio, Settings, ChevronLeft, ChevronRight, X, Bookmark } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
-import { useExclusionsStore } from '@/stores/exclusionsStore'
-import { db, clearProgress } from '@/services/db'
+import { useProfileStore } from '@/stores/profileStore'
+import { useActiveExclusions } from '@/hooks/useActiveExclusions'
+import { db, clearProgress, addToWatchLater, removeFromWatchLater } from '@/services/db'
+import { deleteRemoteProgress, pushWatchLater, deleteRemoteWatchLater } from '@/services/sync'
 import { MovieCard } from '@/components/movies/MovieCard'
 import { Poster } from '@/components/ui/Poster'
 import { ProgressRing } from '@/components/ui/ProgressRing'
-import type { Channel, WatchProgress } from '@/types'
+import type { Channel, WatchProgress, WatchLater } from '@/types'
 import { formatTime } from '@/lib/time'
 
 function ContinueCard({ channel, progress, onClick, onRemove }: { channel: Channel; progress: WatchProgress; onClick: () => void; onRemove: () => void }) {
@@ -141,35 +143,83 @@ export function HomePage() {
   const navigate = useNavigate()
   const { channels, loaded, m3uUrl } = usePlaylistStore()
   const { play } = usePlayerStore()
+  const { activeProfileId } = useProfileStore()
 
-  const { excluded } = useExclusionsStore()
+  const excluded = useActiveExclusions()
   const movies = useMemo(() => channels.filter((c) => c.type === 'movie' && !excluded.movie.has(c.groupTitle)), [channels, excluded.movie])
   const series = useMemo(() => channels.filter((c) => c.type === 'series' && !excluded.series.has(c.groupTitle)), [channels, excluded.series])
   const live = useMemo(() => channels.filter((c) => c.type === 'live' && !excluded.live.has(c.groupTitle)), [channels, excluded.live])
 
-  const recentProgress = useLiveQuery(() =>
-    db.watchProgress
-      .orderBy('lastWatched')
-      .reverse()
-      .limit(20)
-      .toArray()
-  )
+  const recentProgress = useLiveQuery(async () => {
+    if (!activeProfileId) return []
+    const all = await db.watchProgress.where('profileId').equals(activeProfileId).toArray()
+    return all.sort((a, b) => b.lastWatched - a.lastWatched).slice(0, 20)
+  }, [activeProfileId])
 
   const progressMap = useLiveQuery(async () => {
-    const ids = channels.slice(0, 500).map((c) => c.id)
-    const rows = await db.watchProgress.where('id').anyOf(ids).toArray()
-    return Object.fromEntries(rows.map((r) => [r.id, r]))
-  }, [channels])
+    if (!activeProfileId) return {}
+    const profileIds = channels.slice(0, 500).map((c) => `${activeProfileId}:${c.id}`)
+    const rows = await db.watchProgress.where('id').anyOf(profileIds).toArray()
+    return Object.fromEntries(rows.map((r) => [r.channelId, r]))
+  }, [channels, activeProfileId])
 
   const continueWatching = useMemo(() => {
     if (!recentProgress || !channels.length) return []
     const chanById = new Map(channels.map((c) => [c.id, c]))
     return recentProgress
       .filter((p) => !p.completed && p.position > 10)
-      .map((p) => ({ progress: p, channel: chanById.get(p.id) }))
+      .map((p) => ({ progress: p, channel: chanById.get(p.channelId) }))
       .filter((x): x is { progress: WatchProgress; channel: Channel } => x.channel !== undefined)
       .slice(0, 12)
   }, [recentProgress, channels])
+
+  const watchLaterEntries = useLiveQuery(async () => {
+    if (!activeProfileId) return []
+    return db.watchLater.where('profileId').equals(activeProfileId).toArray()
+      .then((rows) => rows.sort((a, b) => b.addedAt - a.addedAt))
+  }, [activeProfileId])
+
+  const watchLaterSet = useMemo(
+    () => new Set(watchLaterEntries?.map((e) => e.contentId) ?? []),
+    [watchLaterEntries]
+  )
+
+  const watchLaterResolved = useMemo(() => {
+    if (!watchLaterEntries || !channels.length) return []
+    const chanById = new Map(channels.map((c) => [c.id, c]))
+    // Build a map of normalizedShowKey -> representative channel for series
+    const showRepMap = new Map<string, Channel>()
+    for (const ch of channels) {
+      if (ch.type === 'series' && ch.showName) {
+        const key = normalizeShowKey(ch.showName)
+        if (!showRepMap.has(key)) showRepMap.set(key, ch)
+      }
+    }
+    return watchLaterEntries
+      .map((entry): { entry: WatchLater; channel: Channel } | null => {
+        if (entry.kind === 'movie') {
+          const ch = chanById.get(entry.contentId)
+          return ch ? { entry, channel: ch } : null
+        } else {
+          const ch = showRepMap.get(entry.contentId)
+          return ch ? { entry, channel: ch } : null
+        }
+      })
+      .filter((x): x is { entry: WatchLater; channel: Channel } => x !== null)
+      .slice(0, 12)
+  }, [watchLaterEntries, channels])
+
+  const toggleWatchLater = async (contentId: string, kind: 'movie' | 'series', e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!activeProfileId) return
+    if (watchLaterSet.has(contentId)) {
+      await removeFromWatchLater(activeProfileId, contentId)
+      deleteRemoteWatchLater(activeProfileId, contentId)
+    } else {
+      const entry = await addToWatchLater(activeProfileId, contentId, kind)
+      pushWatchLater(entry)
+    }
+  }
 
   const recentMovies = useMemo(() => movies.slice(0, 14), [movies])
 
@@ -240,6 +290,60 @@ export function HomePage() {
         ))}
       </div>
 
+      {/* Watch Later */}
+      {watchLaterResolved.length > 0 && (
+        <section className="mb-10">
+          <SectionHeader title="Watch Later" />
+          <ScrollableRow>
+            {watchLaterResolved.map(({ entry, channel }) => {
+              const showKey = entry.kind === 'series' ? normalizeShowKey(channel.showName ?? channel.name) : null
+              return (
+                <div key={entry.id} className="group relative flex-shrink-0 w-44 animate-fade-in">
+                  <button
+                    onClick={() => {
+                      if (entry.kind === 'movie') { navigate(`/movies?playing=${channel.id}`); play(channel) }
+                      else navigate(`/series?show=${encodeURIComponent(showKey!)}`)
+                    }}
+                    className="block w-full text-left"
+                  >
+                    <div className="relative w-full aspect-[2/3] rounded-lg overflow-hidden bg-[#1a1a1a] ring-1 ring-white/5 group-hover:ring-accent-600/50 transition-all group-hover:scale-[1.03] group-hover:shadow-xl group-hover:shadow-black/60">
+                      <Poster src={channel.logo} alt={channel.name} type={channel.type} className="w-full h-full" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center ring-2 ring-white/30">
+                          <Play size={16} fill="white" className="text-white ml-0.5" />
+                        </div>
+                      </div>
+                      <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-accent-600/80 flex items-center justify-center">
+                        <Bookmark size={11} fill="white" className="text-white" />
+                      </div>
+                    </div>
+                    <div className="mt-2 px-0.5">
+                      <p className="text-sm text-white font-medium line-clamp-1">
+                        {entry.kind === 'movie' ? (channel.movieTitle ?? channel.name) : (channel.showName ?? channel.name)}
+                      </p>
+                      <p className="text-xs text-neutral-500 mt-0.5 capitalize">{entry.kind}</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation()
+                      if (!activeProfileId) return
+                      await removeFromWatchLater(activeProfileId, entry.contentId)
+                      deleteRemoteWatchLater(activeProfileId, entry.contentId)
+                    }}
+                    aria-label="Remove from Watch Later"
+                    className="absolute top-2 left-2 w-7 h-7 rounded-full bg-black/70 hover:bg-red-600/90 backdrop-blur-sm flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all ring-1 ring-white/20"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              )
+            })}
+          </ScrollableRow>
+        </section>
+      )}
+
       {/* Continue Watching */}
       {continueWatching.length > 0 && (
         <section className="mb-10">
@@ -255,7 +359,12 @@ export function HomePage() {
                   else if (channel.type === 'series') navigate(`/series?show=${encodeURIComponent(normalizeShowKey(channel.showName ?? channel.name))}&playing=${channel.id}`)
                   play(channel)
                 }}
-                onRemove={() => { clearProgress(channel.id) }}
+                onRemove={() => {
+                  if (activeProfileId) {
+                    clearProgress(activeProfileId, channel.id)
+                    deleteRemoteProgress(activeProfileId, channel.id)
+                  }
+                }}
               />
             ))}
           </ScrollableRow>
@@ -268,7 +377,11 @@ export function HomePage() {
           <SectionHeader title="Recently Added Movies" to="/movies" />
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4">
             {recentMovies.map((m) => (
-              <MovieCard key={m.id} channel={m} progress={progressMap?.[m.id]} onClick={() => { navigate(`/movies?playing=${m.id}`); play(m) }} />
+              <MovieCard key={m.id} channel={m} progress={progressMap?.[m.id]}
+                isWatchLater={watchLaterSet.has(m.id)}
+                onClick={() => { navigate(`/movies?playing=${m.id}`); play(m) }}
+                onWatchLater={(e) => toggleWatchLater(m.id, 'movie', e)}
+              />
             ))}
           </div>
         </section>
@@ -279,9 +392,16 @@ export function HomePage() {
         <section className="mb-10">
           <SectionHeader title="Recently Added TV Shows" to="/series" />
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4">
-            {recentShows.map((ch) => (
-              <MovieCard key={ch.id} channel={ch} progress={progressMap?.[ch.id]} onClick={() => { navigate(`/series?show=${encodeURIComponent(normalizeShowKey(ch.showName ?? ch.name))}&playing=${ch.id}`); play(ch) }} />
-            ))}
+            {recentShows.map((ch) => {
+              const showKey = normalizeShowKey(ch.showName ?? ch.name)
+              return (
+                <MovieCard key={ch.id} channel={ch} progress={progressMap?.[ch.id]}
+                  isWatchLater={watchLaterSet.has(showKey)}
+                  onClick={() => { navigate(`/series?show=${encodeURIComponent(showKey)}&playing=${ch.id}`); play(ch) }}
+                  onWatchLater={(e) => toggleWatchLater(showKey, 'series', e)}
+                />
+              )
+            })}
           </div>
         </section>
       )}

@@ -1,15 +1,26 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Film, Tv, Radio, Settings } from 'lucide-react'
+import { Home, Film, Tv, Radio, Settings, Bookmark } from 'lucide-react'
+import { PROFILES, getProfile, useProfileStore } from '@/stores/profileStore'
 
-const NAV = [
-  { to: '/',        icon: Home,     label: 'Home' },
-  { to: '/movies',  icon: Film,     label: 'Movies' },
-  { to: '/series',  icon: Tv,       label: 'TV Shows' },
-  { to: '/live',    icon: Radio,    label: 'Live TV' },
-  { to: '/settings',icon: Settings, label: 'Settings' },
-]
+const NAV_MAIN = [
+  { to: '/',            icon: Home,     label: 'Home',        minRole: 'kid'    },
+  { to: '/movies',      icon: Film,     label: 'Movies',      minRole: 'kid'    },
+  { to: '/series',      icon: Tv,       label: 'TV Shows',    minRole: 'kid'    },
+  { to: '/live',        icon: Radio,    label: 'Live TV',     minRole: 'kid'    },
+  { to: '/watchlater',  icon: Bookmark, label: 'Watch Later', minRole: 'kid'    },
+] as const
+
+const NAV_BOTTOM = [
+  { to: '/settings',    icon: Settings, label: 'Settings',    minRole: 'parent' },
+] as const
+
+const ROLE_RANK: Record<string, number> = { kid: 0, parent: 1, admin: 2 }
 
 export function Sidebar() {
+  const { activeProfileId, openPicker } = useProfileStore()
+  const activeProfile = PROFILES.find((p) => p.id === activeProfileId)
+  const role = getProfile(activeProfileId)?.role ?? 'kid'
+
   return (
     <aside className="flex flex-col w-56 shrink-0 border-r border-white/5 bg-[#0d0d0d] h-full">
       {/* Logo */}
@@ -24,7 +35,7 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 flex flex-col gap-0.5">
-        {NAV.map(({ to, icon: Icon, label }) => (
+        {NAV_MAIN.filter((item) => (ROLE_RANK[role] ?? 0) >= (ROLE_RANK[item.minRole] ?? 0)).map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}
@@ -43,9 +54,55 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* Footer */}
-      <div className="px-5 py-4 border-t border-white/5">
-        <p className="text-xs text-neutral-600">Private use only</p>
+      {/* Profile section */}
+      <div className="px-3 py-3 border-t border-white/5">
+        <button
+          onClick={openPicker}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors group"
+        >
+          {activeProfile ? (
+            <>
+              <div
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0"
+                style={{ backgroundColor: activeProfile.color }}
+              >
+                {activeProfile.name[0]}
+              </div>
+              <div className="flex-1 text-left min-w-0">
+                <p className="text-sm text-white font-medium truncate">{activeProfile.name}</p>
+                <p className="text-xs text-neutral-600 group-hover:text-neutral-500 transition-colors">Switch profile</p>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="w-7 h-7 rounded-lg bg-neutral-700 flex items-center justify-center shrink-0">
+                <span className="text-neutral-400 text-xs">?</span>
+              </div>
+              <span className="text-sm text-neutral-400">Select profile</span>
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Settings + footer */}
+      <div className="px-3 pb-3 border-t border-white/5 pt-2">
+        {NAV_BOTTOM.filter((item) => (ROLE_RANK[role] ?? 0) >= (ROLE_RANK[item.minRole] ?? 0)).map(({ to, icon: Icon, label }) => (
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                isActive
+                  ? 'bg-accent-600/20 text-accent-400 font-medium'
+                  : 'text-neutral-400 hover:text-white hover:bg-white/5'
+              }`
+            }
+          >
+            <Icon size={17} strokeWidth={1.8} />
+            {label}
+          </NavLink>
+        ))}
+        <p className="text-xs text-neutral-600 px-3 pt-2">Private use only</p>
       </div>
     </aside>
   )

@@ -3,6 +3,8 @@ import type Hls from 'hls.js'
 import { useNavigate } from 'react-router-dom'
 import { usePlayerStore } from '@/stores/playerStore'
 import { saveProgress, getProgress, clearProgress } from '@/services/db'
+import { pushProgress, deleteRemoteProgress } from '@/services/sync'
+import { useProfileStore } from '@/stores/profileStore'
 import {
   isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, probeMedia, pickProxyMode,
   subtitleVttUrl, audioStreamLabel, subtitleStreamLabel,
@@ -59,6 +61,7 @@ type VideoWithAudioTracks = HTMLVideoElement & {
 export function VideoPlayer() {
   const navigate = useNavigate()
   const { current, close } = usePlayerStore()
+  const activeProfileId = useProfileStore((s) => s.activeProfileId)
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -306,12 +309,16 @@ export function VideoPlayer() {
         return
       }
 
-      const saved = await getProgress(current.id)
+      const profileId = useProfileStore.getState().activeProfileId
+      const saved = profileId ? await getProgress(profileId, current.id) : undefined
       const startTime = saved && !saved.completed ? saved.position : 0
       // Replay of a finished item: drop the completed flag right now so the
       // "seen" check disappears immediately. Next save tick (5 s in) will
       // record fresh position/duration.
-      if (saved?.completed) await clearProgress(current.id)
+      if (saved?.completed && profileId) {
+        clearProgress(profileId, current.id)
+        deleteRemoteProgress(profileId, current.id)
+      }
 
       const isVideoFile = current.type === 'movie' || current.type === 'series' || VIDEO_EXT.test(current.url)
 
@@ -434,7 +441,7 @@ export function VideoPlayer() {
     }
 
     load()
-  }, [current, destroyHls, detachSubtitleTrack])
+  }, [current, activeProfileId, destroyHls, detachSubtitleTrack])
 
   // Progress saving (skipped for live — there's no resume point on a live feed)
   useEffect(() => {
@@ -445,8 +452,11 @@ export function VideoPlayer() {
     saveTimerRef.current = setInterval(() => {
       const video = videoRef.current
       if (video && video.currentTime > 0) {
+        const profileId = useProfileStore.getState().activeProfileId
+        if (!profileId) return
         const realTime = playbackOffsetRef.current + video.currentTime
-        saveProgress(current.id, realTime, video.duration || 0)
+        saveProgress(profileId, current.id, realTime, video.duration || 0)
+          .then((entry) => pushProgress(entry))
       }
     }, SAVE_INTERVAL_MS)
     return () => {
@@ -481,7 +491,11 @@ export function VideoPlayer() {
       if (!current || current.type === 'live') return
       const localDur = Number.isFinite(video.duration) ? video.duration : 0
       const realDur = transcodedDurationRef.current ?? (playbackOffsetRef.current + localDur)
-      if (realDur > 0) saveProgress(current.id, realDur, realDur)
+      const profileId = useProfileStore.getState().activeProfileId
+      if (realDur > 0 && profileId) {
+        saveProgress(profileId, current.id, realDur, realDur)
+          .then((entry) => pushProgress(entry))
+      }
     }
 
     const syncNativeAudioTracks = () => {

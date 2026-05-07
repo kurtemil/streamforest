@@ -1,0 +1,8 @@
+name = "streamforest"
+compatibility_date = "2024-09-23"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "streamforest-profiles"
+database_id = "1b607c87-bab2-485b-94c8-5722f9f8f9a6"

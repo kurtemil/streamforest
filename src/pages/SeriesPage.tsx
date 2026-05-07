@@ -1,11 +1,13 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Tv, ChevronRight, ChevronDown, Star, Play, Check } from 'lucide-react'
+import { Tv, ChevronRight, ChevronDown, Star, Play, Check, Bookmark } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
-import { useExclusionsStore } from '@/stores/exclusionsStore'
-import { db, toggleFavorite } from '@/services/db'
+import { useProfileStore } from '@/stores/profileStore'
+import { useActiveExclusions } from '@/hooks/useActiveExclusions'
+import { db, toggleFavorite, addToWatchLater, removeFromWatchLater } from '@/services/db'
+import { pushWatchLater, deleteRemoteWatchLater } from '@/services/sync'
 import { Poster } from '@/components/ui/Poster'
 import { SearchBar } from '@/components/ui/SearchBar'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -155,8 +157,9 @@ function EpisodeRow({ ep, progress, onClick }: {
 
 // ─── Show card ─────────────────────────────────────────────────────────────────
 
-function ShowCard({ showName, poster, seasons, episodes, onClick }: {
-  showName: string; poster: string; seasons: number; episodes: number; onClick: () => void
+function ShowCard({ showName, poster, seasons, episodes, isWatchLater, onClick, onWatchLater }: {
+  showName: string; poster: string; seasons: number; episodes: number
+  isWatchLater?: boolean; onClick: () => void; onWatchLater?: (e: React.MouseEvent) => void
 }) {
   return (
     <button onClick={onClick} className="group text-left animate-fade-in">
@@ -168,6 +171,19 @@ function ShowCard({ showName, poster, seasons, episodes, onClick }: {
             <Play size={18} fill="white" className="text-white ml-0.5" />
           </div>
         </div>
+        {onWatchLater && (
+          <button
+            onClick={onWatchLater}
+            title={isWatchLater ? 'Remove from Watch Later' : 'Add to Watch Later'}
+            className={`absolute top-2 left-2 w-7 h-7 rounded-full backdrop-blur-sm flex items-center justify-center ring-1 transition-all z-10 ${
+              isWatchLater
+                ? 'bg-accent-600/90 ring-accent-500/60 opacity-100'
+                : 'bg-black/70 ring-white/20 opacity-0 group-hover:opacity-100 hover:bg-accent-600/80'
+            }`}
+          >
+            <Bookmark size={13} fill={isWatchLater ? 'white' : 'none'} className="text-white" />
+          </button>
+        )}
         <div className="absolute bottom-0 left-0 right-0 p-2">
           <p className="text-xs text-neutral-300">{seasons}S · {episodes}ep</p>
         </div>
@@ -191,7 +207,26 @@ export function SeriesPage() {
   useEffect(() => { setSelectedSeason(null) }, [selectedShow])
   const [showFavs, setShowFavs] = useState(false)
 
-  const excludedSeries = useExclusionsStore((s) => s.excluded.series)
+  const { activeProfileId } = useProfileStore()
+  const { series: excludedSeries } = useActiveExclusions()
+
+  const watchLaterIds = useLiveQuery(async () => {
+    if (!activeProfileId) return new Set<string>()
+    const entries = await db.watchLater.where('profileId').equals(activeProfileId).toArray()
+    return new Set(entries.map((e) => e.contentId))
+  }, [activeProfileId])
+
+  const toggleWatchLater = async (e: React.MouseEvent, showKey: string) => {
+    e.stopPropagation()
+    if (!activeProfileId) return
+    if (watchLaterIds?.has(showKey)) {
+      await removeFromWatchLater(activeProfileId, showKey)
+      deleteRemoteWatchLater(activeProfileId, showKey)
+    } else {
+      const entry = await addToWatchLater(activeProfileId, showKey, 'series')
+      pushWatchLater(entry)
+    }
+  }
   const seriesChannels = useMemo(
     () => channels.filter((c) => c.type === 'series' && !excludedSeries.has(c.groupTitle)),
     [channels, excludedSeries]
@@ -212,13 +247,14 @@ export function SeriesPage() {
 
   // Only load progress for the currently open show
   const progressRecords = useLiveQuery(async () => {
-    if (!selectedShow) return {}
+    if (!selectedShow || !activeProfileId) return {}
     const showData = showMap.get(selectedShow)
     if (!showData) return {}
     const ids = Array.from(showData.seasons.values()).flat().map((c) => c.id)
-    const rows = await db.watchProgress.where('id').anyOf(ids).toArray()
-    return Object.fromEntries(rows.map((r) => [r.id, r]))
-  }, [selectedShow, showMap])
+    const profileIds = ids.map((id) => `${activeProfileId}:${id}`)
+    const rows = await db.watchProgress.where('id').anyOf(profileIds).toArray()
+    return Object.fromEntries(rows.map((r) => [r.channelId, r]))
+  }, [selectedShow, showMap, activeProfileId])
 
   const allShowNames = useMemo(() => Array.from(showMap.keys()), [showMap])
 
@@ -263,7 +299,7 @@ export function SeriesPage() {
         .sort((a, b) => b.lastWatched - a.lastWatched)[0]
       if (lastRecord) {
         for (const [s, eps] of currentShowData.seasons.entries()) {
-          if (eps.some((e) => e.id === lastRecord.id)) return s
+          if (eps.some((e) => e.id === lastRecord.channelId)) return s
         }
       }
     }
@@ -277,6 +313,7 @@ export function SeriesPage() {
     if (!showData) return null
     const { seasons, logo } = showData
     const isFav = favIds.has(selectedShow)
+    const isWL = watchLaterIds?.has(selectedShow) ?? false
     const totalEps = Array.from(seasons.values()).reduce((a, b) => a + b.length, 0)
 
     const episodes = seasons.get(autoSeason) ?? []
@@ -312,6 +349,17 @@ export function SeriesPage() {
               >
                 <Star size={12} fill={isFav ? 'currentColor' : 'none'} />
                 {isFav ? 'Favorited' : 'Add to Favorites'}
+              </button>
+              <button
+                onClick={(e) => toggleWatchLater(e, selectedShow)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                  isWL
+                    ? 'bg-accent-600/30 text-accent-400 ring-1 ring-accent-600/50'
+                    : 'bg-white/5 text-neutral-400 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Bookmark size={12} fill={isWL ? 'currentColor' : 'none'} />
+                {isWL ? 'In Watch Later' : 'Watch Later'}
               </button>
             </div>
           </div>
@@ -412,7 +460,9 @@ export function SeriesPage() {
                   poster={data.logo}
                   seasons={data.seasons.size}
                   episodes={allEps.length}
+                  isWatchLater={watchLaterIds?.has(name)}
                   onClick={() => navigate(`/series?show=${encodeURIComponent(name)}`)}
+                  onWatchLater={(e) => toggleWatchLater(e, name)}
                 />
               )
             })}

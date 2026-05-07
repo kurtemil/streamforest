@@ -19,7 +19,9 @@ export interface Channel {
 }
 
 export interface WatchProgress {
-  id: string
+  id: string        // "${profileId}:${channelId}"
+  profileId: string
+  channelId: string
   position: number
   duration: number
   lastWatched: number
@@ -29,6 +31,14 @@ export interface WatchProgress {
 export interface Favorite {
   id: string
   kind: ContentType
+  addedAt: number
+}
+
+export interface WatchLater {
+  id: string        // "${profileId}:${contentId}"
+  profileId: string
+  contentId: string // channel.id for movies, normalizedShowKey for series
+  kind: 'movie' | 'series'
   addedAt: number
 }
 

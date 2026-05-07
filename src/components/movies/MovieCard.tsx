@@ -1,4 +1,4 @@
-import { Play, Check } from 'lucide-react'
+import { Play, Check, Bookmark } from 'lucide-react'
 import { Poster } from '@/components/ui/Poster'
 import { ProgressRing } from '@/components/ui/ProgressRing'
 import type { Channel, WatchProgress } from '@/types'
@@ -6,47 +6,56 @@ import type { Channel, WatchProgress } from '@/types'
 interface Props {
   channel: Channel
   progress?: WatchProgress
+  isWatchLater?: boolean
   onClick: () => void
+  onWatchLater?: (e: React.MouseEvent) => void
 }
 
-export function MovieCard({ channel, progress, onClick }: Props) {
+export function MovieCard({ channel, progress, isWatchLater, onClick, onWatchLater }: Props) {
   const pct = progress && progress.duration > 0
     ? Math.round((progress.position / progress.duration) * 100)
     : 0
 
   return (
-    <button
-      onClick={onClick}
-      className="group text-left animate-fade-in"
-    >
+    <button onClick={onClick} className="group text-left animate-fade-in">
       <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-[#1a1a1a] ring-1 ring-white/5 group-hover:ring-accent-600/50 transition-all duration-200 group-hover:scale-[1.02] group-hover:shadow-xl group-hover:shadow-black/60">
         <Poster src={channel.logo} alt={channel.name} type="movie" className="w-full h-full" />
 
-        {/* Gradient overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
 
-        {/* Play button */}
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
           <div className="w-11 h-11 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center ring-2 ring-white/30">
             <Play size={18} fill="white" className="text-white ml-0.5" />
           </div>
         </div>
 
-        {/* Completed badge */}
+        {/* Watch Later toggle */}
+        {onWatchLater && (
+          <button
+            onClick={onWatchLater}
+            title={isWatchLater ? 'Remove from Watch Later' : 'Add to Watch Later'}
+            className={`absolute top-2 left-2 w-7 h-7 rounded-full backdrop-blur-sm flex items-center justify-center ring-1 transition-all z-10 ${
+              isWatchLater
+                ? 'bg-accent-600/90 ring-accent-500/60 opacity-100'
+                : 'bg-black/70 ring-white/20 opacity-0 group-hover:opacity-100 hover:bg-accent-600/80'
+            }`}
+          >
+            <Bookmark size={13} fill={isWatchLater ? 'white' : 'none'} className="text-white" />
+          </button>
+        )}
+
         {progress?.completed && (
           <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-accent-600 flex items-center justify-center">
             <Check size={12} className="text-white" />
           </div>
         )}
 
-        {/* Progress ring */}
         {!progress?.completed && pct > 0 && (
           <div className="absolute bottom-2 right-2">
             <ProgressRing pct={pct} size={30} stroke={2.5} />
           </div>
         )}
 
-        {/* Progress bar */}
         {!progress?.completed && pct > 0 && (
           <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/10">
             <div className="h-full bg-accent-500" style={{ width: `${pct}%` }} />

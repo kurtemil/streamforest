@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { Radio } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
-import { useExclusionsStore } from '@/stores/exclusionsStore'
+import { useActiveExclusions } from '@/hooks/useActiveExclusions'
 import { SearchBar } from '@/components/ui/SearchBar'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { GroupSidebar } from '@/components/ui/GroupSidebar'
@@ -15,7 +15,7 @@ export function LiveTVPage() {
   const [search, setSearch] = useState('')
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
 
-  const excludedLive = useExclusionsStore((s) => s.excluded.live)
+  const { live: excludedLive } = useActiveExclusions()
   const live = useMemo(
     () => channels.filter((c) => c.type === 'live' && !excludedLive.has(c.groupTitle)),
     [channels, excludedLive]

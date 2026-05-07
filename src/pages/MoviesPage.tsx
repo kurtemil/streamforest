@@ -1,11 +1,13 @@
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, type MouseEvent } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Film } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
-import { useExclusionsStore } from '@/stores/exclusionsStore'
-import { db } from '@/services/db'
+import { useProfileStore } from '@/stores/profileStore'
+import { useActiveExclusions } from '@/hooks/useActiveExclusions'
+import { db, addToWatchLater, removeFromWatchLater } from '@/services/db'
+import { pushWatchLater, deleteRemoteWatchLater } from '@/services/sync'
 import { MovieCard } from '@/components/movies/MovieCard'
 import { SearchBar } from '@/components/ui/SearchBar'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -24,7 +26,8 @@ export function MoviesPage() {
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
   const [page, setPage] = useState(1)
 
-  const excludedMovies = useExclusionsStore((s) => s.excluded.movie)
+  const { activeProfileId } = useProfileStore()
+  const { movie: excludedMovies } = useActiveExclusions()
   const movies = useMemo(
     () => channels.filter((c) => c.type === 'movie' && !excludedMovies.has(c.groupTitle)),
     [channels, excludedMovies]
@@ -63,10 +66,29 @@ export function MoviesPage() {
   const visible = useMemo(() => filtered.slice(0, page * PAGE_SIZE), [filtered, page])
 
   const progressMap = useLiveQuery(async () => {
-    const ids = visible.map((m) => m.id)
-    const rows = await db.watchProgress.where('id').anyOf(ids).toArray()
-    return Object.fromEntries(rows.map((r) => [r.id, r]))
-  }, [visible])
+    if (!activeProfileId) return {}
+    const profileIds = visible.map((m) => `${activeProfileId}:${m.id}`)
+    const rows = await db.watchProgress.where('id').anyOf(profileIds).toArray()
+    return Object.fromEntries(rows.map((r) => [r.channelId, r]))
+  }, [visible, activeProfileId])
+
+  const watchLaterSet = useLiveQuery(async () => {
+    if (!activeProfileId) return new Set<string>()
+    const entries = await db.watchLater.where('profileId').equals(activeProfileId).toArray()
+    return new Set(entries.map((e) => e.contentId))
+  }, [activeProfileId])
+
+  const toggleWatchLater = async (channelId: string, e: MouseEvent) => {
+    e.stopPropagation()
+    if (!activeProfileId) return
+    if (watchLaterSet?.has(channelId)) {
+      await removeFromWatchLater(activeProfileId, channelId)
+      deleteRemoteWatchLater(activeProfileId, channelId)
+    } else {
+      const entry = await addToWatchLater(activeProfileId, channelId, 'movie')
+      pushWatchLater(entry)
+    }
+  }
 
   const handleGroupSelect = (g: string | null) => {
     setSelectedGroup(g)
@@ -121,7 +143,11 @@ export function MoviesPage() {
           <>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
               {visible.map((m) => (
-                <MovieCard key={m.id} channel={m} progress={progressMap?.[m.id]} onClick={() => { navigate(`/movies?playing=${m.id}`); play(m) }} />
+                <MovieCard key={m.id} channel={m} progress={progressMap?.[m.id]}
+                  isWatchLater={watchLaterSet?.has(m.id)}
+                  onClick={() => { navigate(`/movies?playing=${m.id}`); play(m) }}
+                  onWatchLater={(e) => toggleWatchLater(m.id, e)}
+                />
               ))}
             </div>
             {visible.length < filtered.length && (

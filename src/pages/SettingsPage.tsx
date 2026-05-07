@@ -1,9 +1,11 @@
 import { useState, useMemo } from 'react'
-import { Settings, RefreshCw, Trash2, Check, AlertCircle, Download, Database, ChevronDown, EyeOff } from 'lucide-react'
+import { Settings, RefreshCw, Trash2, Check, AlertCircle, Download, Database, ChevronDown, EyeOff, Shield, Users } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { getPlaylistMeta, clearPlaylist } from '@/services/db'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useExclusionsStore, type ContentType } from '@/stores/exclusionsStore'
+import { useProfileStore, getProfile, PROFILES } from '@/stores/profileStore'
+import { useKidRestrictions } from '@/stores/kidRestrictionsStore'
 
 function formatBytes(bytes: number) {
   if (bytes === 0) return '0 B'
@@ -20,7 +22,7 @@ function formatDate(ts: number) {
 function ProgressBar({ label, icon, pct, indeterminate, detail }: {
   label: string
   icon: React.ReactNode
-  pct: number | null       // null = not started, -1 = done
+  pct: number | null
   indeterminate?: boolean
   detail?: string
 }) {
@@ -58,13 +60,7 @@ function ProgressBar({ label, icon, pct, indeterminate, detail }: {
 }
 
 function GroupFilterPanel({
-  label,
-  type,
-  groups,
-  excluded,
-  toggle,
-  setAll,
-  cleanTitle = (t: string) => t,
+  label, type, groups, excluded, toggle, setAll, cleanTitle = (t) => t,
 }: {
   label: string
   type: ContentType
@@ -159,10 +155,36 @@ function GroupFilterPanel({
   )
 }
 
+const KID_PROFILES = PROFILES.filter((p) => p.role === 'kid')
+
+function KidGroupPanel({
+  kidProfileId, movieGroups, seriesGroups, liveGroups,
+}: {
+  kidProfileId: string
+  movieGroups: { title: string; count: number }[]
+  seriesGroups: { title: string; count: number }[]
+  liveGroups: { title: string; count: number }[]
+}) {
+  const { excluded, toggle, setAll } = useKidRestrictions(kidProfileId)
+  return (
+    <div className="flex flex-col gap-3">
+      <GroupFilterPanel label="Movies"   type="movie"  groups={movieGroups}  excluded={excluded.movie}  toggle={toggle} setAll={setAll} cleanTitle={(t) => t.replace(/^VOD:\s*/i, '')} />
+      <GroupFilterPanel label="TV Shows" type="series" groups={seriesGroups} excluded={excluded.series} toggle={toggle} setAll={setAll} cleanTitle={(t) => t.replace(/^Series:\s*/i, '')} />
+      <GroupFilterPanel label="Live TV"  type="live"   groups={liveGroups}   excluded={excluded.live}   toggle={toggle} setAll={setAll} />
+    </div>
+  )
+}
+
 export function SettingsPage() {
   const { m3uUrl, setM3uUrl, refresh, fetching, progress, error, loadFromDB, channels } = usePlaylistStore()
   const { excluded, toggle, setAll } = useExclusionsStore()
   const [urlInput, setUrlInput] = useState(m3uUrl)
+  const [selectedKid, setSelectedKid] = useState<string>(KID_PROFILES[0]?.id ?? '')
+
+  const activeProfileId = useProfileStore((s) => s.activeProfileId)
+  const role = getProfile(activeProfileId)?.role ?? 'kid'
+  const isAdmin = role === 'admin'
+  const canManage = role === 'admin' || role === 'parent'
 
   const { movieGroups, seriesGroups, liveGroups } = useMemo(() => {
     const mc = new Map<string, number>()
@@ -176,9 +198,9 @@ export function SettingsPage() {
       Array.from(m.entries()).sort((a, b) => b[1] - a[1]).map(([title, count]) => ({ title, count }))
     return { movieGroups: sorted(mc), seriesGroups: sorted(sc), liveGroups: sorted(lc) }
   }, [channels])
+
   const [saved, setSaved] = useState(false)
   const [clearing, setClearing] = useState(false)
-
   const meta = useLiveQuery(() => getPlaylistMeta())
 
   const handleSave = () => {
@@ -195,14 +217,12 @@ export function SettingsPage() {
     setClearing(false)
   }
 
-  // Download bar: pct from bytes, null before start, -1 when done
   const dlPct = !progress ? null
     : progress.phase === 'done' ? -1
     : progress.phase === 'saving' ? -1
     : progress.dlTotal > 0 ? Math.round((progress.dlBytes / progress.dlTotal) * 100)
-    : null  // indeterminate if no Content-Length
+    : null
 
-  // Save bar: pct from savePct field, null before saving phase
   const savePct = !progress ? null
     : progress.phase === 'done' ? -1
     : progress.phase === 'saving' ? progress.savePct
@@ -213,6 +233,15 @@ export function SettingsPage() {
     ? progress?.phase === 'saving' ? 'Saving…' : 'Downloading…'
     : meta ? 'Re-download' : 'Download now'
 
+  if (!canManage) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-neutral-600">
+        <Shield size={32} />
+        <p className="text-sm">Settings are restricted to parents and administrators.</p>
+      </div>
+    )
+  }
+
   return (
     <div className="p-6 pb-12 max-w-2xl">
       <div className="flex items-center gap-2.5 mb-8">
@@ -220,37 +249,37 @@ export function SettingsPage() {
         <h1 className="text-2xl font-bold text-white">Settings</h1>
       </div>
 
-      {/* M3U URL */}
-      <section className="mb-8">
-        <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-4">Playlist Source</h2>
-        <div className="bg-[#141414] rounded-xl p-5 flex flex-col gap-4 ring-1 ring-white/5">
-          <div>
-            <label className="block text-sm text-neutral-300 mb-2">M3U URL</label>
-            <input
-              type="url"
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="http://provider.com/get.php?username=…&password=…&type=m3u_plus"
-              className="w-full bg-white/5 border border-white/8 rounded-lg px-3 py-2.5 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-accent-600/60 transition-colors font-mono"
-            />
-            <p className="text-xs text-neutral-600 mt-1.5">Keep this URL private — it contains your credentials.</p>
+      {/* M3U URL — admin only */}
+      {isAdmin && (
+        <section className="mb-8">
+          <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-4">Playlist Source</h2>
+          <div className="bg-[#141414] rounded-xl p-5 flex flex-col gap-4 ring-1 ring-white/5">
+            <div>
+              <label className="block text-sm text-neutral-300 mb-2">M3U URL</label>
+              <input
+                type="url"
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                placeholder="http://provider.com/get.php?username=…&password=…&type=m3u_plus"
+                className="w-full bg-white/5 border border-white/8 rounded-lg px-3 py-2.5 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-accent-600/60 transition-colors font-mono"
+              />
+              <p className="text-xs text-neutral-600 mt-1.5">Keep this URL private — it contains your credentials.</p>
+            </div>
+            <button
+              onClick={handleSave}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors w-fit"
+            >
+              {saved ? <Check size={15} /> : null}
+              {saved ? 'Saved' : 'Save URL'}
+            </button>
           </div>
-          <button
-            onClick={handleSave}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors w-fit"
-          >
-            {saved ? <Check size={15} /> : null}
-            {saved ? 'Saved' : 'Save URL'}
-          </button>
-        </div>
-      </section>
+        </section>
+      )}
 
-      {/* Cached Playlist */}
+      {/* Cached Playlist — admin + parent */}
       <section className="mb-8">
         <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-4">Cached Playlist</h2>
         <div className="bg-[#141414] rounded-xl p-5 flex flex-col gap-5 ring-1 ring-white/5">
-
-          {/* Stats */}
           {meta ? (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
@@ -268,31 +297,21 @@ export function SettingsPage() {
                 <p className="text-xs text-neutral-500 mb-1">Last updated</p>
                 <p className="text-white text-sm font-medium">{formatDate(meta.fetchedAt)}</p>
               </div>
-              <div className="col-span-2">
-                <p className="text-xs text-neutral-500 mb-1">Source</p>
-                <p className="text-neutral-400 text-xs font-mono truncate">{meta.url.slice(0, 50)}…</p>
-              </div>
+              {isAdmin && (
+                <div className="col-span-2">
+                  <p className="text-xs text-neutral-500 mb-1">Source</p>
+                  <p className="text-neutral-400 text-xs font-mono truncate">{meta.url.slice(0, 50)}…</p>
+                </div>
+              )}
             </div>
           ) : (
             <p className="text-neutral-500 text-sm">No playlist cached yet.</p>
           )}
 
-          {/* Progress bars — shown during and after fetch until dismissed */}
           {fetching && (
             <div className="flex flex-col gap-3 p-4 bg-white/3 rounded-lg border border-white/5">
-              <ProgressBar
-                label="Downloading"
-                icon={<Download size={12} />}
-                pct={dlPct}
-                indeterminate={dlIndeterminate}
-                detail={progress ? formatBytes(progress.dlBytes) : undefined}
-              />
-              <ProgressBar
-                label="Saving to device"
-                icon={<Database size={12} />}
-                pct={savePct}
-                indeterminate={false}
-              />
+              <ProgressBar label="Downloading" icon={<Download size={12} />} pct={dlPct} indeterminate={dlIndeterminate} detail={progress ? formatBytes(progress.dlBytes) : undefined} />
+              <ProgressBar label="Saving to device" icon={<Database size={12} />} pct={savePct} indeterminate={false} />
             </div>
           )}
 
@@ -306,13 +325,13 @@ export function SettingsPage() {
           <div className="flex gap-2.5">
             <button
               onClick={refresh}
-              disabled={fetching || !urlInput.trim()}
+              disabled={fetching || !m3uUrl}
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
             >
               <RefreshCw size={14} className={fetching ? 'animate-spin' : ''} />
               {buttonLabel}
             </button>
-            {meta && (
+            {meta && isAdmin && (
               <button
                 onClick={handleClear}
                 disabled={clearing}
@@ -326,39 +345,56 @@ export function SettingsPage() {
         </div>
       </section>
 
-      {/* Hidden Groups */}
+      {/* Hidden Groups — admin + parent */}
       {channels.length > 0 && (
-        <section>
+        <section className="mb-8">
           <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-4">Hidden Groups</h2>
           <p className="text-xs text-neutral-600 mb-4">Groups you hide won't appear anywhere in the app — not in lists, search, or the home screen.</p>
           <div className="flex flex-col gap-3">
-            <GroupFilterPanel
-              label="Movies"
-              type="movie"
-              groups={movieGroups}
-              excluded={excluded.movie}
-              toggle={toggle}
-              setAll={setAll}
-              cleanTitle={(t) => t.replace(/^VOD:\s*/i, '')}
-            />
-            <GroupFilterPanel
-              label="TV Shows"
-              type="series"
-              groups={seriesGroups}
-              excluded={excluded.series}
-              toggle={toggle}
-              setAll={setAll}
-              cleanTitle={(t) => t.replace(/^Series:\s*/i, '')}
-            />
-            <GroupFilterPanel
-              label="Live TV"
-              type="live"
-              groups={liveGroups}
-              excluded={excluded.live}
-              toggle={toggle}
-              setAll={setAll}
-            />
+            <GroupFilterPanel label="Movies"   type="movie"  groups={movieGroups}  excluded={excluded.movie}  toggle={toggle} setAll={setAll} cleanTitle={(t) => t.replace(/^VOD:\s*/i, '')} />
+            <GroupFilterPanel label="TV Shows" type="series" groups={seriesGroups} excluded={excluded.series} toggle={toggle} setAll={setAll} cleanTitle={(t) => t.replace(/^Series:\s*/i, '')} />
+            <GroupFilterPanel label="Live TV"  type="live"   groups={liveGroups}   excluded={excluded.live}   toggle={toggle} setAll={setAll} />
           </div>
+        </section>
+      )}
+
+      {/* Parental Controls — admin + parent */}
+      {channels.length > 0 && (
+        <section>
+          <div className="flex items-center gap-2.5 mb-4">
+            <Users size={16} className="text-neutral-400" />
+            <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider">Parental Controls</h2>
+          </div>
+          <p className="text-xs text-neutral-600 mb-4">Hidden groups apply on top of your global settings for each kid's profile.</p>
+
+          {/* Kid selector */}
+          <div className="flex gap-2 mb-5">
+            {KID_PROFILES.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setSelectedKid(p.id)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  selectedKid === p.id
+                    ? 'text-white ring-1'
+                    : 'text-neutral-400 bg-white/3 hover:bg-white/6'
+                }`}
+                style={selectedKid === p.id ? { backgroundColor: `${p.color}25`, border: `1px solid ${p.color}60` } : undefined}
+              >
+                <div className="w-5 h-5 rounded flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: p.color }}>
+                  {p.name[0]}
+                </div>
+                {p.name}
+              </button>
+            ))}
+          </div>
+
+          <KidGroupPanel
+            key={selectedKid}
+            kidProfileId={selectedKid}
+            movieGroups={movieGroups}
+            seriesGroups={seriesGroups}
+            liveGroups={liveGroups}
+          />
         </section>
       )}
     </div>
