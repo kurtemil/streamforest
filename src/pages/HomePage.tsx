@@ -5,6 +5,7 @@ import { normalizeShowKey } from '@/lib/utils'
 import { Play, Film, Tv, Radio, Settings, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
+import { useExclusionsStore } from '@/stores/exclusionsStore'
 import { db, clearProgress } from '@/services/db'
 import { MovieCard } from '@/components/movies/MovieCard'
 import { Poster } from '@/components/ui/Poster'
@@ -141,9 +142,10 @@ export function HomePage() {
   const { channels, loaded, m3uUrl } = usePlaylistStore()
   const { play } = usePlayerStore()
 
-  const movies = useMemo(() => channels.filter((c) => c.type === 'movie'), [channels])
-  const series = useMemo(() => channels.filter((c) => c.type === 'series'), [channels])
-  const live = useMemo(() => channels.filter((c) => c.type === 'live'), [channels])
+  const { excluded } = useExclusionsStore()
+  const movies = useMemo(() => channels.filter((c) => c.type === 'movie' && !excluded.movie.has(c.groupTitle)), [channels, excluded.movie])
+  const series = useMemo(() => channels.filter((c) => c.type === 'series' && !excluded.series.has(c.groupTitle)), [channels, excluded.series])
+  const live = useMemo(() => channels.filter((c) => c.type === 'live' && !excluded.live.has(c.groupTitle)), [channels, excluded.live])
 
   const recentProgress = useLiveQuery(() =>
     db.watchProgress

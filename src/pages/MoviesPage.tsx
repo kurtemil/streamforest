@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Film } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
+import { useExclusionsStore } from '@/stores/exclusionsStore'
 import { db } from '@/services/db'
 import { MovieCard } from '@/components/movies/MovieCard'
 import { SearchBar } from '@/components/ui/SearchBar'
@@ -23,7 +24,11 @@ export function MoviesPage() {
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
   const [page, setPage] = useState(1)
 
-  const movies = useMemo(() => channels.filter((c) => c.type === 'movie'), [channels])
+  const excludedMovies = useExclusionsStore((s) => s.excluded.movie)
+  const movies = useMemo(
+    () => channels.filter((c) => c.type === 'movie' && !excludedMovies.has(c.groupTitle)),
+    [channels, excludedMovies]
+  )
 
   const didAutoPlay = useRef(false)
   useEffect(() => {

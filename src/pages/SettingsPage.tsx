@@ -1,8 +1,9 @@
-import { useState } from 'react'
-import { Settings, RefreshCw, Trash2, Check, AlertCircle, Download, Database } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import { Settings, RefreshCw, Trash2, Check, AlertCircle, Download, Database, ChevronDown, EyeOff } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { getPlaylistMeta, clearPlaylist } from '@/services/db'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useExclusionsStore, type ContentType } from '@/stores/exclusionsStore'
 
 function formatBytes(bytes: number) {
   if (bytes === 0) return '0 B'
@@ -56,9 +57,125 @@ function ProgressBar({ label, icon, pct, indeterminate, detail }: {
   )
 }
 
+function GroupFilterPanel({
+  label,
+  type,
+  groups,
+  excluded,
+  toggle,
+  setAll,
+  cleanTitle = (t: string) => t,
+}: {
+  label: string
+  type: ContentType
+  groups: { title: string; count: number }[]
+  excluded: Set<string>
+  toggle: (type: ContentType, group: string) => void
+  setAll: (type: ContentType, groups: string[], hide: boolean) => void
+  cleanTitle?: (t: string) => string
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [search, setSearch] = useState('')
+
+  const hiddenCount = groups.filter((g) => excluded.has(g.title)).length
+  const filtered = search.trim()
+    ? groups.filter((g) => cleanTitle(g.title).toLowerCase().includes(search.toLowerCase()))
+    : groups
+
+  return (
+    <div className="border border-white/5 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center justify-between w-full px-4 py-3 bg-white/3 hover:bg-white/5 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-white">{label}</span>
+          {hiddenCount > 0 && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-400">
+              {hiddenCount} hidden
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 text-neutral-500 text-xs">
+          <span>{groups.length} groups</span>
+          <ChevronDown size={14} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="p-4 flex flex-col gap-3 border-t border-white/5">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Filter groups…"
+              className="flex-1 bg-white/5 border border-white/8 rounded-lg px-3 py-1.5 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-accent-600/60 transition-colors"
+            />
+            <button
+              onClick={() => setAll(type, groups.map((g) => g.title), true)}
+              className="px-3 py-1.5 text-xs rounded-lg bg-white/5 hover:bg-red-500/20 hover:text-red-400 text-neutral-400 transition-colors whitespace-nowrap"
+            >
+              Hide all
+            </button>
+            <button
+              onClick={() => setAll(type, [], false)}
+              className="px-3 py-1.5 text-xs rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-400 transition-colors whitespace-nowrap"
+            >
+              Show all
+            </button>
+          </div>
+
+          <div className="max-h-72 overflow-y-auto flex flex-col gap-0.5 pr-1 scrollbar-hide">
+            {filtered.map((g) => {
+              const hidden = excluded.has(g.title)
+              return (
+                <button
+                  key={g.title}
+                  onClick={() => toggle(type, g.title)}
+                  className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors text-left w-full ${
+                    hidden ? 'text-neutral-600' : 'text-neutral-300 hover:bg-white/5'
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded shrink-0 border flex items-center justify-center transition-colors ${
+                    hidden ? 'bg-red-500/20 border-red-500/40' : 'border-white/20'
+                  }`}>
+                    {hidden && <EyeOff size={9} className="text-red-400" />}
+                  </div>
+                  <span className={`flex-1 truncate ${hidden ? 'opacity-40' : ''}`}>
+                    {cleanTitle(g.title)}
+                  </span>
+                  <span className="text-xs text-neutral-600 shrink-0">{g.count.toLocaleString()}</span>
+                </button>
+              )
+            })}
+            {filtered.length === 0 && (
+              <p className="text-neutral-600 text-sm text-center py-4">No groups found</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function SettingsPage() {
-  const { m3uUrl, setM3uUrl, refresh, fetching, progress, error, loadFromDB } = usePlaylistStore()
+  const { m3uUrl, setM3uUrl, refresh, fetching, progress, error, loadFromDB, channels } = usePlaylistStore()
+  const { excluded, toggle, setAll } = useExclusionsStore()
   const [urlInput, setUrlInput] = useState(m3uUrl)
+
+  const { movieGroups, seriesGroups, liveGroups } = useMemo(() => {
+    const mc = new Map<string, number>()
+    const sc = new Map<string, number>()
+    const lc = new Map<string, number>()
+    for (const ch of channels) {
+      const map = ch.type === 'movie' ? mc : ch.type === 'series' ? sc : lc
+      map.set(ch.groupTitle, (map.get(ch.groupTitle) ?? 0) + 1)
+    }
+    const sorted = (m: Map<string, number>) =>
+      Array.from(m.entries()).sort((a, b) => b[1] - a[1]).map(([title, count]) => ({ title, count }))
+    return { movieGroups: sorted(mc), seriesGroups: sorted(sc), liveGroups: sorted(lc) }
+  }, [channels])
   const [saved, setSaved] = useState(false)
   const [clearing, setClearing] = useState(false)
 
@@ -208,6 +325,42 @@ export function SettingsPage() {
           </div>
         </div>
       </section>
+
+      {/* Hidden Groups */}
+      {channels.length > 0 && (
+        <section>
+          <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-4">Hidden Groups</h2>
+          <p className="text-xs text-neutral-600 mb-4">Groups you hide won't appear anywhere in the app — not in lists, search, or the home screen.</p>
+          <div className="flex flex-col gap-3">
+            <GroupFilterPanel
+              label="Movies"
+              type="movie"
+              groups={movieGroups}
+              excluded={excluded.movie}
+              toggle={toggle}
+              setAll={setAll}
+              cleanTitle={(t) => t.replace(/^VOD:\s*/i, '')}
+            />
+            <GroupFilterPanel
+              label="TV Shows"
+              type="series"
+              groups={seriesGroups}
+              excluded={excluded.series}
+              toggle={toggle}
+              setAll={setAll}
+              cleanTitle={(t) => t.replace(/^Series:\s*/i, '')}
+            />
+            <GroupFilterPanel
+              label="Live TV"
+              type="live"
+              groups={liveGroups}
+              excluded={excluded.live}
+              toggle={toggle}
+              setAll={setAll}
+            />
+          </div>
+        </section>
+      )}
     </div>
   )
 }

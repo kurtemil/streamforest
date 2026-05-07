@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { Tv, ChevronRight, ChevronDown, Star, Play, Check } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
+import { useExclusionsStore } from '@/stores/exclusionsStore'
 import { db, toggleFavorite } from '@/services/db'
 import { Poster } from '@/components/ui/Poster'
 import { SearchBar } from '@/components/ui/SearchBar'
@@ -189,7 +190,11 @@ export function SeriesPage() {
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null)
   const [showFavs, setShowFavs] = useState(false)
 
-  const seriesChannels = useMemo(() => channels.filter((c) => c.type === 'series'), [channels])
+  const excludedSeries = useExclusionsStore((s) => s.excluded.series)
+  const seriesChannels = useMemo(
+    () => channels.filter((c) => c.type === 'series' && !excludedSeries.has(c.groupTitle)),
+    [channels, excludedSeries]
+  )
   const showMap = useMemo(() => buildShowMap(seriesChannels), [seriesChannels])
 
   const groups = useMemo(() => {
