@@ -186,8 +186,9 @@ export function SeriesPage() {
   const { play } = usePlayerStore()
   const [search, setSearch] = useState('')
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
-  const [selectedShow, setSelectedShow] = useState<string | null>(() => searchParams.get('show'))
+  const selectedShow = searchParams.get('show')
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null)
+  useEffect(() => { setSelectedSeason(null) }, [selectedShow])
   const [showFavs, setShowFavs] = useState(false)
 
   const excludedSeries = useExclusionsStore((s) => s.excluded.series)
@@ -273,7 +274,7 @@ export function SeriesPage() {
 
   if (selectedShow) {
     const showData = currentShowData
-    if (!showData) { setSelectedShow(null); return null }
+    if (!showData) return null
     const { seasons, logo } = showData
     const isFav = favIds.has(selectedShow)
     const totalEps = Array.from(seasons.values()).reduce((a, b) => a + b.length, 0)
@@ -284,7 +285,7 @@ export function SeriesPage() {
       <div className="p-6 pb-12 animate-slide-up overflow-y-auto h-full">
         {/* Back */}
         <button
-          onClick={() => { navigate('/series'); setSelectedShow(null); setSelectedSeason(null) }}
+          onClick={() => navigate('/series')}
           className="flex items-center gap-1.5 text-neutral-400 hover:text-white text-sm mb-6 transition-colors"
         >
           <ChevronRight size={16} className="rotate-180" /> All shows
@@ -411,7 +412,7 @@ export function SeriesPage() {
                   poster={data.logo}
                   seasons={data.seasons.size}
                   episodes={allEps.length}
-                  onClick={() => { navigate(`/series?show=${encodeURIComponent(name)}`); setSelectedShow(name); setSelectedSeason(null) }}
+                  onClick={() => navigate(`/series?show=${encodeURIComponent(name)}`)}
                 />
               )
             })}
