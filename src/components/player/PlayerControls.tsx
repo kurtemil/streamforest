@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect } from 'react'
 import {
   Play, Pause, Volume2, VolumeX, Maximize2, X,
-  SkipBack, SkipForward, Languages,
+  SkipBack, SkipForward, Languages, Loader2,
 } from 'lucide-react'
 import type { Channel } from '@/types'
 import { formatTime } from '@/lib/time'
@@ -21,6 +21,7 @@ interface Props {
   activeAudioTrack: number
   subtitleTracks: Track[]
   activeSubtitle: number
+  loadingSubtitle: number | null
   onTogglePlay: () => void
   onSeek: (t: number) => void
   onVolumeChange: (v: number) => void
@@ -35,7 +36,7 @@ export function PlayerControls({
   channel, visible, isPlaying,
   currentTime, duration, buffered,
   volume, muted,
-  audioTracks, activeAudioTrack, subtitleTracks, activeSubtitle,
+  audioTracks, activeAudioTrack, subtitleTracks, activeSubtitle, loadingSubtitle,
   onTogglePlay, onSeek, onVolumeChange, onToggleMute,
   onSelectAudioTrack, onSelectSubtitle,
   onToggleFullscreen, onClose,
@@ -229,16 +230,25 @@ export function PlayerControls({
                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${activeSubtitle === -1 ? 'bg-accent-500' : 'bg-white/30'}`} />
                           Off
                         </button>
-                        {subtitleTracks.map(t => (
-                          <button
-                            key={t.id}
-                            onClick={() => { onSelectSubtitle(t.id); setShowTrackMenu(false) }}
-                            className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-white/10 text-left text-sm transition-colors ${activeSubtitle === t.id ? 'text-accent-500' : 'text-white/80'}`}
-                          >
-                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${activeSubtitle === t.id ? 'bg-accent-500' : 'bg-white/30'}`} />
-                            {t.name || t.lang || `Track ${t.id + 1}`}
-                          </button>
-                        ))}
+                        {subtitleTracks.map(t => {
+                          const isLoading = loadingSubtitle === t.id
+                          const isActive = activeSubtitle === t.id
+                          return (
+                            <button
+                              key={t.id}
+                              onClick={() => { if (!isLoading) onSelectSubtitle(t.id) }}
+                              disabled={isLoading}
+                              className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-white/10 text-left text-sm transition-colors disabled:opacity-70 ${isActive ? 'text-accent-500' : 'text-white/80'}`}
+                            >
+                              {isLoading ? (
+                                <Loader2 size={12} className="shrink-0 animate-spin text-white/60" />
+                              ) : (
+                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? 'bg-accent-500' : 'bg-white/30'}`} />
+                              )}
+                              {t.name || t.lang || `Track ${t.id + 1}`}
+                            </button>
+                          )
+                        })}
                       </>
                     )}
                   </div>

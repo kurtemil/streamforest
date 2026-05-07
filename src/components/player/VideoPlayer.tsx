@@ -3,13 +3,49 @@ import type Hls from 'hls.js'
 import { useNavigate } from 'react-router-dom'
 import { usePlayerStore } from '@/stores/playerStore'
 import { saveProgress, getProgress } from '@/services/db'
-import { mightNeedTranscode, isTranscodeProxyConfigured, needsTranscode, transcodeUrl, probeMedia } from '@/lib/transcode'
+import {
+  isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, probeMedia, pickProxyMode,
+  subtitleVttUrl, audioStreamLabel, subtitleStreamLabel,
+} from '@/lib/transcode'
+import type { ProxyMode } from '@/lib/transcode'
 import { PlayerControls } from './PlayerControls'
 
 const SAVE_INTERVAL_MS = 5000
 const VIDEO_EXT = /\.(mkv|mp4|avi|mov|wmv|flv|webm)$/i
 
 interface Track { id: number; name: string; lang: string }
+
+function isProxyVideo(channel: { type: string; url: string } | null): boolean {
+  if (!channel || !isTranscodeProxyConfigured()) return false
+  return channel.type === 'movie' || channel.type === 'series' || VIDEO_EXT.test(channel.url)
+}
+
+function parseVttTimestamp(s: string): number {
+  const m = s.match(/^(?:(\d+):)?(\d+):(\d+)\.(\d+)$/)
+  if (!m) return NaN
+  const h = m[1] ? Number(m[1]) : 0
+  return h * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4].padEnd(3, '0').slice(0, 3)) / 1000
+}
+
+function parseVttBlock(block: string): VTTCue | null {
+  const lines = block.split('\n').filter(l => l.length > 0)
+  if (lines.length === 0) return null
+  if (lines[0].startsWith('WEBVTT')) return null
+  if (/^(NOTE|STYLE|REGION)\b/.test(lines[0])) return null
+  const tsIdx = lines.findIndex(l => l.includes('-->'))
+  if (tsIdx < 0) return null
+  const [rawStart, rawEnd] = lines[tsIdx].split('-->').map(s => s.trim().split(/\s+/)[0] ?? '')
+  const start = parseVttTimestamp(rawStart)
+  const end = parseVttTimestamp(rawEnd)
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null
+  const content = lines.slice(tsIdx + 1).join('\n').trim()
+  if (!content) return null
+  try {
+    return new VTTCue(start, end, content)
+  } catch {
+    return null
+  }
+}
 
 type VideoWithAudioTracks = HTMLVideoElement & {
   audioTracks?: EventTarget & {
@@ -32,6 +68,22 @@ export function VideoPlayer() {
   const playbackOffsetRef = useRef(0)
   const isTranscodedRef = useRef(false)
   const transcodedDurationRef = useRef<number | null>(null)
+  // For probe-derived MKV tracks: which audio stream index ffmpeg is currently
+  // mapping. Re-included whenever we rebuild the transcode URL (seek/audio swap).
+  const audioStreamIndexRef = useRef<number | null>(null)
+  // Proxy mode for the current source: 'copy' (cheap remux, browser-compatible
+  // codecs) or 'transcode' (full re-encode for AC3/DTS/etc.). Re-applied when
+  // the URL is rebuilt for seek or audio swap.
+  const proxyModeRef = useRef<ProxyMode | null>(null)
+  // Tracks the active VTT subtitle so we can re-attach after a src reload
+  // (audio swap rebuilds video.src, which clears any addTextTrack-created list).
+  const activeSubtitleRef = useRef(-1)
+  const subtitleTextTrackRef = useRef<TextTrack | null>(null)
+  const subtitleAbortRef = useRef<AbortController | null>(null)
+  // Stall threshold: only abort the subtitle stream if NO bytes arrive for this
+  // long. As long as ffmpeg keeps producing cues we stay connected, however
+  // long the full extraction takes — first cues display within seconds anyway.
+  const SUBTITLE_STALL_MS = 30_000
   const [showControls, setShowControls] = useState(true)
   const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
@@ -44,6 +96,9 @@ export function VideoPlayer() {
   const [activeAudioTrack, setActiveAudioTrack] = useState(-1)
   const [subtitleTracks, setSubtitleTracks] = useState<Track[]>([])
   const [activeSubtitle, setActiveSubtitle] = useState(-1)
+  const [loadingSubtitle, setLoadingSubtitle] = useState<number | null>(null)
+  const [subtitleNotice, setSubtitleNotice] = useState<string | null>(null)
+  const subtitleNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const destroyHls = useCallback(() => {
     if (hlsRef.current) {
@@ -62,6 +117,120 @@ export function VideoPlayer() {
     navigate(-1)
     close()
   }, [navigate, close])
+
+  const flashSubtitleNotice = useCallback((msg: string) => {
+    if (subtitleNoticeTimerRef.current) clearTimeout(subtitleNoticeTimerRef.current)
+    setSubtitleNotice(msg)
+    subtitleNoticeTimerRef.current = setTimeout(() => setSubtitleNotice(null), 4500)
+  }, [])
+
+  const detachSubtitleTrack = useCallback(() => {
+    subtitleAbortRef.current?.abort()
+    subtitleAbortRef.current = null
+    const track = subtitleTextTrackRef.current
+    if (track) {
+      track.mode = 'disabled'
+      while (track.cues && track.cues.length > 0) {
+        track.removeCue(track.cues[0])
+      }
+    }
+    subtitleTextTrackRef.current = null
+  }, [])
+
+  const attachSubtitleTrack = useCallback(async (streamIndex: number, label: string, lang: string) => {
+    const video = videoRef.current
+    if (!video || !current) return
+    const url = subtitleVttUrl(current.url, streamIndex)
+    if (!url) return
+    detachSubtitleTrack()
+    const ctrl = new AbortController()
+    subtitleAbortRef.current = ctrl
+    setLoadingSubtitle(streamIndex)
+
+    // Stall detection: abort only if NO bytes for STALL_MS. While ffmpeg is
+    // producing cues we keep streaming, however long it takes.
+    let lastByteAt = Date.now()
+    let stalled = false
+    const stallTimer = setInterval(() => {
+      if (Date.now() - lastByteAt > SUBTITLE_STALL_MS) {
+        stalled = true
+        ctrl.abort()
+      }
+    }, 2000)
+
+    try {
+      const res = await fetch(url, { signal: ctrl.signal })
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '')
+        throw new Error(`Proxy ${res.status}${detail ? `: ${detail.slice(0, 120)}` : ''}`)
+      }
+      if (!res.body) throw new Error('Subtitle response had no body')
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder('utf-8')
+      let buffer = ''
+      let track: TextTrack | null = null
+      let cueCount = 0
+
+      const ensureTrack = () => {
+        if (track) return track
+        track = video.addTextTrack('subtitles', label, lang || '')
+        track.mode = 'showing'
+        subtitleTextTrackRef.current = track
+        // First cue arrived — drop the spinner; cues will keep streaming in.
+        setLoadingSubtitle((cur) => (cur === streamIndex ? null : cur))
+        return track
+      }
+
+      const flush = (final: boolean) => {
+        let idx
+        while ((idx = buffer.indexOf('\n\n')) >= 0) {
+          const block = buffer.slice(0, idx)
+          buffer = buffer.slice(idx + 2)
+          const cue = parseVttBlock(block)
+          if (cue) { ensureTrack().addCue(cue); cueCount++ }
+        }
+        if (final && buffer.length > 0) {
+          const cue = parseVttBlock(buffer)
+          if (cue) { ensureTrack().addCue(cue); cueCount++ }
+          buffer = ''
+        }
+      }
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) {
+          buffer += decoder.decode()
+          flush(true)
+          break
+        }
+        lastByteAt = Date.now()
+        // Normalize CRLF/CR → LF as bytes arrive (each chunk is independent
+        // for normalization since CR alone collapses to LF too).
+        buffer += decoder.decode(value, { stream: true }).replace(/\r\n?/g, '\n')
+        flush(false)
+      }
+
+      if (cueCount === 0) {
+        throw new Error('Subtitle stream had no readable cues')
+      }
+    } catch (err) {
+      const aborted = (err as { name?: string }).name === 'AbortError'
+      // Silent only on user-initiated abort (track switch / unmount). A stall
+      // is also an AbortError but we mark it via `stalled` to surface it.
+      if (aborted && !stalled) return
+      const msg = stalled
+        ? 'Subtitle extraction stalled — no data from proxy in 30 s'
+        : (err instanceof Error ? err.message : 'Subtitle load failed')
+      console.warn('[subtitle] attach failed:', err)
+      flashSubtitleNotice(msg)
+      activeSubtitleRef.current = -1
+      setActiveSubtitle(-1)
+    } finally {
+      clearInterval(stallTimer)
+      setLoadingSubtitle((cur) => (cur === streamIndex ? null : cur))
+    }
+  }, [current, detachSubtitleTrack, flashSubtitleNotice])
 
   const seekTo = useCallback((realTime: number) => {
     const video = videoRef.current
@@ -91,7 +260,11 @@ export function VideoPlayer() {
     playbackOffsetRef.current = clamped
     setCurrentTime(clamped)
     setBuffered(clamped)
-    video.src = transcodeUrl(current.url, clamped)
+    video.src = transcodeUrl(current.url, {
+      startSeconds: clamped,
+      audioIndex: audioStreamIndexRef.current,
+      mode: proxyModeRef.current ?? undefined,
+    })
     video.play().catch(() => {})
   }, [current])
 
@@ -109,28 +282,87 @@ export function VideoPlayer() {
     setActiveAudioTrack(-1)
     setSubtitleTracks([])
     setActiveSubtitle(-1)
+    activeSubtitleRef.current = -1
+    audioStreamIndexRef.current = null
+    proxyModeRef.current = null
+    detachSubtitleTrack()
 
     const load = async () => {
+      // Live channels (Xtream Codes MPEG-TS over HTTP). Browsers can't play
+      // raw MPEG-TS, and on HTTPS pages the HTTP source is mixed-content
+      // blocked anyway. Route through the transcode-proxy in copy mode (cheap
+      // remux to fragmented MP4). Saved progress is irrelevant for live.
+      if (current.type === 'live') {
+        const proxied = isTranscodeProxyConfigured() ? liveStreamUrl(current.url) : null
+        if (proxied) {
+          isTranscodedRef.current = false
+          playbackOffsetRef.current = 0
+          transcodedDurationRef.current = null
+          video.src = proxied
+          video.play().catch(() => {})
+          return
+        }
+        setError('Live TV requires the transcode proxy. Set VITE_TRANSCODE_PROXY_URL.')
+        return
+      }
+
       const saved = await getProgress(current.id)
       const startTime = saved && !saved.completed ? saved.position : 0
 
-      if (VIDEO_EXT.test(current.url)) {
+      const isVideoFile = current.type === 'movie' || current.type === 'series' || VIDEO_EXT.test(current.url)
+
+      if (isVideoFile) {
         // Direct video file — default to native <video> playback.
-        // Only detour through the ffmpeg proxy if the file is an MKV whose audio
-        // codec Chrome can't decode (AC3/EAC3/DTS). Probed via ffprobe to avoid
-        // forcing a re-encode on perfectly-fine AAC content.
-        const info = mightNeedTranscode(current.url) && isTranscodeProxyConfigured()
+        // Probe (a) to detect audio codecs Chrome can't decode (AC3/DTS), and
+        // (b) to enumerate embedded audio/subtitle tracks. Browsers don't
+        // expose embedded MKV tracks via the <video> element, so the picker
+        // depends on probe + ffmpeg routing. Movie/series URLs from many
+        // providers omit the .mkv extension, so we trust the channel type.
+        const info = isProxyVideo(current)
           ? await probeMedia(current.url)
           : null
 
         if (usePlayerStore.getState().current !== current) return // navigated away during probe
 
-        if (info && needsTranscode(info)) {
+        if (info) {
+          if (info.audioStreams.length > 1) {
+            setAudioTracks(info.audioStreams.map(s => ({
+              id: s.index,
+              name: audioStreamLabel(s),
+              lang: s.lang ?? '',
+            })))
+            const firstIdx = info.audioStreams[0].index
+            audioStreamIndexRef.current = firstIdx
+            setActiveAudioTrack(firstIdx)
+          } else if (info.audioStreams.length === 1) {
+            audioStreamIndexRef.current = info.audioStreams[0].index
+          }
+          if (info.subtitleStreams.length > 0) {
+            setSubtitleTracks(info.subtitleStreams.map(s => ({
+              id: s.index,
+              name: subtitleStreamLabel(s),
+              lang: s.lang ?? '',
+            })))
+          }
+        }
+
+        // Movie/series streams: always route through the proxy so the upstream
+        // sees one persistent connection. Direct browser-to-provider playback
+        // breaks down on seek because IPTV providers commonly rate-limit
+        // concurrent Range requests (509 errors). Use 'copy' (cheap remux) when
+        // codecs are browser-compatible, 'transcode' (re-encode) for AC3/DTS.
+        if (isProxyVideo(current)) {
+          const mode = pickProxyMode(info)
+          proxyModeRef.current = mode
           isTranscodedRef.current = true
           playbackOffsetRef.current = startTime
-          transcodedDurationRef.current = info.duration
-          if (info.duration) setDuration(info.duration)
-          video.src = transcodeUrl(current.url, startTime)
+          transcodedDurationRef.current = info?.duration ?? null
+          if (info?.duration) setDuration(info.duration)
+          video.src = transcodeUrl(current.url, {
+            startSeconds: startTime,
+            audioIndex: audioStreamIndexRef.current,
+            mode,
+          })
         } else {
           isTranscodedRef.current = false
           playbackOffsetRef.current = 0
@@ -198,11 +430,11 @@ export function VideoPlayer() {
     }
 
     load()
-  }, [current, destroyHls])
+  }, [current, destroyHls, detachSubtitleTrack])
 
-  // Progress saving
+  // Progress saving (skipped for live — there's no resume point on a live feed)
   useEffect(() => {
-    if (!current) {
+    if (!current || current.type === 'live') {
       if (saveTimerRef.current) clearInterval(saveTimerRef.current)
       return
     }
@@ -242,7 +474,7 @@ export function VideoPlayer() {
       setMuted(video.muted)
     }
     const onEnded = () => {
-      if (!current) return
+      if (!current || current.type === 'live') return
       const localDur = Number.isFinite(video.duration) ? video.duration : 0
       const realDur = transcodedDurationRef.current ?? (playbackOffsetRef.current + localDur)
       if (realDur > 0) saveProgress(current.id, realDur, realDur)
@@ -265,6 +497,9 @@ export function VideoPlayer() {
 
     const onNativeSubtitleChange = () => {
       if (hlsRef.current && hlsRef.current.subtitleTracks.length > 0) return
+      // Skip when we're driving subtitles from probe + proxy: the <track>
+      // element we attach for VTT would otherwise overwrite the probed list.
+      if (current && isProxyVideo(current)) return
       const subs = Array.from(video.textTracks).filter(t => t.kind === 'subtitles' || t.kind === 'captions')
       if (subs.length > 0) {
         setSubtitleTracks(subs.map((t, i) => ({ id: i, name: t.label || t.language || `Track ${i + 1}`, lang: t.language })))
@@ -367,25 +602,65 @@ export function VideoPlayer() {
   useEffect(() => {
     if (!current) {
       destroyHls()
+      detachSubtitleTrack()
+      if (subtitleNoticeTimerRef.current) {
+        clearTimeout(subtitleNoticeTimerRef.current)
+        subtitleNoticeTimerRef.current = null
+      }
+      setSubtitleNotice(null)
       if (videoRef.current) {
         videoRef.current.src = ''
       }
     }
-  }, [current, destroyHls])
+  }, [current, destroyHls, detachSubtitleTrack])
 
   const selectAudioTrack = useCallback((id: number) => {
     if (hlsRef.current) {
       hlsRef.current.audioTrack = id
       return
     }
-    const video = videoRef.current as VideoWithAudioTracks
-    if (video?.audioTracks) {
-      for (let i = 0; i < video.audioTracks.length; i++) {
-        video.audioTracks[i].enabled = (i === id)
+    const video = videoRef.current
+    if (current && video && isProxyVideo(current)) {
+      // MKV via proxy: switch by reloading the transcode stream with a different
+      // -map. ffmpeg can't hot-swap audio mid-stream, so this is a restart at
+      // the current position. Stash the active subtitle so we can re-attach it
+      // after the new src starts loading.
+      const realTime = playbackOffsetRef.current + video.currentTime
+      const fullDur = transcodedDurationRef.current
+        ?? (Number.isFinite(video.duration) ? video.duration : null)
+      const previousSub = activeSubtitleRef.current
+      const previousSubInfo = previousSub !== -1
+        ? subtitleTracks.find(t => t.id === previousSub) ?? null
+        : null
+      detachSubtitleTrack()
+
+      audioStreamIndexRef.current = id
+      isTranscodedRef.current = true
+      playbackOffsetRef.current = realTime
+      transcodedDurationRef.current = fullDur
+      if (fullDur) setDuration(fullDur)
+      setCurrentTime(realTime)
+      setBuffered(realTime)
+      setActiveAudioTrack(id)
+      video.src = transcodeUrl(current.url, {
+        startSeconds: realTime,
+        audioIndex: id,
+        mode: proxyModeRef.current ?? undefined,
+      })
+      video.play().catch(() => {})
+      if (previousSubInfo) {
+        attachSubtitleTrack(previousSubInfo.id, previousSubInfo.name, previousSubInfo.lang)
+      }
+      return
+    }
+    const v = video as VideoWithAudioTracks | null
+    if (v?.audioTracks) {
+      for (let i = 0; i < v.audioTracks.length; i++) {
+        v.audioTracks[i].enabled = (i === id)
       }
       setActiveAudioTrack(id)
     }
-  }, [])
+  }, [current, subtitleTracks, detachSubtitleTrack, attachSubtitleTrack])
 
   const selectSubtitle = useCallback((id: number) => {
     const hls = hlsRef.current
@@ -393,17 +668,31 @@ export function VideoPlayer() {
     if (id === -1) {
       if (hls) hls.subtitleTrack = -1
       if (video) Array.from(video.textTracks).forEach(t => { t.mode = 'hidden' })
+      detachSubtitleTrack()
+      activeSubtitleRef.current = -1
       setActiveSubtitle(-1)
       return
     }
     if (hls && hls.subtitleTracks.length > id) {
       hls.subtitleTrack = id
-    } else if (video) {
+      activeSubtitleRef.current = id
+      return
+    }
+    if (current && video && isProxyVideo(current)) {
+      const info = subtitleTracks.find(t => t.id === id)
+      if (!info) return
+      activeSubtitleRef.current = id
+      setActiveSubtitle(id)
+      attachSubtitleTrack(id, info.name, info.lang)
+      return
+    }
+    if (video) {
       const subs = Array.from(video.textTracks).filter(t => t.kind === 'subtitles' || t.kind === 'captions')
       subs.forEach((t, i) => { t.mode = i === id ? 'showing' : 'hidden' })
+      activeSubtitleRef.current = id
       setActiveSubtitle(id)
     }
-  }, [])
+  }, [current, subtitleTracks, attachSubtitleTrack, detachSubtitleTrack])
 
   if (!current) return null
 
@@ -466,6 +755,14 @@ export function VideoPlayer() {
           </div>
         )}
 
+        {subtitleNotice && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 max-w-md z-10 pointer-events-none">
+            <div className="bg-black/80 backdrop-blur-sm border border-red-500/30 text-red-200 text-sm rounded-lg px-4 py-2 shadow-lg">
+              {subtitleNotice}
+            </div>
+          </div>
+        )}
+
         <PlayerControls
           channel={current}
           visible={showControls}
@@ -479,6 +776,7 @@ export function VideoPlayer() {
           activeAudioTrack={activeAudioTrack}
           subtitleTracks={subtitleTracks}
           activeSubtitle={activeSubtitle}
+          loadingSubtitle={loadingSubtitle}
           onTogglePlay={togglePlay}
           onSeek={seek}
           onVolumeChange={changeVolume}
