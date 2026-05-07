@@ -946,19 +946,19 @@ export function VideoPlayer() {
 
         {/* Mini-player overlay controls */}
         {minimized && (
-          <div
-            className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent opacity-0 hover:opacity-100 transition-opacity"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent opacity-0 hover:opacity-100 transition-opacity">
             <div className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-2 pb-2 pt-4">
               <button
-                onClick={togglePlay}
+                onClick={(e) => { e.stopPropagation(); togglePlay() }}
                 className="text-white/90 hover:text-white p-1 transition-colors shrink-0"
               >
                 {isPlaying ? <Pause size={14} fill="white" className="text-white" /> : <Play size={14} fill="white" className="text-white" />}
               </button>
               <p className="text-white text-xs flex-1 truncate min-w-0">{miniTitle}</p>
-              <button onClick={handleClose} className="text-white/60 hover:text-white p-1 transition-colors shrink-0">
+              <button
+                onClick={(e) => { e.stopPropagation(); handleClose() }}
+                className="text-white/60 hover:text-white p-1 transition-colors shrink-0"
+              >
                 <X size={14} />
               </button>
             </div>
