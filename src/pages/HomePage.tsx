@@ -357,10 +357,14 @@ export function HomePage() {
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4">
               {recentShows.map((ch) => {
                 const showKey = normalizeShowKey(ch.showName ?? ch.name)
+                const episodeLabel = ch.season != null && ch.episode != null
+                  ? `S${String(ch.season).padStart(2, '0')}E${String(ch.episode).padStart(2, '0')}${ch.episodeTitle ? ` · ${ch.episodeTitle}` : ''}`
+                  : undefined
                 return (
                   <MovieCard key={ch.id} channel={ch} progress={progressMap?.[ch.id]}
                     isWatchLater={watchLaterSet.has(showKey)}
                     tmdbMeta={tmdbMap.get(showKey)}
+                    episodeLabel={episodeLabel}
                     onClick={() => { navigate(`/series?show=${encodeURIComponent(showKey)}&playing=${ch.id}`); play(ch) }}
                     onWatchLater={(e) => toggleWatchLater(showKey, 'series', e)}
                   />

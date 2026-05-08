@@ -228,6 +228,12 @@ export async function saveTmdbMeta(meta: TmdbMeta): Promise<void> {
   await db.tmdbCache.put(meta)
 }
 
+export async function clearTmdbNotFound(): Promise<number> {
+  const ids = (await db.tmdbCache.filter((r) => !!r.notFound).primaryKeys()) as string[]
+  await db.tmdbCache.bulkDelete(ids)
+  return ids.length
+}
+
 // ── EPG cache ──────────────────────────────────────────────────────────────────
 
 const EPG_SAVE_CHUNK = 5000

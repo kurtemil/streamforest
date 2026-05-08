@@ -49,10 +49,12 @@ async function tmdbFetch<T>(path: string, params: Record<string, string> = {}): 
 
 interface TmdbSearchResult {
   id: number
-  title?: string        // movie
-  name?: string         // tv
-  release_date?: string // movie
-  first_air_date?: string // tv
+  title?: string          // movie
+  original_title?: string // movie original language
+  name?: string           // tv
+  original_name?: string  // tv original language
+  release_date?: string
+  first_air_date?: string
   poster_path: string | null
   backdrop_path: string | null
   vote_average: number
@@ -108,13 +110,20 @@ function normalizeForSearch(title: string): string {
     .replace(/\s*\[\d{4}\]\s*$/, '')      // trailing [2023]
     .replace(/\s*\[.*?\]\s*/g, '')        // [PRE], [HD], etc.
     .replace(/[:\-–]\s*Part\s+\d+$/i, '') // "Movie: Part 2"
+    .replace(/\boch\b/gi, '&')            // Swedish "och" → "&" (e.g. "Leif och Billy" → "Leif & Billy")
+    .replace(/\s*&\s*/g, ' & ')
     .trim()
+}
+
+function stripDiacritics(s: string): string {
+  return s.normalize('NFD').replace(/\p{Diacritic}/gu, '')
 }
 
 /** Simple similarity score for matching search results. Higher = better. */
 function matchScore(query: string, candidate: string, queryYear: number | null, candidateYear: number | null): number {
-  const q = query.toLowerCase()
-  const c = candidate.toLowerCase()
+  // Normalize both sides: lowercase + strip diacritics so "Slakten" matches "Släkten"
+  const q = stripDiacritics(query.toLowerCase())
+  const c = stripDiacritics(candidate.toLowerCase())
   let score = 0
   if (c === q) score += 100
   else if (c.startsWith(q) || q.startsWith(c)) score += 60
@@ -150,12 +159,16 @@ export async function enrichMovie(cacheId: string, title: string, year: number |
     searchData!.results = fallback!.results
   }
 
-  // Pick best match
+  // Pick best match — check both translated title and original title
   const best = searchData!.results
-    .map((r) => ({
-      r,
-      score: matchScore(query, r.title ?? r.name ?? '', year, r.release_date ? parseInt(r.release_date) : null),
-    }))
+    .map((r) => {
+      const candidateYear = r.release_date ? parseInt(r.release_date) : null
+      const score = Math.max(
+        matchScore(query, r.title ?? r.name ?? '', year, candidateYear),
+        matchScore(query, r.original_title ?? r.original_name ?? '', year, candidateYear),
+      )
+      return { r, score }
+    })
     .sort((a, b) => b.score - a.score)[0]
 
   if (!best || best.score < 10) {
@@ -214,7 +227,13 @@ export async function enrichTV(cacheId: string, showName: string): Promise<TmdbM
   }
 
   const best = searchData.results
-    .map((r) => ({ r, score: matchScore(query, r.name ?? r.title ?? '', null, null) }))
+    .map((r) => ({
+      r,
+      score: Math.max(
+        matchScore(query, r.name ?? r.title ?? '', null, null),
+        matchScore(query, r.original_name ?? r.original_title ?? '', null, null),
+      ),
+    }))
     .sort((a, b) => b.score - a.score)[0]
 
   if (!best || best.score < 10) {

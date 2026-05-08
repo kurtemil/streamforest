@@ -1,9 +1,9 @@
 import { useState, useMemo } from 'react'
-import { Settings, RefreshCw, Trash2, Check, AlertCircle, Download, Database, ChevronDown, EyeOff, Shield, Users, Tv } from 'lucide-react'
+import { Settings, RefreshCw, Trash2, Check, AlertCircle, Download, Database, ChevronDown, EyeOff, Shield, Users, Tv, ImageOff } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { useEpgStore } from '@/stores/epgStore'
 import { epgUrlFromM3u } from '@/services/epg'
-import { getPlaylistMeta, clearPlaylist } from '@/services/db'
+import { getPlaylistMeta, clearPlaylist, clearTmdbNotFound } from '@/services/db'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useExclusionsStore, type ContentType } from '@/stores/exclusionsStore'
 import { useProfileStore, getProfile, PROFILES } from '@/stores/profileStore'
@@ -267,12 +267,22 @@ export function SettingsPage() {
 
   const [saved, setSaved] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const [clearingTmdb, setClearingTmdb] = useState(false)
+  const [tmdbCleared, setTmdbCleared] = useState<number | null>(null)
   const meta = useLiveQuery(() => getPlaylistMeta())
 
   const handleSave = () => {
     setM3uUrl(urlInput.trim())
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
+  }
+
+  const handleClearTmdb = async () => {
+    setClearingTmdb(true)
+    const count = await clearTmdbNotFound()
+    setTmdbCleared(count)
+    setClearingTmdb(false)
+    setTimeout(() => setTmdbCleared(null), 4000)
   }
 
   const handleClear = async () => {
@@ -413,6 +423,28 @@ export function SettingsPage() {
 
       {/* Guide Data (EPG) */}
       <EpgSection m3uUrl={m3uUrl} />
+
+      {/* TMDB Metadata */}
+      <section className="mb-8">
+        <div className="flex items-center gap-2.5 mb-4">
+          <ImageOff size={16} className="text-neutral-400" />
+          <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider">Metadata (TMDB)</h2>
+        </div>
+        <div className="bg-white/[0.03] rounded-xl p-4 ring-1 ring-white/8 flex items-center justify-between gap-4">
+          <div className="text-sm text-neutral-400 leading-relaxed">
+            <p>Posters and metadata are cached locally from TMDB.</p>
+            <p className="text-neutral-600 text-xs mt-0.5">Failed lookups are skipped for 24 hours. Use this to retry them immediately.</p>
+          </div>
+          <button
+            onClick={handleClearTmdb}
+            disabled={clearingTmdb}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-400 text-sm font-medium transition-colors shrink-0 disabled:opacity-40"
+          >
+            <RefreshCw size={14} className={clearingTmdb ? 'animate-spin' : ''} />
+            {tmdbCleared !== null ? `Cleared ${tmdbCleared}` : 'Retry failed'}
+          </button>
+        </div>
+      </section>
 
       {/* Hidden Groups — admin + parent */}
       {channels.length > 0 && (

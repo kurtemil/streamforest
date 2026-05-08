@@ -1,13 +1,14 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Film, Tv, Radio, Settings, Bookmark } from 'lucide-react'
+import { Home, Film, Tv, Radio, Settings, Library, Search } from 'lucide-react'
 import { PROFILES, getProfile, useProfileStore } from '@/stores/profileStore'
+import { useSearchStore } from '@/stores/searchStore'
 
 const NAV_MAIN = [
-  { to: '/',            icon: Home,     label: 'Home',        minRole: 'kid'    },
-  { to: '/movies',      icon: Film,     label: 'Movies',      minRole: 'kid'    },
-  { to: '/series',      icon: Tv,       label: 'TV Shows',    minRole: 'kid'    },
-  { to: '/live',        icon: Radio,    label: 'Live TV',     minRole: 'kid'    },
-  { to: '/watchlater',  icon: Bookmark, label: 'Watch Later', minRole: 'kid'    },
+  { to: '/',         icon: Home,    label: 'Home',     minRole: 'kid' },
+  { to: '/movies',   icon: Film,    label: 'Movies',   minRole: 'kid' },
+  { to: '/series',   icon: Tv,      label: 'TV Shows', minRole: 'kid' },
+  { to: '/live',     icon: Radio,   label: 'Live TV',  minRole: 'kid' },
+  { to: '/library',  icon: Library, label: 'Library',  minRole: 'kid' },
 ] as const
 
 const NAV_BOTTOM = [
@@ -20,6 +21,7 @@ export function Sidebar() {
   const { activeProfileId, openPicker } = useProfileStore()
   const activeProfile = PROFILES.find((p) => p.id === activeProfileId)
   const role = getProfile(activeProfileId)?.role ?? 'kid'
+  const { toggle: toggleSearch } = useSearchStore()
 
   return (
     <aside className="flex flex-col w-56 shrink-0 border-r border-white/5 bg-[#0d0d0d] h-full">
@@ -33,8 +35,20 @@ export function Sidebar() {
         <span className="text-white font-semibold tracking-tight text-sm">StreamForest</span>
       </div>
 
+      {/* Search trigger */}
+      <div className="px-3 pt-3">
+        <button
+          onClick={toggleSearch}
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg bg-white/5 border border-white/8 hover:border-white/15 text-neutral-500 hover:text-neutral-300 transition-colors group"
+        >
+          <Search size={14} className="shrink-0" />
+          <span className="flex-1 text-left text-sm">Search…</span>
+          <kbd className="text-xs font-mono bg-white/5 border border-white/10 rounded px-1 py-0.5 group-hover:border-white/20 transition-colors">⌘K</kbd>
+        </button>
+      </div>
+
       {/* Nav */}
-      <nav className="flex-1 px-3 py-4 flex flex-col gap-0.5">
+      <nav className="flex-1 px-3 py-3 flex flex-col gap-0.5">
         {NAV_MAIN.filter((item) => (ROLE_RANK[role] ?? 0) >= (ROLE_RANK[item.minRole] ?? 0)).map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}

@@ -1,4 +1,4 @@
-import { Play, Check, Bookmark, Star } from 'lucide-react'
+import { Play, Check, Bookmark, Star, X } from 'lucide-react'
 import { Poster } from '@/components/ui/Poster'
 import { ProgressRing } from '@/components/ui/ProgressRing'
 import type { Channel, WatchProgress, TmdbMeta } from '@/types'
@@ -8,11 +8,13 @@ interface Props {
   progress?: WatchProgress
   isWatchLater?: boolean
   tmdbMeta?: TmdbMeta
+  episodeLabel?: string
   onClick: () => void
   onWatchLater?: (e: React.MouseEvent) => void
+  onRemove?: (e: React.MouseEvent) => void
 }
 
-export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, onClick, onWatchLater }: Props) {
+export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLabel, onClick, onWatchLater, onRemove }: Props) {
   const pct = progress && progress.duration > 0
     ? Math.round((progress.position / progress.duration) * 100)
     : 0
@@ -39,6 +41,17 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, onClick, 
             <Play size={18} fill="white" className="text-white ml-0.5" />
           </div>
         </div>
+
+        {/* Remove button (e.g. Continue Watching) */}
+        {onRemove && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onRemove(e) }}
+            aria-label="Remove"
+            className="absolute top-2 left-2 w-7 h-7 rounded-full bg-black/70 hover:bg-red-600/90 backdrop-blur-sm flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all ring-1 ring-white/20 z-10"
+          >
+            <X size={13} />
+          </button>
+        )}
 
         {/* Watch Later toggle */}
         {onWatchLater && (
@@ -83,11 +96,12 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, onClick, 
         )}
       </div>
 
-      <div className="mt-2 px-0.5">
+      <div className="mt-2 px-0.5 min-h-[3.75rem]">
         <p className="text-body text-white font-medium leading-tight line-clamp-2">{displayTitle}</p>
-        <div className="flex items-center gap-1.5 mt-0.5">
-          {displayYear && <span className="text-caption text-neutral-500">{displayYear}</span>}
-          {tmdbMeta?.genres?.[0] && (
+        <div className="flex items-center gap-1.5 mt-0.5 h-[1.1rem]">
+          {episodeLabel && <span className="text-caption text-accent-400 font-medium shrink-0 truncate">{episodeLabel}</span>}
+          {!episodeLabel && displayYear && <span className="text-caption text-neutral-500 shrink-0">{displayYear}</span>}
+          {!episodeLabel && tmdbMeta?.genres?.[0] && (
             <span className="text-caption text-neutral-600 truncate">{tmdbMeta.genres[0]}</span>
           )}
         </div>

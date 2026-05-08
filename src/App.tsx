@@ -7,7 +7,7 @@ import { MoviesPage } from '@/pages/MoviesPage'
 import { SeriesPage } from '@/pages/SeriesPage'
 import { LiveTVPage } from '@/pages/LiveTVPage'
 import { SettingsPage } from '@/pages/SettingsPage'
-import { WatchLaterPage } from '@/pages/WatchLaterPage'
+import { LibraryPage } from '@/pages/LibraryPage'
 import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { ProfilePicker } from '@/components/ProfilePicker'
 import { usePlaylistStore } from '@/stores/playlistStore'
@@ -55,7 +55,8 @@ export default function App() {
             <Route path="/movies"     element={<PageTransition><MoviesPage /></PageTransition>} />
             <Route path="/series"     element={<PageTransition><SeriesPage /></PageTransition>} />
             <Route path="/live"       element={<PageTransition><LiveTVPage /></PageTransition>} />
-            <Route path="/watchlater" element={<PageTransition><WatchLaterPage /></PageTransition>} />
+            <Route path="/library"    element={<PageTransition><LibraryPage /></PageTransition>} />
+            <Route path="/watchlater" element={<Navigate to="/library" replace />} />
             <Route path="/settings"   element={<PageTransition><SettingsPage /></PageTransition>} />
             <Route path="*"           element={<Navigate to="/" replace />} />
           </Routes>
