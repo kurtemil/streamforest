@@ -275,7 +275,7 @@ export function SettingsPage() {
   const [selectedPlaybackProfile, setSelectedPlaybackProfile] = useState(activeProfileId ?? PROFILES[0].id)
   const { byProfile: playbackByProfile, setPrefs: setPlaybackPrefs } = usePlaybackPrefsStore()
   const rawPlaybackPrefs = playbackByProfile[selectedPlaybackProfile] ?? {}
-  const playbackPrefs = { preferredSubtitleLang: '', autoplayNextEpisode: true, ...rawPlaybackPrefs }
+  const playbackPrefs = { preferredSubtitleLang: '', preferredAudioLang: '', autoplayNextEpisode: true, ...rawPlaybackPrefs }
 
   const [saved, setSaved] = useState(false)
   const [clearing, setClearing] = useState(false)
@@ -503,26 +503,48 @@ export function SettingsPage() {
             </button>
           </div>
 
-          {/* Preferred subtitle language */}
-          <div>
-            <label className="block text-sm text-white mb-1">Default subtitle language</label>
-            <p className="text-xs text-neutral-600 mb-2">Auto-selects this language when subtitles are available on playback</p>
-            <select
-              value={playbackPrefs.preferredSubtitleLang}
-              onChange={(e) => setPlaybackPrefs(selectedPlaybackProfile, { preferredSubtitleLang: e.target.value })}
-              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-accent-500/60 transition-colors"
-            >
-              <option value="">Off — manual selection</option>
-              <option value="sv">Swedish (sv)</option>
-              <option value="en">English (en)</option>
-              <option value="no">Norwegian (no)</option>
-              <option value="da">Danish (da)</option>
-              <option value="fi">Finnish (fi)</option>
-              <option value="de">German (de)</option>
-              <option value="fr">French (fr)</option>
-              <option value="es">Spanish (es)</option>
-              <option value="ar">Arabic (ar)</option>
-            </select>
+          {/* Language selects — side by side on wider screens */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-white mb-1">Default audio language</label>
+              <p className="text-xs text-neutral-600 mb-2">Auto-selects this audio track on playback</p>
+              <select
+                value={playbackPrefs.preferredAudioLang}
+                onChange={(e) => setPlaybackPrefs(selectedPlaybackProfile, { preferredAudioLang: e.target.value })}
+                className="w-full bg-[#1e1e1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-accent-500/60 transition-colors"
+              >
+                <option value="" className="bg-[#1e1e1e]">Off — manual selection</option>
+                <option value="sv" className="bg-[#1e1e1e]">Swedish (sv)</option>
+                <option value="en" className="bg-[#1e1e1e]">English (en)</option>
+                <option value="no" className="bg-[#1e1e1e]">Norwegian (no)</option>
+                <option value="da" className="bg-[#1e1e1e]">Danish (da)</option>
+                <option value="fi" className="bg-[#1e1e1e]">Finnish (fi)</option>
+                <option value="de" className="bg-[#1e1e1e]">German (de)</option>
+                <option value="fr" className="bg-[#1e1e1e]">French (fr)</option>
+                <option value="es" className="bg-[#1e1e1e]">Spanish (es)</option>
+                <option value="ar" className="bg-[#1e1e1e]">Arabic (ar)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm text-white mb-1">Default subtitle language</label>
+              <p className="text-xs text-neutral-600 mb-2">Auto-selects this subtitle track on playback</p>
+              <select
+                value={playbackPrefs.preferredSubtitleLang}
+                onChange={(e) => setPlaybackPrefs(selectedPlaybackProfile, { preferredSubtitleLang: e.target.value })}
+                className="w-full bg-[#1e1e1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-accent-500/60 transition-colors"
+              >
+                <option value="" className="bg-[#1e1e1e]">Off — manual selection</option>
+                <option value="sv" className="bg-[#1e1e1e]">Swedish (sv)</option>
+                <option value="en" className="bg-[#1e1e1e]">English (en)</option>
+                <option value="no" className="bg-[#1e1e1e]">Norwegian (no)</option>
+                <option value="da" className="bg-[#1e1e1e]">Danish (da)</option>
+                <option value="fi" className="bg-[#1e1e1e]">Finnish (fi)</option>
+                <option value="de" className="bg-[#1e1e1e]">German (de)</option>
+                <option value="fr" className="bg-[#1e1e1e]">French (fr)</option>
+                <option value="es" className="bg-[#1e1e1e]">Spanish (es)</option>
+                <option value="ar" className="bg-[#1e1e1e]">Arabic (ar)</option>
+              </select>
+            </div>
           </div>
         </div>
       </section>

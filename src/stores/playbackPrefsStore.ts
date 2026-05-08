@@ -3,11 +3,13 @@ import { persist } from 'zustand/middleware'
 
 export interface PlaybackPrefs {
   preferredSubtitleLang: string  // '' = off
+  preferredAudioLang: string     // '' = off
   autoplayNextEpisode: boolean
 }
 
 const DEFAULT: PlaybackPrefs = {
   preferredSubtitleLang: '',
+  preferredAudioLang: '',
   autoplayNextEpisode: true,
 }
 

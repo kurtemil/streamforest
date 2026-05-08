@@ -70,6 +70,7 @@ export function VideoPlayer() {
   const rawPlaybackPrefs = usePlaybackPrefsStore((s) => s.byProfile[activeProfileId ?? ''])
   const autoplayNextEpisode = rawPlaybackPrefs?.autoplayNextEpisode ?? true
   const preferredSubtitleLang = rawPlaybackPrefs?.preferredSubtitleLang ?? ''
+  const preferredAudioLang = rawPlaybackPrefs?.preferredAudioLang ?? ''
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -116,6 +117,7 @@ export function VideoPlayer() {
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const nextEpisodeRef = useRef<typeof current>(null)
   const autoplayRef = useRef(true)
+  const autoAudioSelectedRef = useRef(false)
   const [parsedSubtitles, setParsedSubtitles] = useState<{ start: number; end: number; text: string }[]>([])
   const [subtitleDelay, setSubtitleDelay] = useState(0)
   const lastTapRef = useRef<{ time: number; side: 'left' | 'right' } | null>(null)
@@ -150,13 +152,14 @@ export function VideoPlayer() {
     return () => video.removeEventListener('loadedmetadata', onMeta)
   }, [])
 
-  // Reset minimized + clear countdown + reset subtitle delay on new item
+  // Reset minimized + clear countdown + reset subtitle delay + reset auto-select flags on new item
   useEffect(() => {
     setMinimized(false)
     setSubtitleDelay(0)
     if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
     countdownIntervalRef.current = null
     setNextEpCountdown(null)
+    autoAudioSelectedRef.current = false
   }, [current?.id])
 
   const resetControlsTimer = useCallback(() => {
@@ -846,6 +849,14 @@ export function VideoPlayer() {
     const match = subtitleTracks.find(t => t.lang?.toLowerCase().startsWith(preferredSubtitleLang.toLowerCase()))
     if (match) selectSubtitle(match.id)
   }, [subtitleTracks, preferredSubtitleLang, selectSubtitle])
+
+  // Auto-select preferred audio language once when tracks first become available for a new item
+  useEffect(() => {
+    if (!preferredAudioLang || !audioTracks.length || autoAudioSelectedRef.current) return
+    autoAudioSelectedRef.current = true
+    const match = audioTracks.find(t => t.lang?.toLowerCase().startsWith(preferredAudioLang.toLowerCase()))
+    if (match && match.id !== activeAudioTrack) selectAudioTrack(match.id)
+  }, [audioTracks, preferredAudioLang, activeAudioTrack, selectAudioTrack])
 
   if (!current) return null
 
