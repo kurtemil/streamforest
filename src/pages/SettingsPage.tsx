@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Settings, RefreshCw, Trash2, Check, AlertCircle, Download, Database, ChevronDown, EyeOff, Shield, Users, Tv, ImageOff } from 'lucide-react'
+import { Settings, RefreshCw, Trash2, Check, AlertCircle, Download, Database, ChevronDown, EyeOff, Shield, Users, Tv, ImageOff, Play } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { useEpgStore } from '@/stores/epgStore'
 import { epgUrlFromM3u } from '@/services/epg'
@@ -8,6 +8,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { useExclusionsStore, type ContentType } from '@/stores/exclusionsStore'
 import { useProfileStore, getProfile, PROFILES } from '@/stores/profileStore'
 import { useKidRestrictions } from '@/stores/kidRestrictionsStore'
+import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 
 function formatBytes(bytes: number) {
   if (bytes === 0) return '0 B'
@@ -271,6 +272,11 @@ export function SettingsPage() {
     return { movieGroups: sorted(mc), seriesGroups: sorted(sc), liveGroups: sorted(lc) }
   }, [channels])
 
+  const [selectedPlaybackProfile, setSelectedPlaybackProfile] = useState(activeProfileId ?? PROFILES[0].id)
+  const { byProfile: playbackByProfile, setPrefs: setPlaybackPrefs } = usePlaybackPrefsStore()
+  const rawPlaybackPrefs = playbackByProfile[selectedPlaybackProfile] ?? {}
+  const playbackPrefs = { preferredSubtitleLang: '', autoplayNextEpisode: true, ...rawPlaybackPrefs }
+
   const [saved, setSaved] = useState(false)
   const [clearing, setClearing] = useState(false)
   const [clearingTmdb, setClearingTmdb] = useState(false)
@@ -449,6 +455,75 @@ export function SettingsPage() {
             <RefreshCw size={14} className={clearingTmdb ? 'animate-spin' : ''} />
             {tmdbCleared !== null ? `Cleared ${tmdbCleared}` : 'Retry failed'}
           </button>
+        </div>
+      </section>
+
+      {/* Playback preferences */}
+      <section className="mb-8">
+        <div className="flex items-center gap-2.5 mb-4">
+          <Play size={16} className="text-neutral-400" />
+          <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider">Playback</h2>
+        </div>
+        <div className="bg-white/[0.03] rounded-xl p-4 ring-1 ring-white/8 flex flex-col gap-5">
+          {/* Profile selector */}
+          <div>
+            <p className="text-xs text-neutral-500 mb-2.5">Profile</p>
+            <div className="flex gap-2 flex-wrap">
+              {PROFILES.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => setSelectedPlaybackProfile(p.id)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    selectedPlaybackProfile === p.id ? 'text-white ring-1' : 'text-neutral-400 bg-white/3 hover:bg-white/6'
+                  }`}
+                  style={selectedPlaybackProfile === p.id ? { backgroundColor: `${p.color}25`, border: `1px solid ${p.color}60` } : undefined}
+                >
+                  <div className="w-4 h-4 rounded flex items-center justify-center text-white text-[10px] font-bold" style={{ backgroundColor: p.color }}>
+                    {p.name[0]}
+                  </div>
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Autoplay next episode */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm text-white">Autoplay next episode</p>
+              <p className="text-xs text-neutral-600 mt-0.5">Automatically plays the next episode when one ends</p>
+            </div>
+            <button
+              onClick={() => setPlaybackPrefs(selectedPlaybackProfile, { autoplayNextEpisode: !playbackPrefs.autoplayNextEpisode })}
+              role="switch"
+              aria-checked={playbackPrefs.autoplayNextEpisode}
+              className={`relative shrink-0 w-10 h-6 rounded-full transition-colors ${playbackPrefs.autoplayNextEpisode ? 'bg-accent-600' : 'bg-white/15'}`}
+            >
+              <span className={`absolute top-[3px] left-[3px] w-[18px] h-[18px] rounded-full bg-white shadow transition-transform ${playbackPrefs.autoplayNextEpisode ? 'translate-x-4' : 'translate-x-0'}`} />
+            </button>
+          </div>
+
+          {/* Preferred subtitle language */}
+          <div>
+            <label className="block text-sm text-white mb-1">Default subtitle language</label>
+            <p className="text-xs text-neutral-600 mb-2">Auto-selects this language when subtitles are available on playback</p>
+            <select
+              value={playbackPrefs.preferredSubtitleLang}
+              onChange={(e) => setPlaybackPrefs(selectedPlaybackProfile, { preferredSubtitleLang: e.target.value })}
+              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-accent-500/60 transition-colors"
+            >
+              <option value="">Off — manual selection</option>
+              <option value="sv">Swedish (sv)</option>
+              <option value="en">English (en)</option>
+              <option value="no">Norwegian (no)</option>
+              <option value="da">Danish (da)</option>
+              <option value="fi">Finnish (fi)</option>
+              <option value="de">German (de)</option>
+              <option value="fr">French (fr)</option>
+              <option value="es">Spanish (es)</option>
+              <option value="ar">Arabic (ar)</option>
+            </select>
+          </div>
         </div>
       </section>
 

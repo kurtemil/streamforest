@@ -202,9 +202,60 @@ export function HomePage() {
     return result
   }, [series])
 
+  // "Because you watched X" — unwatched items from the same group as the most-recently-finished content
+  const recommendations = useMemo(() => {
+    if (!recentProgress?.length || !channels.length) return null
+    const chanById = new Map(channels.map(c => [c.id, c]))
+
+    const watchedChannels = recentProgress
+      .filter(p => p.completed || (p.duration > 0 && p.position / p.duration > 0.5))
+      .map(p => chanById.get(p.channelId))
+      .filter(Boolean) as Channel[]
+
+    if (!watchedChannels.length) return null
+
+    const source = watchedChannels[0]
+    const sourceKey = source.type === 'series' && source.showName
+      ? normalizeShowKey(source.showName) : source.id
+
+    const watchedIds = new Set(watchedChannels.map(c => c.id))
+    const watchedShowKeys = new Set(watchedChannels.map(c =>
+      c.type === 'series' && c.showName ? normalizeShowKey(c.showName) : c.id
+    ))
+
+    const pool: Channel[] = []
+    for (const m of movies) {
+      if (!watchedIds.has(m.id)) pool.push(m)
+    }
+    const seenShows = new Set<string>()
+    for (const ch of series) {
+      const k = normalizeShowKey(ch.showName ?? ch.name)
+      if (!seenShows.has(k) && !watchedShowKeys.has(k)) {
+        seenShows.add(k)
+        pool.push(ch)
+      }
+    }
+
+    const sameGroup = pool.filter(c => c.groupTitle === source.groupTitle)
+    const candidates = sameGroup.length >= 4 ? sameGroup : pool
+    if (!candidates.length) return null
+
+    const shuffled = [...candidates]
+      .sort(() => Math.random() - 0.5)
+      .slice(0, 16)
+
+    const title = source.movieTitle ?? source.showName ?? source.name
+    return { title, sourceKey, items: shuffled }
+  }, [recentProgress, channels, movies, series])
+
   const enrichTargets = useMemo(
-    () => [...continueWatching.map((x) => x.channel), ...recentMovies, ...recentShows],
-    [continueWatching, recentMovies, recentShows]
+    () => [
+      ...continueWatching.map((x) => x.channel),
+      ...recentMovies,
+      ...recentShows,
+      ...(recommendations?.items ?? []),
+    ],
+    [continueWatching, recentMovies, recentShows, recommendations]
   )
   const tmdbMap = useTmdbEnrich(enrichTargets)
 
@@ -371,6 +422,38 @@ export function HomePage() {
                 )
               })}
             </div>
+          </section>
+        )}
+
+        {/* Because you watched X */}
+        {recommendations && recommendations.items.length > 0 && (
+          <section className="mb-10">
+            <SectionHeader
+              title={`Because you watched ${tmdbMap.get(recommendations.sourceKey)?.title ?? recommendations.title}`}
+            />
+            <ScrollableRow>
+              {recommendations.items.map((ch) => {
+                const key = ch.type === 'series' && ch.showName ? normalizeShowKey(ch.showName) : ch.id
+                return (
+                  <div key={ch.id} className="flex-shrink-0 w-36">
+                    <MovieCard
+                      channel={ch}
+                      tmdbMeta={tmdbMap.get(key)}
+                      isWatchLater={watchLaterSet.has(key)}
+                      onClick={() => {
+                        if (ch.type === 'series' && ch.showName) {
+                          navigate(`/series?show=${encodeURIComponent(normalizeShowKey(ch.showName))}`)
+                        } else {
+                          navigate(`/movies?playing=${ch.id}`)
+                          play(ch)
+                        }
+                      }}
+                      onWatchLater={(e) => toggleWatchLater(key, ch.type === 'series' ? 'series' : 'movie', e)}
+                    />
+                  </div>
+                )
+              })}
+            </ScrollableRow>
           </section>
         )}
       </div>

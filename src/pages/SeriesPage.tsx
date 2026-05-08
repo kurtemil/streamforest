@@ -1,7 +1,7 @@
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Tv, ChevronRight, ChevronDown, Star, Play, Check, Bookmark } from 'lucide-react'
+import { Tv, ChevronRight, ChevronDown, Star, Play, Check, Bookmark, Shuffle } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useProfileStore } from '@/stores/profileStore'
@@ -476,6 +476,12 @@ export function SeriesPage() {
     )
   }
 
+  const handleSurprise = useCallback(() => {
+    if (!visibleShowNames.length) return
+    const name = visibleShowNames[Math.floor(Math.random() * visibleShowNames.length)]
+    navigate(`/series?show=${encodeURIComponent(name)}`)
+  }, [visibleShowNames, navigate])
+
   const heading = search.trim()
     ? `Results for "${search}"`
     : showFavs ? 'Favorites'
@@ -506,6 +512,14 @@ export function SeriesPage() {
           <div className="flex items-center justify-between sm:justify-start gap-3">
             <h1 className="text-xl font-bold text-white truncate">{heading}</h1>
             <p className="text-neutral-500 text-sm shrink-0">{visibleShowNames.length} shows</p>
+            <button
+              onClick={handleSurprise}
+              title="Surprise me — pick a random show"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
+            >
+              <Shuffle size={13} />
+              <span className="hidden sm:inline">Surprise me</span>
+            </button>
           </div>
           <div className="sm:w-52">
             <SearchBar

@@ -1,7 +1,7 @@
-import { useState, useMemo, useRef, useEffect, type MouseEvent } from 'react'
+import { useState, useMemo, useRef, useEffect, useCallback, type MouseEvent } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Film } from 'lucide-react'
+import { Film, Shuffle } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useProfileStore } from '@/stores/profileStore'
@@ -98,6 +98,13 @@ export function MoviesPage() {
     setSearch('')
   }
 
+  const handleSurprise = useCallback(() => {
+    if (!filtered.length) return
+    const m = filtered[Math.floor(Math.random() * filtered.length)]
+    navigate(`/movies?playing=${m.id}`)
+    play(m)
+  }, [filtered, navigate, play])
+
   if (movies.length === 0) {
     return (
       <div className="p-8">
@@ -134,6 +141,14 @@ export function MoviesPage() {
           <div className="flex items-center justify-between sm:justify-start gap-3">
             <h1 className="text-xl font-bold text-white truncate">{heading}</h1>
             <p className="text-neutral-500 text-caption shrink-0">{filtered.length.toLocaleString()} titles</p>
+            <button
+              onClick={handleSurprise}
+              title="Surprise me — pick a random movie"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
+            >
+              <Shuffle size={13} />
+              <span className="hidden sm:inline">Surprise me</span>
+            </button>
           </div>
           <div className="sm:w-52">
             <SearchBar value={search} onChange={setSearch} placeholder="Search movies…" />

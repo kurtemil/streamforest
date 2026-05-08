@@ -7,6 +7,7 @@ import { usePlaylistStore } from '@/stores/playlistStore'
 import { saveProgress, getProgress, clearProgress } from '@/services/db'
 import { pushProgress, deleteRemoteProgress } from '@/services/sync'
 import { useProfileStore } from '@/stores/profileStore'
+import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import {
   isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, probeMedia, pickProxyMode,
   subtitleVttUrl, audioStreamLabel, subtitleStreamLabel,
@@ -66,6 +67,9 @@ export function VideoPlayer() {
   const { current, play, close } = usePlayerStore()
   const { channels } = usePlaylistStore()
   const activeProfileId = useProfileStore((s) => s.activeProfileId)
+  const rawPlaybackPrefs = usePlaybackPrefsStore((s) => s.byProfile[activeProfileId ?? ''])
+  const autoplayNextEpisode = rawPlaybackPrefs?.autoplayNextEpisode ?? true
+  const preferredSubtitleLang = rawPlaybackPrefs?.preferredSubtitleLang ?? ''
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -111,6 +115,7 @@ export function VideoPlayer() {
   const [nextEpCountdown, setNextEpCountdown] = useState<number | null>(null)
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const nextEpisodeRef = useRef<typeof current>(null)
+  const autoplayRef = useRef(true)
   const [parsedSubtitles, setParsedSubtitles] = useState<{ start: number; end: number; text: string }[]>([])
   const [subtitleDelay, setSubtitleDelay] = useState(0)
   const lastTapRef = useRef<{ time: number; side: 'left' | 'right' } | null>(null)
@@ -134,6 +139,7 @@ export function VideoPlayer() {
   }, [current, channels])
 
   useEffect(() => { nextEpisodeRef.current = nextEpisode }, [nextEpisode])
+  useEffect(() => { autoplayRef.current = autoplayNextEpisode }, [autoplayNextEpisode])
 
   // Re-apply playback speed after every source load (browser resets to 1× on src change)
   useEffect(() => {
@@ -604,7 +610,7 @@ export function VideoPlayer() {
       // spurious 'ended' events browsers fire when video.src is replaced mid-seek.
       const isNearEnd = localDur > 0 && video.currentTime >= localDur * 0.85
       const next = nextEpisodeRef.current
-      if (next && isNearEnd) {
+      if (next && isNearEnd && autoplayRef.current) {
         setNextEpCountdown(10)
         countdownIntervalRef.current = setInterval(() => {
           setNextEpCountdown((n) => {
@@ -833,6 +839,13 @@ export function VideoPlayer() {
       setActiveSubtitle(id)
     }
   }, [current, subtitleTracks, attachSubtitleTrack, detachSubtitleTrack])
+
+  // Auto-select preferred subtitle language when tracks first become available
+  useEffect(() => {
+    if (!preferredSubtitleLang || !subtitleTracks.length || activeSubtitleRef.current !== -1) return
+    const match = subtitleTracks.find(t => t.lang?.toLowerCase().startsWith(preferredSubtitleLang.toLowerCase()))
+    if (match) selectSubtitle(match.id)
+  }, [subtitleTracks, preferredSubtitleLang, selectSubtitle])
 
   if (!current) return null
 
