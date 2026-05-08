@@ -69,7 +69,7 @@ export function GroupSidebar({
           <>
             <button
               onClick={prefixItem.onClick}
-              className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+              className={`flex items-center gap-1.5 text-left px-3 py-2 rounded-lg text-sm transition-colors ${
                 prefixItem.active
                   ? 'bg-accent-600/20 text-accent-400 font-medium'
                   : 'text-neutral-400 hover:text-white hover:bg-white/5'
