@@ -94,7 +94,8 @@ export function VideoPlayer() {
   // Stall threshold: only abort the subtitle stream if NO bytes arrive for this
   // long. As long as ffmpeg keeps producing cues we stay connected, however
   // long the full extraction takes — first cues display within seconds anyway.
-  const SUBTITLE_STALL_MS = 30_000
+  const SUBTITLE_STALL_MS = 60_000
+  const [isBuffering, setIsBuffering] = useState(true)
   const [showControls, setShowControls] = useState(true)
   const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
@@ -152,10 +153,11 @@ export function VideoPlayer() {
     return () => video.removeEventListener('loadedmetadata', onMeta)
   }, [])
 
-  // Reset minimized + clear countdown + reset subtitle delay + reset auto-select flags on new item
+  // Reset all per-item UI state on new item
   useEffect(() => {
     setMinimized(false)
     setSubtitleDelay(0)
+    setIsBuffering(true)
     if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
     countdownIntervalRef.current = null
     setNextEpCountdown(null)
@@ -309,7 +311,7 @@ export function VideoPlayer() {
           if (cue) { pending.push({ start: cue.startTime, end: cue.endTime, text: cue.text }); cueCount++ }
           buffer = ''
         }
-        if (pending.length >= 20 || (final && pending.length > 0)) {
+        if (pending.length >= 5 || (final && pending.length > 0)) {
           const batch = pending.splice(0)
           if (!gotFirst) {
             gotFirst = true
@@ -659,6 +661,10 @@ export function VideoPlayer() {
     // Capture reference once here only for addEventListener/removeEventListener symmetry.
     const nativeAudioTracks = (video as VideoWithAudioTracks).audioTracks
 
+    const onWaiting  = () => setIsBuffering(true)
+    const onCanPlay  = () => setIsBuffering(false)
+    const onPlaying  = () => setIsBuffering(false)
+
     video.addEventListener('timeupdate', onTimeUpdate)
     video.addEventListener('durationchange', onDurationChange)
     video.addEventListener('loadedmetadata', syncNativeAudioTracks)
@@ -667,6 +673,9 @@ export function VideoPlayer() {
     video.addEventListener('pause', onPause)
     video.addEventListener('volumechange', onVolumeChange)
     video.addEventListener('ended', onEnded)
+    video.addEventListener('waiting', onWaiting)
+    video.addEventListener('canplay', onCanPlay)
+    video.addEventListener('playing', onPlaying)
     nativeAudioTracks?.addEventListener('addtrack', syncNativeAudioTracks)
     nativeAudioTracks?.addEventListener('change', syncNativeAudioTracks)
     video.textTracks.addEventListener('addtrack', onNativeSubtitleChange)
@@ -679,6 +688,9 @@ export function VideoPlayer() {
       video.removeEventListener('pause', onPause)
       video.removeEventListener('volumechange', onVolumeChange)
       video.removeEventListener('ended', onEnded)
+      video.removeEventListener('waiting', onWaiting)
+      video.removeEventListener('canplay', onCanPlay)
+      video.removeEventListener('playing', onPlaying)
       nativeAudioTracks?.removeEventListener('addtrack', syncNativeAudioTracks)
       nativeAudioTracks?.removeEventListener('change', syncNativeAudioTracks)
       video.textTracks.removeEventListener('addtrack', onNativeSubtitleChange)
@@ -925,6 +937,13 @@ export function VideoPlayer() {
                 Close
               </button>
             </div>
+          </div>
+        )}
+
+        {!minimized && !error && isBuffering && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none">
+            <div className="w-12 h-12 rounded-full border-2 border-white/15 border-t-white animate-spin" />
+            <p className="text-white/60 text-sm font-medium tracking-wide">Buffering…</p>
           </div>
         )}
 
