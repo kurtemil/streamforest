@@ -178,7 +178,7 @@ export function MoviesPage() {
               </div>
             </div>
             {/* Desktop: virtualized grid */}
-            <div className="hidden md:flex flex-1 min-h-0 px-6 pb-6">
+            <div className="hidden md:block flex-1 min-h-0 px-6 pb-6 overflow-hidden">
               <VirtualPosterGrid
                 items={filtered}
                 getKey={(m) => m.id}
