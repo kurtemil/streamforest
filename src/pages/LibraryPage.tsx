@@ -286,9 +286,9 @@ export function LibraryPage() {
   }
 
   return (
-    <div className="p-6 pb-12">
+    <div className="p-4 sm:p-6 pb-12">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4 sm:mb-6">
         <h1 className="text-2xl font-bold text-white">Library</h1>
         <select
           value={sort}
@@ -301,21 +301,21 @@ export function LibraryPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-1 mb-8 bg-white/5 rounded-xl p-1 w-fit">
+      <div className="flex items-stretch gap-1 mb-6 bg-white/5 rounded-xl p-1">
         {TABS.map(({ id, label, Icon }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex-1 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 px-2 py-2 sm:px-4 rounded-lg text-[11px] sm:text-sm font-medium transition-colors ${
               tab === id
                 ? 'bg-accent-600 text-white'
                 : 'text-neutral-400 hover:text-white'
             }`}
           >
-            <Icon size={14} />
-            {label}
+            <Icon size={14} className="shrink-0" />
+            <span>{label === 'Watch Later' ? <><span className="sm:hidden">Later</span><span className="hidden sm:inline">Watch Later</span></> : label}</span>
             {tabCount[id] > 0 && (
-              <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+              <span className={`hidden sm:inline text-xs px-1.5 py-0.5 rounded-full ${
                 tab === id ? 'bg-white/20 text-white' : 'bg-white/10 text-neutral-500'
               }`}>
                 {tabCount[id]}

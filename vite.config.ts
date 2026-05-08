@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
 import type { Connect } from 'vite'
 import type { IncomingMessage, ServerResponse } from 'http'
@@ -48,6 +49,29 @@ function devProxyMiddleware(): Connect.NextHandleFunction {
 export default defineConfig({
   plugins: [
     react(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['icon.svg'],
+      manifest: {
+        name: 'StreamForest',
+        short_name: 'StreamForest',
+        description: 'Personal IPTV player',
+        theme_color: '#0d0d0d',
+        background_color: '#0d0d0d',
+        display: 'standalone',
+        orientation: 'any',
+        start_url: '/',
+        scope: '/',
+        icons: [
+          { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' },
+        ],
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,svg,woff2}'],
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/proxy/, /^\/transcode/],
+      },
+    }),
     {
       name: 'dev-proxy',
       configureServer(server) {

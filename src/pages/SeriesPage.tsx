@@ -483,39 +483,36 @@ export function SeriesPage() {
     : 'Recently Added'
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* Group sidebar */}
-      <div className="p-4 pt-6 overflow-y-auto scrollbar-hide border-r border-white/5 flex flex-col gap-3">
-        <button
-          onClick={() => { setShowFavs(!showFavs); setSelectedGroup(null); setSearch('') }}
-          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
-            showFavs ? 'bg-accent-600/20 text-accent-400 font-medium' : 'text-neutral-400 hover:text-white hover:bg-white/5'
-          }`}
-        >
-          <Star size={13} fill={showFavs ? 'currentColor' : 'none'} /> Favorites
-        </button>
+    <div className="flex flex-col md:flex-row h-full overflow-hidden">
+      {/* Group sidebar / mobile pills */}
+      <div className="md:p-4 md:pt-6 md:overflow-y-auto md:scrollbar-hide md:border-r md:border-white/5 md:shrink-0">
         <GroupSidebar
           groups={groups}
           selected={showFavs ? '__favs__' : selectedGroup}
           onSelect={(g) => { setShowFavs(false); setSelectedGroup(g); setSearch('') }}
           recentLabel="Recently Added"
           cleanTitle={(t) => t.replace(/^Series:\s*/, '')}
+          prefixItem={{
+            label: <><Star size={12} fill={showFavs ? 'currentColor' : 'none'} className="shrink-0" /> Favorites</>,
+            active: showFavs,
+            onClick: () => { setShowFavs(!showFavs); setSelectedGroup(null); setSearch('') },
+          }}
         />
       </div>
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-6 pb-12 min-w-0">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-xl font-bold text-white">{heading}</h1>
-          <div className="flex items-center gap-3">
-            <p className="text-neutral-500 text-sm">{visibleShowNames.length} shows</p>
-            <div className="w-52">
-              <SearchBar
-                value={search}
-                onChange={(v) => { setSearch(v); setSelectedGroup(null); setShowFavs(false) }}
-                placeholder="Search shows…"
-              />
-            </div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mb-4">
+          <div className="flex items-center justify-between sm:justify-start gap-3">
+            <h1 className="text-xl font-bold text-white truncate">{heading}</h1>
+            <p className="text-neutral-500 text-sm shrink-0">{visibleShowNames.length} shows</p>
+          </div>
+          <div className="sm:w-52">
+            <SearchBar
+              value={search}
+              onChange={(v) => { setSearch(v); setSelectedGroup(null); setShowFavs(false) }}
+              placeholder="Search shows…"
+            />
           </div>
         </div>
 

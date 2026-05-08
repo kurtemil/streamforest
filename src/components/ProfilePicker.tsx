@@ -1,12 +1,24 @@
 import { PROFILES, useProfileStore } from '@/stores/profileStore'
 import { syncFromRemote } from '@/services/sync'
+import { useExclusionsStore } from '@/stores/exclusionsStore'
+import { kidRestrictionsStore } from '@/stores/kidRestrictionsStore'
+
+const KID_IDS = PROFILES.filter((p) => p.role === 'kid').map((p) => p.id)
 
 export function ProfilePicker({ forced }: { forced?: boolean }) {
   const { setProfile, closePicker, activeProfileId } = useProfileStore()
 
   const select = (id: string) => {
     setProfile(id)
+    // Sync watch progress for the selected profile
     syncFromRemote(id)
+    // Sync this profile's own exclusions
+    useExclusionsStore.getState().syncFromRemote(id)
+    // If it's a parent/admin, also sync all kids' restrictions so Settings is fresh
+    const profile = PROFILES.find((p) => p.id === id)
+    if (profile?.role === 'admin' || profile?.role === 'parent') {
+      KID_IDS.forEach((kidId) => kidRestrictionsStore.syncFromRemote(kidId))
+    }
   }
 
   return (
@@ -20,7 +32,7 @@ export function ProfilePicker({ forced }: { forced?: boolean }) {
         <h1 className="text-3xl font-bold text-white">Who's watching?</h1>
       </div>
 
-      <div className="flex gap-6">
+      <div className="grid grid-cols-2 gap-5 sm:flex sm:gap-6 px-4 sm:px-0">
         {PROFILES.map((profile) => (
           <button
             key={profile.id}

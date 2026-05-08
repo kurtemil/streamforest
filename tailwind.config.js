@@ -104,5 +104,12 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    function ({ addUtilities }) {
+      addUtilities({
+        '.pb-safe': { paddingBottom: 'env(safe-area-inset-bottom, 0px)' },
+        '.pt-safe': { paddingTop: 'env(safe-area-inset-top, 0px)' },
+      })
+    },
+  ],
 }

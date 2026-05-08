@@ -2,54 +2,79 @@ import { create } from 'zustand'
 
 export type ContentType = 'movie' | 'series' | 'live'
 
-interface ExclusionsState {
-  excluded: Record<ContentType, Set<string>>
-  toggle: (type: ContentType, group: string) => void
-  setAll: (type: ContentType, groups: string[], hide: boolean) => void
-}
+type Raw = Record<ContentType, string[]>
 
-const STORAGE_KEY = 'sf_excluded_groups_v1'
+const STORAGE_KEY = 'sf_excluded_v2'
+const API = '/api/exclusions'
 
-function loadExclusions(): Record<ContentType, Set<string>> {
+function emptyRaw(): Raw { return { movie: [], series: [], live: [] } }
+
+function load(): Record<string, Raw> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw) as Record<ContentType, string[]>
-      return {
-        movie: new Set(parsed.movie ?? []),
-        series: new Set(parsed.series ?? []),
-        live: new Set(parsed.live ?? []),
-      }
-    }
+    if (raw) return JSON.parse(raw) as Record<string, Raw>
   } catch {}
-  return { movie: new Set(), series: new Set(), live: new Set() }
+  return {}
 }
 
-function saveExclusions(excluded: Record<ContentType, Set<string>>) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    movie: Array.from(excluded.movie),
-    series: Array.from(excluded.series),
-    live: Array.from(excluded.live),
-  }))
+function persist(data: Record<string, Raw>) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+}
+
+function push(profileId: string, raw: Raw) {
+  fetch(API, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profileId, ...raw }),
+  }).catch(() => {})
+}
+
+interface ExclusionsState {
+  /** Raw per-profile exclusions: profileId → { movie, series, live } (arrays for serialisation) */
+  byProfile: Record<string, Raw>
+  toggle: (profileId: string, type: ContentType, group: string) => void
+  setAll: (profileId: string, type: ContentType, groups: string[], hide: boolean) => void
+  syncFromRemote: (profileId: string) => Promise<void>
 }
 
 export const useExclusionsStore = create<ExclusionsState>((set, get) => ({
-  excluded: loadExclusions(),
+  byProfile: load(),
 
-  toggle(type, group) {
-    const prev = get().excluded
-    const next = new Set(prev[type])
-    if (next.has(group)) next.delete(group)
-    else next.add(group)
-    const excluded = { ...prev, [type]: next }
-    saveExclusions(excluded)
-    set({ excluded })
+  toggle(profileId, type, group) {
+    const prev = get().byProfile[profileId] ?? emptyRaw()
+    const arr = prev[type]
+    const next: Raw = { ...prev, [type]: arr.includes(group) ? arr.filter((g) => g !== group) : [...arr, group] }
+    const byProfile = { ...get().byProfile, [profileId]: next }
+    persist(byProfile)
+    set({ byProfile })
+    push(profileId, next)
   },
 
-  setAll(type, groups, hide) {
-    const prev = get().excluded
-    const excluded = { ...prev, [type]: hide ? new Set(groups) : new Set<string>() }
-    saveExclusions(excluded)
-    set({ excluded })
+  setAll(profileId, type, groups, hide) {
+    const prev = get().byProfile[profileId] ?? emptyRaw()
+    const next: Raw = { ...prev, [type]: hide ? groups : [] }
+    const byProfile = { ...get().byProfile, [profileId]: next }
+    persist(byProfile)
+    set({ byProfile })
+    push(profileId, next)
+  },
+
+  async syncFromRemote(profileId) {
+    try {
+      const res = await fetch(`${API}?profileId=${encodeURIComponent(profileId)}`)
+      if (!res.ok) return
+      const remote = await res.json() as Raw
+      const byProfile = { ...get().byProfile, [profileId]: remote }
+      persist(byProfile)
+      set({ byProfile })
+    } catch {
+      // silent — offline or D1 not configured
+    }
   },
 }))
+
+/** Converts the raw array-based store entry to a Set-based record for use in filters. */
+export function rawToExcluded(raw: Raw | undefined): Record<ContentType, Set<string>> {
+  const r = raw ?? emptyRaw()
+  return { movie: new Set(r.movie), series: new Set(r.series), live: new Set(r.live) }
+}

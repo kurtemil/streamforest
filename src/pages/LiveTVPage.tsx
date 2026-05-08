@@ -220,9 +220,9 @@ export function LiveTVPage() {
     : 'Recently Added'
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* Left sidebar: groups */}
-      <div className="p-4 pt-6 overflow-y-auto scrollbar-hide border-r border-white/5 shrink-0">
+    <div className="flex flex-col md:flex-row h-full overflow-hidden">
+      {/* Groups sidebar / mobile pills */}
+      <div className="md:p-4 md:pt-6 md:overflow-y-auto md:scrollbar-hide md:border-r md:border-white/5 md:shrink-0">
         <GroupSidebar
           groups={groups}
           selected={selectedGroup}
@@ -232,19 +232,19 @@ export function LiveTVPage() {
       </div>
 
       {/* Main content */}
-      <div className="flex-1 overflow-y-auto p-6 pb-12 min-w-0">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-12 min-w-0">
         {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-xl font-bold text-white">{heading}</h1>
-          <div className="flex items-center gap-3">
-            <p className="text-neutral-500 text-sm">{filtered.length} channels</p>
-            <div className="w-52">
-              <SearchBar
-                value={search}
-                onChange={(v) => { setSearch(v); setSelectedGroup(null) }}
-                placeholder="Search channels…"
-              />
-            </div>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mb-4">
+          <div className="flex items-center justify-between sm:justify-start gap-3">
+            <h1 className="text-xl font-bold text-white truncate">{heading}</h1>
+            <p className="text-neutral-500 text-sm shrink-0">{filtered.length} channels</p>
+          </div>
+          <div className="sm:w-52">
+            <SearchBar
+              value={search}
+              onChange={(v) => { setSearch(v); setSelectedGroup(null) }}
+              placeholder="Search channels…"
+            />
           </div>
         </div>
 

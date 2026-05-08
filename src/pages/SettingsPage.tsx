@@ -243,12 +243,18 @@ function EpgSection({ m3uUrl }: { m3uUrl: string }) {
 
 export function SettingsPage() {
   const { m3uUrl, setM3uUrl, refresh, fetching, progress, error, loadFromDB, channels } = usePlaylistStore()
-  const { excluded, toggle, setAll } = useExclusionsStore()
-  const [urlInput, setUrlInput] = useState(m3uUrl)
-  const [selectedKid, setSelectedKid] = useState<string>(KID_PROFILES[0]?.id ?? '')
-
   const activeProfileId = useProfileStore((s) => s.activeProfileId)
   const role = getProfile(activeProfileId)?.role ?? 'kid'
+
+  const { byProfile, toggle: rawToggle, setAll: rawSetAll } = useExclusionsStore()
+  const excluded = useMemo(() => {
+    const raw = byProfile[activeProfileId ?? ''] ?? { movie: [], series: [], live: [] }
+    return { movie: new Set<string>(raw.movie), series: new Set<string>(raw.series), live: new Set<string>(raw.live) }
+  }, [byProfile, activeProfileId])
+  const toggle = (type: ContentType, group: string) => rawToggle(activeProfileId!, type, group)
+  const setAll = (type: ContentType, groups: string[], hide: boolean) => rawSetAll(activeProfileId!, type, groups, hide)
+  const [urlInput, setUrlInput] = useState(m3uUrl)
+  const [selectedKid, setSelectedKid] = useState<string>(KID_PROFILES[0]?.id ?? '')
   const isAdmin = role === 'admin'
   const canManage = role === 'admin' || role === 'parent'
 

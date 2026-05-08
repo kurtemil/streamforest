@@ -24,7 +24,7 @@ export function Sidebar() {
   const { toggle: toggleSearch } = useSearchStore()
 
   return (
-    <aside className="flex flex-col w-56 shrink-0 border-r border-white/5 bg-[#0d0d0d] h-full">
+    <aside className="hidden md:flex flex-col w-56 shrink-0 border-r border-white/5 bg-[#0d0d0d] h-full">
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-5 py-6 border-b border-white/5">
         <div className="w-7 h-7 rounded-lg bg-accent-600 flex items-center justify-center shrink-0">

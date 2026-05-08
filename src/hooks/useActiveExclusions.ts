@@ -1,24 +1,31 @@
-import { useSyncExternalStore } from 'react'
-import { useExclusionsStore } from '@/stores/exclusionsStore'
+import { useSyncExternalStore, useMemo } from 'react'
+import { useExclusionsStore, rawToExcluded, type ContentType } from '@/stores/exclusionsStore'
 import { useProfileStore, getProfile } from '@/stores/profileStore'
 import { kidRestrictionsStore } from '@/stores/kidRestrictionsStore'
-import type { ContentType } from '@/stores/exclusionsStore'
 
 type Excluded = Record<ContentType, Set<string>>
 
 export function useActiveExclusions(): Excluded {
-  const { excluded } = useExclusionsStore()
+  const byProfile = useExclusionsStore((s) => s.byProfile)
   const activeProfileId = useProfileStore((s) => s.activeProfileId)
-  // Subscribe to kid restrictions so the hook re-renders when they change
+  // Re-render when kid restrictions change
   useSyncExternalStore(kidRestrictionsStore.subscribe, kidRestrictionsStore.getSnapshot)
 
   const profile = getProfile(activeProfileId)
-  if (profile?.role !== 'kid' || !activeProfileId) return excluded
+  const profileExclusions = useMemo(
+    () => rawToExcluded(byProfile[activeProfileId ?? '']),
+    [byProfile, activeProfileId],
+  )
 
-  const kid = kidRestrictionsStore.getExcluded(activeProfileId)
-  return {
-    movie:  new Set([...excluded.movie,  ...kid.movie]),
-    series: new Set([...excluded.series, ...kid.series]),
-    live:   new Set([...excluded.live,   ...kid.live]),
+  if (profile?.role === 'kid' && activeProfileId) {
+    // Kids can't change their own exclusions; apply parent-set restrictions on top
+    const kid = kidRestrictionsStore.getExcluded(activeProfileId)
+    return {
+      movie:  new Set([...profileExclusions.movie,  ...kid.movie]),
+      series: new Set([...profileExclusions.series, ...kid.series]),
+      live:   new Set([...profileExclusions.live,   ...kid.live]),
+    }
   }
+
+  return profileExclusions
 }

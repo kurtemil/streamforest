@@ -113,6 +113,8 @@ export function VideoPlayer() {
   const nextEpisodeRef = useRef<typeof current>(null)
   const [parsedSubtitles, setParsedSubtitles] = useState<{ start: number; end: number; text: string }[]>([])
   const [subtitleDelay, setSubtitleDelay] = useState(0)
+  const lastTapRef = useRef<{ time: number; side: 'left' | 'right' } | null>(null)
+  const [seekFeedback, setSeekFeedback] = useState<{ side: 'left' | 'right'; key: number } | null>(null)
 
   const destroyHls = useCallback(() => {
     if (hlsRef.current) {
@@ -172,6 +174,36 @@ export function VideoPlayer() {
   const handleSubtitleDelayChange = useCallback((delta: number) => {
     setSubtitleDelay(prev => parseFloat(Math.max(-10, Math.min(10, prev + delta)).toFixed(1)))
   }, [])
+
+  useEffect(() => {
+    if (!seekFeedback) return
+    const t = setTimeout(() => setSeekFeedback(null), 700)
+    return () => clearTimeout(t)
+  }, [seekFeedback])
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    if (minimized) return
+    const touch = e.changedTouches[0]
+    if (!touch) return
+    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+    const side: 'left' | 'right' = touch.clientX < rect.left + rect.width / 2 ? 'left' : 'right'
+    const now = Date.now()
+    const last = lastTapRef.current
+    if (last?.side === side && now - last.time < 300) {
+      e.preventDefault()
+      lastTapRef.current = null
+      const v = videoRef.current
+      if (v) {
+        const dur = Number.isFinite(v.duration) ? v.duration : Infinity
+        v.currentTime = side === 'left'
+          ? Math.max(0, v.currentTime - 10)
+          : Math.min(v.currentTime + 10, dur)
+      }
+      setSeekFeedback({ side, key: now })
+    } else {
+      lastTapRef.current = { time: now, side }
+    }
+  }, [minimized])
 
   const handleSpeedChange = useCallback((s: number) => {
     playbackSpeedRef.current = s
@@ -842,12 +874,13 @@ export function VideoPlayer() {
   return (
     <div className={`fixed z-50 transition-all duration-300 ${
       minimized
-        ? 'bottom-4 right-4 w-72 rounded-2xl overflow-hidden bg-black shadow-cinema ring-1 ring-white/10'
+        ? 'bottom-20 md:bottom-4 right-4 w-72 rounded-2xl overflow-hidden bg-black shadow-cinema ring-1 ring-white/10'
         : 'inset-0 bg-black flex flex-col animate-fade-in'
     }`}>
       <div
         className={`relative ${minimized ? 'aspect-video' : 'flex-1'} group cursor-pointer`}
         onMouseMove={minimized ? undefined : resetControlsTimer}
+        onTouchEnd={handleTouchEnd}
         onClick={minimized ? () => setMinimized(false) : togglePlay}
       >
         <video
@@ -884,6 +917,21 @@ export function VideoPlayer() {
           <div className="absolute bottom-20 left-0 right-0 flex justify-center pointer-events-none z-10 px-8">
             <div className="bg-black/75 text-white text-base font-medium px-3 py-1.5 rounded text-center max-w-2xl whitespace-pre-wrap leading-snug">
               {activeCue.text.replace(/<[^>]+>/g, '').trim()}
+            </div>
+          </div>
+        )}
+
+        {!minimized && seekFeedback && (
+          <div
+            key={seekFeedback.key}
+            className={`absolute top-1/2 -translate-y-1/2 pointer-events-none z-10 flex flex-col items-center gap-1 animate-fade-in ${
+              seekFeedback.side === 'left' ? 'left-10' : 'right-10'
+            }`}
+          >
+            <div className="w-16 h-16 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center">
+              <span className="text-white font-semibold text-sm tabular-nums">
+                {seekFeedback.side === 'left' ? '−10s' : '+10s'}
+              </span>
             </div>
           </div>
         )}

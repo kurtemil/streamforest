@@ -117,8 +117,8 @@ export function MoviesPage() {
     : 'Recently Added'
 
   return (
-    <div className="flex h-full overflow-hidden">
-      <div className="p-4 pt-6 overflow-y-auto scrollbar-hide border-r border-white/5 shrink-0">
+    <div className="flex flex-col md:flex-row h-full overflow-hidden">
+      <div className="md:p-4 md:pt-6 md:overflow-y-auto md:scrollbar-hide md:border-r md:border-white/5 md:shrink-0">
         <GroupSidebar
           groups={groups}
           selected={selectedGroup}
@@ -129,13 +129,14 @@ export function MoviesPage() {
       </div>
 
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
-        <div className="flex items-center justify-between px-6 pt-6 pb-4 shrink-0">
-          <h1 className="text-heading-xl text-white">{heading}</h1>
-          <div className="flex items-center gap-3">
-            <p className="text-neutral-500 text-caption">{filtered.length.toLocaleString()} titles</p>
-            <div className="w-52">
-              <SearchBar value={search} onChange={setSearch} placeholder="Search movies…" />
-            </div>
+        {/* Header — stacks vertically on mobile */}
+        <div className="px-4 sm:px-6 pt-5 pb-3 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
+          <div className="flex items-center justify-between sm:justify-start gap-3">
+            <h1 className="text-xl font-bold text-white truncate">{heading}</h1>
+            <p className="text-neutral-500 text-caption shrink-0">{filtered.length.toLocaleString()} titles</p>
+          </div>
+          <div className="sm:w-52">
+            <SearchBar value={search} onChange={setSearch} placeholder="Search movies…" />
           </div>
         </div>
 
@@ -144,22 +145,41 @@ export function MoviesPage() {
             <EmptyState icon={<Film size={36} />} title="No results" description="Try a different search term." />
           </div>
         ) : (
-          <div className="flex-1 min-h-0 px-6 pb-6">
-            <VirtualPosterGrid
-              items={filtered}
-              getKey={(m) => m.id}
-              renderItem={(m) => (
-                <MovieCard
-                  channel={m}
-                  progress={progressMap?.[m.id]}
-                  isWatchLater={watchLaterSet?.has(m.id)}
-                  tmdbMeta={tmdbMap.get(m.id)}
-                  onClick={() => { navigate(`/movies?playing=${m.id}`); play(m) }}
-                  onWatchLater={(e) => toggleWatchLater(m.id, e)}
-                />
-              )}
-            />
-          </div>
+          <>
+            {/* Mobile: plain scrollable grid — avoids VirtualPosterGrid height measurement issues */}
+            <div className="md:hidden overflow-y-auto flex-1 px-4 pb-6">
+              <div className="grid grid-cols-2 gap-4">
+                {filtered.map((m) => (
+                  <MovieCard
+                    key={m.id}
+                    channel={m}
+                    progress={progressMap?.[m.id]}
+                    isWatchLater={watchLaterSet?.has(m.id)}
+                    tmdbMeta={tmdbMap.get(m.id)}
+                    onClick={() => { navigate(`/movies?playing=${m.id}`); play(m) }}
+                    onWatchLater={(e) => toggleWatchLater(m.id, e)}
+                  />
+                ))}
+              </div>
+            </div>
+            {/* Desktop: virtualized grid */}
+            <div className="hidden md:flex flex-1 min-h-0 px-6 pb-6">
+              <VirtualPosterGrid
+                items={filtered}
+                getKey={(m) => m.id}
+                renderItem={(m) => (
+                  <MovieCard
+                    channel={m}
+                    progress={progressMap?.[m.id]}
+                    isWatchLater={watchLaterSet?.has(m.id)}
+                    tmdbMeta={tmdbMap.get(m.id)}
+                    onClick={() => { navigate(`/movies?playing=${m.id}`); play(m) }}
+                    onWatchLater={(e) => toggleWatchLater(m.id, e)}
+                  />
+                )}
+              />
+            </div>
+          </>
         )}
       </div>
     </div>

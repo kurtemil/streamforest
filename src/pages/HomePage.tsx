@@ -279,23 +279,23 @@ export function HomePage() {
       )}
 
       {/* Scrollable content */}
-      <div className="px-6 pb-12 pt-6">
+      <div className="px-4 sm:px-6 pb-12 pt-6">
         {/* Stats bar */}
-        <div className="flex gap-3 mb-8">
+        <div className="flex gap-2 sm:gap-3 mb-6 sm:mb-8">
           {[
             { icon: Film,  label: 'Movies',        count: movies.length, to: '/movies' },
             { icon: Tv,    label: 'TV Shows',       count: new Set(series.filter((s) => s.showName).map((s) => s.showName)).size, to: '/series' },
             { icon: Radio, label: 'Live Channels',  count: live.length,  to: '/live'   },
           ].map(({ icon: Icon, label, count, to }) => (
             <Link key={to} to={to}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/3 hover:bg-white/6 ring-1 ring-white/5 hover:ring-accent-600/30 transition-all flex-1"
+              className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-3 rounded-xl bg-white/3 hover:bg-white/6 ring-1 ring-white/5 hover:ring-accent-600/30 transition-all flex-1 min-w-0"
             >
-              <div className="w-8 h-8 rounded-lg bg-accent-600/20 flex items-center justify-center shrink-0">
-                <Icon size={16} className="text-accent-400" />
+              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-accent-600/20 flex items-center justify-center shrink-0">
+                <Icon size={15} className="text-accent-400" />
               </div>
-              <div>
-                <p className="text-white font-semibold text-body">{count.toLocaleString()}</p>
-                <p className="text-neutral-500 text-caption">{label}</p>
+              <div className="min-w-0">
+                <p className="text-white font-semibold text-sm">{count.toLocaleString()}</p>
+                <p className="text-neutral-500 text-[10px] sm:text-caption truncate">{label}</p>
               </div>
             </Link>
           ))}
