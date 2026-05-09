@@ -55,6 +55,8 @@ export interface TranscodeOptions {
   startSeconds?: number
   audioIndex?: number | null
   mode?: ProxyMode
+  subtitleIndices?: number[]
+  vstart?: number
 }
 
 export function transcodeUrl(url: string, opts: TranscodeOptions = {}): string {
@@ -69,6 +71,12 @@ export function transcodeUrl(url: string, opts: TranscodeOptions = {}): string {
   }
   if (opts.mode === 'copy') {
     params.set('mode', 'copy')
+  }
+  if (opts.subtitleIndices && opts.subtitleIndices.length > 0) {
+    params.set('subs', opts.subtitleIndices.join(','))
+  }
+  if (opts.vstart && opts.vstart > 0.01) {
+    params.set('vstart', String(opts.vstart))
   }
   return `${base}/transcode?${params.toString()}`
 }
@@ -95,11 +103,12 @@ export function pickProxyMode(info: MediaInfo | null): ProxyMode {
   return 'copy'
 }
 
-export function subtitleVttUrl(url: string, index: number, vstart = 0): string | null {
+export function subtitleVttUrl(url: string, index: number, vstart = 0, start = 0): string | null {
   const base = proxyBase()
   if (!base) return null
   const params = new URLSearchParams({ url, index: String(index) })
   if (vstart > 0) params.set('vstart', String(vstart))
+  if (start > 0) params.set('start', String(Math.floor(start)))
   return `${base}/subtitle?${params.toString()}`
 }
 

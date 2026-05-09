@@ -97,6 +97,8 @@ export function VideoPlayer() {
   const nextEpisodeRef = useRef<typeof current>(null)
   const autoplayRef = useRef(true)
   const autoAudioSelectedRef = useRef(false)
+  const subtitleTracksRef = useRef<Track[]>([])
+  const subtitleStreamIndicesRef = useRef<number[]>([])
   const [parsedSubtitles, setParsedSubtitles] = useState<{ start: number; end: number; text: string }[]>([])
   const [subtitleDelay, setSubtitleDelay] = useState(0)
   const lastTapRef = useRef<{ time: number; side: 'left' | 'right' } | null>(null)
@@ -121,6 +123,7 @@ export function VideoPlayer() {
 
   useEffect(() => { nextEpisodeRef.current = nextEpisode }, [nextEpisode])
   useEffect(() => { autoplayRef.current = autoplayNextEpisode }, [autoplayNextEpisode])
+  useEffect(() => { subtitleTracksRef.current = subtitleTracks }, [subtitleTracks])
 
   // Re-apply playback speed after every source load (browser resets to 1× on src change)
   useEffect(() => {
@@ -140,6 +143,7 @@ export function VideoPlayer() {
     countdownIntervalRef.current = null
     setNextEpCountdown(null)
     autoAudioSelectedRef.current = false
+    subtitleStreamIndicesRef.current = []
   }, [current?.id])
 
   const resetControlsTimer = useCallback(() => {
@@ -240,9 +244,10 @@ export function VideoPlayer() {
   // Custom subtitle renderer: parse VTT into a state array of {start,end,text} with
   // absolute file timestamps. activeCue is computed from currentTime+subtitleDelay
   // so no re-fetch or timestamp adjustment is ever needed after a seek.
-  const attachSubtitleTrack = useCallback(async (streamIndex: number, _label: string, _lang: string) => {
+  const attachSubtitleTrack = useCallback(async (streamIndex: number, _label: string, _lang: string, startSeconds?: number) => {
     if (!current) return
-    const url = subtitleVttUrl(current.url, streamIndex, videoStartTimeRef.current)
+    const url = subtitleVttUrl(current.url, streamIndex, videoStartTimeRef.current, startSeconds ?? playbackOffsetRef.current)
+    console.log('[subtitle] attach streamIndex=%d startSeconds=%s url=%s', streamIndex, startSeconds ?? playbackOffsetRef.current, url)
     if (!url) return
     detachSubtitleTrack()
     const ctrl = new AbortController()
@@ -360,9 +365,17 @@ export function VideoPlayer() {
       startSeconds: clamped,
       audioIndex: audioStreamIndexRef.current,
       mode: proxyModeRef.current ?? undefined,
+      subtitleIndices: subtitleStreamIndicesRef.current,
+      vstart: videoStartTimeRef.current || undefined,
     })
     video.play().catch(() => {})
-  }, [current])
+    console.log('[seekTo] src rebuilt at', clamped, '— activeSubtitle:', activeSubtitleRef.current, 'tracks:', subtitleTracksRef.current.length)
+    if (activeSubtitleRef.current >= 0) {
+      const track = subtitleTracksRef.current.find(t => t.id === activeSubtitleRef.current)
+      console.log('[seekTo] re-attaching subtitle track', track)
+      if (track) attachSubtitleTrack(track.id, track.name, track.lang, clamped)
+    }
+  }, [current, attachSubtitleTrack])
 
   // Load source when current changes
   useEffect(() => {
@@ -442,6 +455,7 @@ export function VideoPlayer() {
             audioStreamIndexRef.current = info.audioStreams[0].index
           }
           if (info.subtitleStreams.length > 0) {
+            subtitleStreamIndicesRef.current = info.subtitleStreams.map(s => s.index)
             setSubtitleTracks(info.subtitleStreams.map(s => ({
               id: s.index,
               name: subtitleStreamLabel(s),
@@ -467,6 +481,8 @@ export function VideoPlayer() {
             startSeconds: startTime,
             audioIndex: audioStreamIndexRef.current,
             mode,
+            subtitleIndices: subtitleStreamIndicesRef.current,
+            vstart: info?.startTime,
           })
         } else {
           isTranscodedRef.current = false
@@ -787,6 +803,8 @@ export function VideoPlayer() {
         startSeconds: realTime,
         audioIndex: id,
         mode: proxyModeRef.current ?? undefined,
+        subtitleIndices: subtitleStreamIndicesRef.current,
+        vstart: videoStartTimeRef.current || undefined,
       })
       video.play().catch(() => {})
       if (previousSubInfo) {

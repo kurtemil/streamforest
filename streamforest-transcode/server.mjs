@@ -13,17 +13,10 @@ const ALLOWED_HOSTS = (process.env.ALLOWED_HOSTS || 'iptvworld.xyz')
   .filter(Boolean)
 const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg'
 const FFPROBE_PATH = process.env.FFPROBE_PATH || FFMPEG_PATH.replace(/ffmpeg(\.exe)?$/i, (m, ext) => 'ffprobe' + (ext ?? ''))
-// Video encoder: libx264 (software, universal) on dev.
-// On Raspberry Pi 4, set H264_ENCODER=h264_v4l2m2m to use the hardware encoder.
-// Other options: h264_nvenc (NVIDIA), h264_qsv (Intel Quick Sync), h264_vaapi (AMD/Intel VAAPI).
 const H264_ENCODER = process.env.H264_ENCODER || 'libx264'
 const H264_PRESET = process.env.H264_PRESET || 'ultrafast'
 const FFMPEG_LOGLEVEL = process.env.FFMPEG_LOGLEVEL || 'warning'
-// Output width cap (height scales to preserve aspect ratio).
-// 720 = 1280 wide target. Drop to 960 (540p) or 640 (360p) if upload-bound.
 const VIDEO_MAX_WIDTH = Number(process.env.VIDEO_MAX_WIDTH) || 1280
-// Target video bitrate. Keep headroom below your home upload speed —
-// typical residential upload is 10-20Mbps but can drop under load.
 const VIDEO_BITRATE = process.env.VIDEO_BITRATE || '1500k'
 const VIDEO_MAX_BITRATE = process.env.VIDEO_MAX_BITRATE || '2000k'
 const AUDIO_BITRATE = process.env.AUDIO_BITRATE || '128k'
@@ -31,6 +24,12 @@ const SUB_CACHE_DIR = process.env.SUB_CACHE_DIR || path.join(os.tmpdir(), 'strea
 const SUB_CACHE_TTL_MS = Number(process.env.SUB_CACHE_TTL_MS) || 7 * 24 * 60 * 60 * 1000
 
 fs.mkdirSync(SUB_CACHE_DIR, { recursive: true })
+
+// Active transcode registry.
+// key: sha1(url|seekBucket)
+// value: { ff, subtitleStreams: Map<index, SubStream>, alive }
+// SubStream: { chunks: Buffer[], ended: bool, readers: Set<ServerResponse> }
+const activeTranscodes = new Map()
 
 function hostAllowed(targetUrl) {
   return ALLOWED_HOSTS.some((h) => targetUrl.hostname === h || targetUrl.hostname.endsWith('.' + h))
@@ -68,32 +67,29 @@ function handleTranscode(reqUrl, res) {
   const start = Number.isFinite(startParam) && startParam > 0 ? startParam : 0
   const audioParam = reqUrl.searchParams.get('audio')
   const audioIdx = audioParam !== null && /^\d+$/.test(audioParam) ? Number(audioParam) : null
-  // mode=copy: stream-copy remux only (no re-encode). Cheap on CPU and holds a
-  // single upstream socket — used when the upstream codecs are browser-compatible
-  // and we just need the proxy as a connection bottleneck against IPTV providers
-  // that rate-limit concurrent requests.
   const mode = reqUrl.searchParams.get('mode') === 'copy' ? 'copy' : 'transcode'
-  // live=1: continuous MPEG-TS source (Xtream Codes live channels). Disables
-  // -ss (no seeking into a live stream) and drops +faststart (a no-op for
-  // fragmented MP4 anyway, but pointless for live). +genpts/+discardcorrupt
-  // help ffmpeg recover from upstream timestamp glitches that are common with
-  // unstable IPTV feeds.
   const live = reqUrl.searchParams.get('live') === '1'
+
+  const subsParam = reqUrl.searchParams.get('subs')
+  const subtitleIndices = (!live && subsParam)
+    ? subsParam.split(',').map(Number).filter(n => Number.isInteger(n) && n >= 0)
+    : []
+
+  const vstartParam = Number(reqUrl.searchParams.get('vstart') || 0)
+  const vstart = Number.isFinite(vstartParam) && vstartParam > 0.01 ? vstartParam : 0
+
+  const seekBucket = start > 0 ? Math.floor(start / 300) * 300 : 0
+  const transKey = createHash('sha1').update(`${target}|${seekBucket}`).digest('hex')
 
   const args = ['-hide_banner', '-loglevel', FFMPEG_LOGLEVEL]
   if (live) {
     args.push('-fflags', '+genpts+discardcorrupt')
   }
-  // Seeking strategy differs by mode:
-  // • transcode: two-pass (fast input seek + accurate output seek). The re-encoder
-  //   can start at any frame, so output begins at exactly `start` → frame-accurate
-  //   subtitle sync.
-  // • copy: single-pass fast seek only. The output-level -ss in copy mode overshoots
-  //   to the NEXT keyframe (≥ start), making subtitles appear a few seconds early.
-  //   Single-pass lands at the keyframe just BEFORE start, making subs slightly late —
-  //   which is less jarring perceptually than early.
   if (start > 0 && !live) {
     args.push('-ss', String(mode === 'transcode' ? Math.max(0, start - 5) : start))
+  }
+  if (vstart > 0 && !live) {
+    args.push('-itsoffset', String(-vstart))
   }
   args.push('-i', target,
     '-map', '0:v:0',
@@ -106,10 +102,6 @@ function handleTranscode(reqUrl, res) {
       ? 'frag_keyframe+empty_moov+default_base_moof'
       : 'frag_keyframe+empty_moov+default_base_moof+faststart'
     args.push('-c', 'copy')
-    // MPEG-TS stores AAC as ADTS; MP4 needs ASC. The bitstream filter
-    // converts in-place. Required for stream-copying MPEG-TS → MP4 — without
-    // it ffmpeg fails with "Malformed AAC bitstream detected". MKV inputs
-    // already carry AAC in ASC, so we only apply this for live.
     if (live) args.push('-bsf:a', 'aac_adtstoasc')
     args.push(
       '-movflags', movflags,
@@ -118,28 +110,14 @@ function handleTranscode(reqUrl, res) {
     )
   } else {
     args.push(
-      // Full re-encode. Stream-copy would be cheaper, but on seek (`-ss N`) it
-      // must land on a video keyframe before N while audio seeks accurately —
-      // that's an inherent up-to-several-second A/V desync for sources with
-      // sparse keyframes. Re-encoding puts both streams on a shared filter-graph
-      // clock and inserts a keyframe exactly at the seek point.
       '-c:v', H264_ENCODER,
       '-preset', H264_PRESET,
-      // Kill encoder lookahead / B-frame queue so output streams as fast as
-      // frames go in. Without this x264 buffers ~8 frames before first output
-      // which adds latency and can stall Chrome's MSE buffer.
       '-tune', 'zerolatency',
-      // Scale down cap (config-driven). Keeps encode CPU and output bandwidth
-      // within the pipeline's weakest link (often home upload to Cloudflare).
       '-vf', `scale='min(${VIDEO_MAX_WIDTH},iw)':-2`,
-      // Cap bitrate for predictable output rate. Needs to fit inside home upload
-      // speed with headroom for audio + overhead.
       '-b:v', VIDEO_BITRATE,
       '-maxrate', VIDEO_MAX_BITRATE,
       '-bufsize', `${parseInt(VIDEO_MAX_BITRATE) * 2}k`,
       '-pix_fmt', 'yuv420p',
-      // Keyframe every 1 second + frag_keyframe below = one video-bearing
-      // fragment every second. Keeps MSE video buffer fed continuously.
       '-force_key_frames', 'expr:gte(t,n_forced*1)',
       '-c:a', 'aac',
       '-b:a', AUDIO_BITRATE,
@@ -150,7 +128,62 @@ function handleTranscode(reqUrl, res) {
     )
   }
 
-  const ff = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+  // Co-extract subtitle streams to additional stdio pipes (pipe:3, pipe:4, ...).
+  // Pipes flush immediately as ffmpeg encodes — no buffering delay like file outputs.
+  const subtitlePipeEntries = [] // 'pipe' for each subtitle track → appended to stdio array
+  for (let i = 0; i < subtitleIndices.length; i++) {
+    const idx = subtitleIndices[i]
+    const pipeN = 3 + i
+    subtitlePipeEntries.push('pipe')
+    args.push('-map', `0:${idx}?`, '-copyts', '-c:s', 'webvtt', '-f', 'webvtt', `pipe:${pipeN}`)
+  }
+
+  // Build in-memory subtitle stream buffers, registered BEFORE spawn so a
+  // /subtitle request arriving during the race window still finds the entry.
+  const subtitleStreams = new Map()
+  if (subtitleIndices.length > 0) {
+    for (const idx of subtitleIndices) {
+      subtitleStreams.set(idx, { chunks: [], ended: false, readers: new Set() })
+    }
+    activeTranscodes.set(transKey, { ff: null, subtitleStreams, alive: true })
+    process.stderr.write(
+      `[transcode] co-extracting subs indices=[${subtitleIndices}] transKey=${transKey.slice(0, 8)} start=${start}\n`,
+    )
+  }
+
+  const ff = spawn(FFMPEG_PATH, args, {
+    stdio: ['ignore', 'pipe', 'pipe', ...subtitlePipeEntries],
+  })
+
+  if (subtitleIndices.length > 0) {
+    const entry = activeTranscodes.get(transKey)
+    entry.ff = ff
+
+    for (let i = 0; i < subtitleIndices.length; i++) {
+      const idx = subtitleIndices[i]
+      const pipeStream = ff.stdio[3 + i]
+      const stream = subtitleStreams.get(idx)
+
+      pipeStream.on('data', (chunk) => {
+        stream.chunks.push(chunk)
+        for (const r of stream.readers) {
+          try { r.write(chunk) } catch { stream.readers.delete(r) }
+        }
+      })
+
+      const endStream = () => {
+        stream.ended = true
+        for (const r of stream.readers) {
+          try { r.end() } catch {}
+        }
+        stream.readers.clear()
+      }
+
+      pipeStream.on('end', endStream)
+      pipeStream.on('error', endStream)
+    }
+  }
+
   let headersSent = false
   let sawStderrError = false
 
@@ -193,16 +226,42 @@ function handleTranscode(reqUrl, res) {
     if (code !== 0 && signal !== 'SIGKILL') {
       console.error('ffmpeg exit', { code, signal })
     }
+    if (subtitleIndices.length > 0) {
+      const entry = activeTranscodes.get(transKey)
+      if (entry) {
+        entry.alive = false
+        if (code === 0) {
+          // Promote accumulated subtitle buffers to permanent cache.
+          for (const [idx, stream] of entry.subtitleStreams) {
+            if (stream.chunks.length > 0) {
+              const cacheFile = subCachePath(target, idx, vstart, seekBucket)
+              try { fs.writeFileSync(cacheFile, Buffer.concat(stream.chunks)) } catch {}
+            }
+          }
+        }
+        setTimeout(() => activeTranscodes.delete(transKey), 15_000)
+      }
+    }
   })
 
   const cleanup = () => {
     if (!ff.killed) ff.kill('SIGKILL')
+    if (subtitleIndices.length > 0) {
+      const entry = activeTranscodes.get(transKey)
+      if (entry) {
+        entry.alive = false
+        for (const stream of entry.subtitleStreams.values()) {
+          stream.ended = true
+          for (const r of stream.readers) { try { r.end() } catch {} }
+          stream.readers.clear()
+        }
+        activeTranscodes.delete(transKey)
+      }
+    }
   }
   res.on('close', cleanup)
 }
 
-// Subtitle codecs ffmpeg can convert directly to WebVTT.
-// Image-based subs (PGS/DVB/VobSub) need OCR — out of scope.
 const TEXT_SUB_CODECS = new Set(['subrip', 'srt', 'ass', 'ssa', 'mov_text', 'webvtt', 'text'])
 
 function handleProbe(reqUrl, res) {
@@ -291,6 +350,28 @@ function serveCachedSubtitle(file, res, source) {
   fs.createReadStream(file).pipe(res)
 }
 
+// Stream subtitle data from an active co-extraction pipe buffer.
+// Immediately sends all buffered chunks, then subscribes for future data.
+function streamFromSubtitleBuffer(stream, res) {
+  res.writeHead(200, {
+    'Content-Type': 'text/vtt; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Sub-Cache': 'PIPE',
+  })
+
+  for (const chunk of stream.chunks) {
+    res.write(chunk)
+  }
+
+  if (stream.ended) {
+    res.end()
+    return
+  }
+
+  stream.readers.add(res)
+  res.on('close', () => stream.readers.delete(res))
+}
+
 function handleSubtitle(reqUrl, res) {
   const target = parseTargetUrl(reqUrl, res)
   if (!target) return
@@ -301,27 +382,15 @@ function handleSubtitle(reqUrl, res) {
     return
   }
   const index = Number(indexParam)
-  // vstart: the video stream's format-level start_time in seconds (from /probe).
-  // Non-zero when the source container has a PTS origin offset (common with
-  // IPTV-remuxed MPEG-TS sources). We apply -itsoffset -{vstart} so the VTT
-  // cue timestamps are relative to the video's re-based timeline (starting at
-  // 0), rather than the container's raw PTS. Without this, subtitles are
-  // consistently N seconds off whenever the source has a non-zero start_time.
   const vstartParam = Number(reqUrl.searchParams.get('vstart') || 0)
   const vstart = Number.isFinite(vstartParam) && vstartParam > 0 ? vstartParam : 0
-  // start: the movie position the user seeked to. We bucket to the nearest 5
-  // minutes so nearby seeks reuse the same cache. We seek ffmpeg to (bucket-60)
-  // so there's a 1-minute pre-buffer before the requested position — this
-  // avoids missing a cue that started just before the seek point.
-  // VTT timestamps remain absolute (container-based), so they match currentTime
-  // on the client regardless of where we started the extraction.
   const startParam = Number(reqUrl.searchParams.get('start') || 0)
   const start = Number.isFinite(startParam) && startParam > 0 ? startParam : 0
   const seekBucket = start > 0 ? Math.floor(start / 300) * 300 : 0
   const seekTo = seekBucket > 0 ? Math.max(0, seekBucket - 60) : 0
   const cacheFile = subCachePath(target, index, vstart, seekBucket)
 
-  // Cache hit — serve immediately.
+  // 1. Permanent cache hit.
   try {
     const stat = fs.statSync(cacheFile)
     if (Date.now() - stat.mtimeMs < SUB_CACHE_TTL_MS) {
@@ -331,23 +400,39 @@ function handleSubtitle(reqUrl, res) {
     }
     process.stderr.write(`[subtitle] cache EXPIRED index=${index} bucket=${seekBucket} — re-extracting\n`)
     fs.unlinkSync(cacheFile)
-  } catch {
-    // ENOENT — proceed to extract
+  } catch { /* ENOENT */ }
+
+  // 2. Active co-extraction pipe — stream directly from the in-memory buffer.
+  //    On seek, the subtitle request may arrive before the new transcode registers.
+  //    Poll for up to 3 s before falling back to standalone ffmpeg.
+  const transKey = createHash('sha1').update(`${target}|${seekBucket}`).digest('hex')
+  let cancelled = false
+  res.on('close', () => { cancelled = true })
+
+  const tryFollowOrFallback = (retriesLeft) => {
+    if (cancelled) return
+    const activeEntry = activeTranscodes.get(transKey)
+    if (activeEntry && activeEntry.subtitleStreams?.has(index)) {
+      process.stderr.write(`[subtitle] PIPE active transcode index=${index} transKey=${transKey.slice(0, 8)}\n`)
+      streamFromSubtitleBuffer(activeEntry.subtitleStreams.get(index), res)
+      return
+    }
+    if (retriesLeft > 0) {
+      setTimeout(() => tryFollowOrFallback(retriesLeft - 1), 200)
+      return
+    }
+    // 3. Fallback: standalone extraction (only when no video transcode is competing).
+    process.stderr.write(`[subtitle] FALLBACK standalone index=${index} bucket=${seekBucket}\n`)
+    startStandaloneSubtitle(target, index, vstart, seekTo, seekBucket, cacheFile, res)
   }
 
-  // Cache miss: pipe ffmpeg's WebVTT output to BOTH the client and a tmp file
-  // simultaneously. The client gets cues incrementally (first cue typically in
-  // 1–5 s once the MKV's first cluster lands), and the tmp file becomes the
-  // cache once ffmpeg exits. ffmpeg keeps running even if the client
-  // disconnects, so subsequent requests are instant cache hits.
+  tryFollowOrFallback(15)
+}
+
+function startStandaloneSubtitle(target, index, vstart, seekTo, seekBucket, cacheFile, res) {
   const tmpFile = `${cacheFile}.${process.pid}.${Date.now()}.tmp`
   const args = ['-hide_banner', '-loglevel', 'error']
-  // Seek to slightly before the requested position so the user gets immediate
-  // coverage. With HTTP+MKV this uses the cue index for a fast range-request
-  // seek — ffmpeg doesn't need to read through the entire file from the start.
   if (seekTo > 0) args.push('-ss', String(seekTo))
-  // Shift all input timestamps by -vstart to normalise subtitle cue times
-  // to match the video's re-based (0-origin) timeline.
   if (vstart > 0) args.push('-itsoffset', String(-vstart))
   args.push(
     '-i', target,
@@ -375,14 +460,6 @@ function handleSubtitle(reqUrl, res) {
 
   ff.stderr.on('data', (c) => { stderrBuf += c.toString() })
 
-  // Keepalive: ffmpeg's WebVTT output is completely silent between subtitle cues —
-  // action scenes, music, long pauses can easily exceed 60 s with no output. Without
-  // keepalives, the client-side stall timer fires, aborts the fetch, and the proxy's
-  // ffmpeg continues reading the source until the IPTV server closes the connection
-  // (~56 min in practice), then exits 0 and saves a *partial* cache. Every subsequent
-  // load would hit that partial cache. The fix: send a VTT NOTE comment to the client
-  // only (not the file writer — cache stays clean) every ~20 s of silence so the
-  // client's lastByteAt stays fresh and the stall timer never fires.
   const keepaliveTimer = setInterval(() => {
     if (!clientAlive || !headersSent) return
     if (Date.now() - lastFfmpegOutputAt >= 20_000) {
