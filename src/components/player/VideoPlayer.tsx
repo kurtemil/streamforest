@@ -334,7 +334,7 @@ export function VideoPlayer() {
       const aborted = (err as { name?: string }).name === 'AbortError'
       if (aborted && !stalled) return
       const msg = stalled
-        ? 'Subtitle extraction stalled — no data from proxy in 30 s'
+        ? 'Subtitle extraction stalled — no data from proxy in 60 s'
         : (err instanceof Error ? err.message : 'Subtitle load failed')
       console.warn('[subtitle] attach failed:', err)
       flashSubtitleNotice(msg)
