@@ -351,6 +351,7 @@ function handleSubtitle(reqUrl, res) {
   if (vstart > 0) args.push('-itsoffset', String(-vstart))
   args.push(
     '-i', target,
+    '-copyts',
     '-map', `0:${index}`,
     '-c:s', 'webvtt',
     '-f', 'webvtt',
@@ -367,7 +368,10 @@ function handleSubtitle(reqUrl, res) {
   let lastFfmpegOutputAt = Date.now()
   let bytesFromFfmpeg = 0
 
-  res.on('close', () => { clientAlive = false })
+  res.on('close', () => {
+    clientAlive = false
+    if (!ff.killed) ff.kill('SIGKILL')
+  })
 
   ff.stderr.on('data', (c) => { stderrBuf += c.toString() })
 
