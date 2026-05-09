@@ -84,19 +84,22 @@ function handleTranscode(reqUrl, res) {
   if (live) {
     args.push('-fflags', '+genpts+discardcorrupt')
   }
-  // Two-pass seek for non-live streams: fast input seek gets us close, then an
-  // accurate output-level seek lands on the exact requested second. Without this,
-  // the fast input seek lands on the nearest keyframe BEFORE start, so the output
-  // begins a few seconds early and causes constant subtitle/timeline desync equal
-  // to (start − actual_keyframe). The output-level -ss is cheap: in copy mode it
-  // just reads/discards packets within the ~5s fast-seek window; in transcode mode
-  // the decoder already has all frames in that window buffered.
-  if (start > 0 && !live) args.push('-ss', String(Math.max(0, start - 5)))
+  // Seeking strategy differs by mode:
+  // • transcode: two-pass (fast input seek + accurate output seek). The re-encoder
+  //   can start at any frame, so output begins at exactly `start` → frame-accurate
+  //   subtitle sync.
+  // • copy: single-pass fast seek only. The output-level -ss in copy mode overshoots
+  //   to the NEXT keyframe (≥ start), making subtitles appear a few seconds early.
+  //   Single-pass lands at the keyframe just BEFORE start, making subs slightly late —
+  //   which is less jarring perceptually than early.
+  if (start > 0 && !live) {
+    args.push('-ss', String(mode === 'transcode' ? Math.max(0, start - 5) : start))
+  }
   args.push('-i', target,
     '-map', '0:v:0',
     '-map', audioIdx !== null ? `0:${audioIdx}` : '0:a:0?',
   )
-  if (start > 0 && !live) args.push('-ss', String(start))
+  if (start > 0 && !live && mode === 'transcode') args.push('-ss', String(start))
 
   if (mode === 'copy') {
     const movflags = live
