@@ -1,5 +1,5 @@
 name: StreamForest Transcode Proxy
-version: "0.4.0"
+version: "0.4.1"
 slug: streamforest_transcode
 description: HTTP proxy that transcodes AC3/DTS/EAC3 MKV streams to AAC for web playback
 url: https://github.com/kurtemil/streamforest

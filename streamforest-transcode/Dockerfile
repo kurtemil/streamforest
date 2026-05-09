@@ -5,6 +5,6 @@ RUN apk add --no-cache nodejs ffmpeg
 
 WORKDIR /app
 COPY server.mjs run.sh ./
-RUN chmod a+x /app/run.sh
+RUN chmod a+x /app/run.sh && node --check server.mjs
 
 CMD ["/app/run.sh"]

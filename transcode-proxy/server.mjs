@@ -436,6 +436,7 @@ function handleSubtitle(reqUrl, res) {
 
 const server = http.createServer((req, res) => {
   const reqUrl = new URL(req.url ?? '/', `http://${req.headers.host}`)
+  process.stderr.write(`[req] ${req.method} ${reqUrl.pathname}\n`)
 
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
