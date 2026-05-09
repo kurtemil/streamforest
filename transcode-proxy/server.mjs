@@ -315,9 +315,11 @@ function handleSubtitle(reqUrl, res) {
   try {
     const stat = fs.statSync(cacheFile)
     if (Date.now() - stat.mtimeMs < SUB_CACHE_TTL_MS) {
+      console.log(`[subtitle] cache HIT index=${index} size=${stat.size} age=${Math.round((Date.now()-stat.mtimeMs)/60000)}min`)
       serveCachedSubtitle(cacheFile, res, 'HIT')
       return
     }
+    console.log(`[subtitle] cache EXPIRED index=${index} — re-extracting`)
     fs.unlinkSync(cacheFile)
   } catch {
     // ENOENT — proceed to extract
@@ -342,11 +344,14 @@ function handleSubtitle(reqUrl, res) {
   )
 
   const ff = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+  const startedAt = Date.now()
+  console.log(`[subtitle] start index=${index} vstart=${vstart} url=${target.slice(0, 80)}`)
   const writer = fs.createWriteStream(tmpFile)
   let headersSent = false
   let stderrBuf = ''
   let clientAlive = true
   let lastFfmpegOutputAt = Date.now()
+  let bytesFromFfmpeg = 0
 
   res.on('close', () => { clientAlive = false })
 
@@ -370,6 +375,7 @@ function handleSubtitle(reqUrl, res) {
 
   ff.stdout.on('data', (chunk) => {
     lastFfmpegOutputAt = Date.now()
+    bytesFromFfmpeg += chunk.length
     writer.write(chunk)
     if (!headersSent) {
       headersSent = true
@@ -394,6 +400,8 @@ function handleSubtitle(reqUrl, res) {
 
   ff.on('exit', (code) => {
     clearInterval(keepaliveTimer)
+    const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1)
+    console.log(`[subtitle] exit code=${code} elapsed=${elapsed}s bytes=${bytesFromFfmpeg} stderr=${stderrBuf.slice(0, 300).replace(/\n/g, ' ')}`)
     writer.end(() => {
       if (code === 0) {
         try { fs.renameSync(tmpFile, cacheFile) } catch {}
