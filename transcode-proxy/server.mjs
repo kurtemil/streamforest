@@ -277,8 +277,8 @@ function handleProbe(reqUrl, res) {
   })
 }
 
-function subCachePath(url, index, vstart) {
-  const hash = createHash('sha1').update(`${url}|${index}|${vstart}`).digest('hex')
+function subCachePath(url, index, vstart, seekBucket) {
+  const hash = createHash('sha1').update(`${url}|${index}|${vstart}|${seekBucket}`).digest('hex')
   return path.join(SUB_CACHE_DIR, `${hash}.vtt`)
 }
 
@@ -309,17 +309,27 @@ function handleSubtitle(reqUrl, res) {
   // consistently N seconds off whenever the source has a non-zero start_time.
   const vstartParam = Number(reqUrl.searchParams.get('vstart') || 0)
   const vstart = Number.isFinite(vstartParam) && vstartParam > 0 ? vstartParam : 0
-  const cacheFile = subCachePath(target, index, vstart)
+  // start: the movie position the user seeked to. We bucket to the nearest 5
+  // minutes so nearby seeks reuse the same cache. We seek ffmpeg to (bucket-60)
+  // so there's a 1-minute pre-buffer before the requested position — this
+  // avoids missing a cue that started just before the seek point.
+  // VTT timestamps remain absolute (container-based), so they match currentTime
+  // on the client regardless of where we started the extraction.
+  const startParam = Number(reqUrl.searchParams.get('start') || 0)
+  const start = Number.isFinite(startParam) && startParam > 0 ? startParam : 0
+  const seekBucket = start > 0 ? Math.floor(start / 300) * 300 : 0
+  const seekTo = seekBucket > 0 ? Math.max(0, seekBucket - 60) : 0
+  const cacheFile = subCachePath(target, index, vstart, seekBucket)
 
   // Cache hit — serve immediately.
   try {
     const stat = fs.statSync(cacheFile)
     if (Date.now() - stat.mtimeMs < SUB_CACHE_TTL_MS) {
-      console.log(`[subtitle] cache HIT index=${index} size=${stat.size} age=${Math.round((Date.now()-stat.mtimeMs)/60000)}min`)
+      process.stderr.write(`[subtitle] cache HIT index=${index} bucket=${seekBucket} size=${stat.size} age=${Math.round((Date.now()-stat.mtimeMs)/60000)}min\n`)
       serveCachedSubtitle(cacheFile, res, 'HIT')
       return
     }
-    console.log(`[subtitle] cache EXPIRED index=${index} — re-extracting`)
+    process.stderr.write(`[subtitle] cache EXPIRED index=${index} bucket=${seekBucket} — re-extracting\n`)
     fs.unlinkSync(cacheFile)
   } catch {
     // ENOENT — proceed to extract
@@ -332,6 +342,10 @@ function handleSubtitle(reqUrl, res) {
   // disconnects, so subsequent requests are instant cache hits.
   const tmpFile = `${cacheFile}.${process.pid}.${Date.now()}.tmp`
   const args = ['-hide_banner', '-loglevel', 'error']
+  // Seek to slightly before the requested position so the user gets immediate
+  // coverage. With HTTP+MKV this uses the cue index for a fast range-request
+  // seek — ffmpeg doesn't need to read through the entire file from the start.
+  if (seekTo > 0) args.push('-ss', String(seekTo))
   // Shift all input timestamps by -vstart to normalise subtitle cue times
   // to match the video's re-based (0-origin) timeline.
   if (vstart > 0) args.push('-itsoffset', String(-vstart))
@@ -345,7 +359,7 @@ function handleSubtitle(reqUrl, res) {
 
   const ff = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] })
   const startedAt = Date.now()
-  console.log(`[subtitle] start index=${index} vstart=${vstart} url=${target.slice(0, 80)}`)
+  process.stderr.write(`[subtitle] start index=${index} bucket=${seekBucket} seekTo=${seekTo} vstart=${vstart} url=${target.slice(0, 80)}\n`)
   const writer = fs.createWriteStream(tmpFile)
   let headersSent = false
   let stderrBuf = ''
@@ -401,7 +415,7 @@ function handleSubtitle(reqUrl, res) {
   ff.on('exit', (code) => {
     clearInterval(keepaliveTimer)
     const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1)
-    console.log(`[subtitle] exit code=${code} elapsed=${elapsed}s bytes=${bytesFromFfmpeg} stderr=${stderrBuf.slice(0, 300).replace(/\n/g, ' ')}`)
+    process.stderr.write(`[subtitle] exit code=${code} elapsed=${elapsed}s bytes=${bytesFromFfmpeg} bucket=${seekBucket} stderr=${stderrBuf.slice(0, 200).replace(/\n/g, ' ')}\n`)
     writer.end(() => {
       if (code === 0) {
         try { fs.renameSync(tmpFile, cacheFile) } catch {}
