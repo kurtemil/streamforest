@@ -87,6 +87,9 @@ export function VideoPlayer() {
   // codecs) or 'transcode' (full re-encode for AC3/DTS/etc.). Re-applied when
   // the URL is rebuilt for seek or audio swap.
   const proxyModeRef = useRef<ProxyMode | null>(null)
+  // format-level start_time from probe — used to normalise subtitle VTT timestamps
+  // so they align with the re-based (0-origin) video timeline.
+  const videoStartTimeRef = useRef(0)
   // Tracks the active VTT subtitle so we can re-attach after a src reload
   // (audio swap rebuilds video.src, which clears any addTextTrack-created list).
   const activeSubtitleRef = useRef(-1)
@@ -264,7 +267,7 @@ export function VideoPlayer() {
   // so no re-fetch or timestamp adjustment is ever needed after a seek.
   const attachSubtitleTrack = useCallback(async (streamIndex: number, _label: string, _lang: string) => {
     if (!current) return
-    const url = subtitleVttUrl(current.url, streamIndex)
+    const url = subtitleVttUrl(current.url, streamIndex, videoStartTimeRef.current)
     if (!url) return
     detachSubtitleTrack()
     const ctrl = new AbortController()
@@ -481,6 +484,7 @@ export function VideoPlayer() {
           const mode = pickProxyMode(info)
           proxyModeRef.current = mode
           isTranscodedRef.current = true
+          videoStartTimeRef.current = info?.startTime ?? 0
           playbackOffsetRef.current = startTime
           transcodedDurationRef.current = info?.duration ?? null
           if (info?.duration) setDuration(info.duration)
@@ -491,6 +495,7 @@ export function VideoPlayer() {
           })
         } else {
           isTranscodedRef.current = false
+          videoStartTimeRef.current = 0
           playbackOffsetRef.current = 0
           transcodedDurationRef.current = null
           video.src = current.url

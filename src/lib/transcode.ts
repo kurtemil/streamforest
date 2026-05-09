@@ -28,6 +28,7 @@ export interface SubtitleStream {
 
 export interface MediaInfo {
   duration: number | null
+  startTime: number  // format-level PTS start offset in seconds; 0 for files that begin at PTS 0
   audioCodec: string | null
   videoCodec: string | null
   audioStreams: AudioStream[]
@@ -94,10 +95,12 @@ export function pickProxyMode(info: MediaInfo | null): ProxyMode {
   return 'copy'
 }
 
-export function subtitleVttUrl(url: string, index: number): string | null {
+export function subtitleVttUrl(url: string, index: number, vstart = 0): string | null {
   const base = proxyBase()
   if (!base) return null
-  return `${base}/subtitle?${new URLSearchParams({ url, index: String(index) }).toString()}`
+  const params = new URLSearchParams({ url, index: String(index) })
+  if (vstart > 0) params.set('vstart', String(vstart))
+  return `${base}/subtitle?${params.toString()}`
 }
 
 export async function probeMedia(url: string, signal?: AbortSignal): Promise<MediaInfo | null> {
@@ -113,6 +116,7 @@ export async function probeMedia(url: string, signal?: AbortSignal): Promise<Med
     const data = (await res.json()) as Partial<MediaInfo>
     return {
       duration: typeof data.duration === 'number' && isFinite(data.duration) ? data.duration : null,
+      startTime: typeof data.startTime === 'number' && isFinite(data.startTime) ? data.startTime : 0,
       audioCodec: typeof data.audioCodec === 'string' ? data.audioCodec : null,
       videoCodec: typeof data.videoCodec === 'string' ? data.videoCodec : null,
       audioStreams: Array.isArray(data.audioStreams) ? data.audioStreams : [],

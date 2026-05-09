@@ -209,7 +209,7 @@ function handleProbe(reqUrl, res) {
   const args = [
     '-hide_banner',
     '-loglevel', 'error',
-    '-show_entries', 'format=duration:stream=index,codec_type,codec_name,channels:stream_tags=language,title',
+    '-show_entries', 'format=duration,start_time:stream=index,codec_type,codec_name,channels:stream_tags=language,title',
     '-of', 'json',
     target,
   ]
@@ -231,6 +231,8 @@ function handleProbe(reqUrl, res) {
     try {
       const parsed = JSON.parse(out)
       const duration = Number(parsed?.format?.duration)
+      const rawStart = Number(parsed?.format?.start_time)
+      const startTime = Number.isFinite(rawStart) && rawStart > 0.01 ? rawStart : 0
       const streams = Array.isArray(parsed?.streams) ? parsed.streams : []
       const audio = streams.find((s) => s.codec_type === 'audio')
       const video = streams.find((s) => s.codec_type === 'video')
@@ -256,6 +258,7 @@ function handleProbe(reqUrl, res) {
         'Cache-Control': 'public, max-age=86400',
       }).end(JSON.stringify({
         duration: Number.isFinite(duration) ? duration : null,
+        startTime,
         audioCodec: audio?.codec_name ?? null,
         videoCodec: video?.codec_name ?? null,
         audioStreams,
@@ -271,8 +274,8 @@ function handleProbe(reqUrl, res) {
   })
 }
 
-function subCachePath(url, index) {
-  const hash = createHash('sha1').update(`${url}|${index}`).digest('hex')
+function subCachePath(url, index, vstart) {
+  const hash = createHash('sha1').update(`${url}|${index}|${vstart}`).digest('hex')
   return path.join(SUB_CACHE_DIR, `${hash}.vtt`)
 }
 
@@ -295,7 +298,15 @@ function handleSubtitle(reqUrl, res) {
     return
   }
   const index = Number(indexParam)
-  const cacheFile = subCachePath(target, index)
+  // vstart: the video stream's format-level start_time in seconds (from /probe).
+  // Non-zero when the source container has a PTS origin offset (common with
+  // IPTV-remuxed MPEG-TS sources). We apply -itsoffset -{vstart} so the VTT
+  // cue timestamps are relative to the video's re-based timeline (starting at
+  // 0), rather than the container's raw PTS. Without this, subtitles are
+  // consistently N seconds off whenever the source has a non-zero start_time.
+  const vstartParam = Number(reqUrl.searchParams.get('vstart') || 0)
+  const vstart = Number.isFinite(vstartParam) && vstartParam > 0 ? vstartParam : 0
+  const cacheFile = subCachePath(target, index, vstart)
 
   // Cache hit — serve immediately.
   try {
@@ -315,15 +326,17 @@ function handleSubtitle(reqUrl, res) {
   // cache once ffmpeg exits. ffmpeg keeps running even if the client
   // disconnects, so subsequent requests are instant cache hits.
   const tmpFile = `${cacheFile}.${process.pid}.${Date.now()}.tmp`
-  const args = [
-    '-hide_banner',
-    '-loglevel', 'error',
+  const args = ['-hide_banner', '-loglevel', 'error']
+  // Shift all input timestamps by -vstart to normalise subtitle cue times
+  // to match the video's re-based (0-origin) timeline.
+  if (vstart > 0) args.push('-itsoffset', String(-vstart))
+  args.push(
     '-i', target,
     '-map', `0:${index}`,
     '-c:s', 'webvtt',
     '-f', 'webvtt',
     'pipe:1',
-  ]
+  )
 
   const ff = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] })
   const writer = fs.createWriteStream(tmpFile)
