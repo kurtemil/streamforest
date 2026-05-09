@@ -94,10 +94,10 @@ export function VideoPlayer() {
   // (audio swap rebuilds video.src, which clears any addTextTrack-created list).
   const activeSubtitleRef = useRef(-1)
   const subtitleAbortRef = useRef<AbortController | null>(null)
-  // Stall threshold: only abort the subtitle stream if NO bytes arrive for this
-  // long. As long as ffmpeg keeps producing cues we stay connected, however
-  // long the full extraction takes — first cues display within seconds anyway.
-  const SUBTITLE_STALL_MS = 60_000
+  // Stall threshold: abort only if NO bytes from the proxy for this long.
+  // The proxy sends VTT NOTE keepalives every ~20 s during silent stretches so
+  // this should only fire on genuine proxy failure, not subtitle gaps.
+  const SUBTITLE_STALL_MS = 300_000
   const [isBuffering, setIsBuffering] = useState(true)
   const [showControls, setShowControls] = useState(true)
   const [duration, setDuration] = useState(0)

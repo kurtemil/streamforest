@@ -343,12 +343,30 @@ function handleSubtitle(reqUrl, res) {
   let headersSent = false
   let stderrBuf = ''
   let clientAlive = true
+  let lastFfmpegOutputAt = Date.now()
 
   res.on('close', () => { clientAlive = false })
 
   ff.stderr.on('data', (c) => { stderrBuf += c.toString() })
 
+  // Keepalive: ffmpeg's WebVTT output is completely silent between subtitle cues —
+  // action scenes, music, long pauses can easily exceed 60 s with no output. Without
+  // keepalives, the client-side stall timer fires, aborts the fetch, and the proxy's
+  // ffmpeg continues reading the source until the IPTV server closes the connection
+  // (~56 min in practice), then exits 0 and saves a *partial* cache. Every subsequent
+  // load would hit that partial cache. The fix: send a VTT NOTE comment to the client
+  // only (not the file writer — cache stays clean) every ~20 s of silence so the
+  // client's lastByteAt stays fresh and the stall timer never fires.
+  const keepaliveTimer = setInterval(() => {
+    if (!clientAlive || !headersSent) return
+    if (Date.now() - lastFfmpegOutputAt >= 20_000) {
+      res.write('\nNOTE\n\n')
+      lastFfmpegOutputAt = Date.now()
+    }
+  }, 5_000)
+
   ff.stdout.on('data', (chunk) => {
+    lastFfmpegOutputAt = Date.now()
     writer.write(chunk)
     if (!headersSent) {
       headersSent = true
@@ -362,6 +380,7 @@ function handleSubtitle(reqUrl, res) {
   })
 
   ff.on('error', (e) => {
+    clearInterval(keepaliveTimer)
     writer.end(() => { try { fs.unlinkSync(tmpFile) } catch {} })
     if (clientAlive && !headersSent) {
       res.writeHead(500, { 'Content-Type': 'text/plain' }).end(`ffmpeg spawn failed: ${e.message}`)
@@ -371,6 +390,7 @@ function handleSubtitle(reqUrl, res) {
   })
 
   ff.on('exit', (code) => {
+    clearInterval(keepaliveTimer)
     writer.end(() => {
       if (code === 0) {
         try { fs.renameSync(tmpFile, cacheFile) } catch {}
