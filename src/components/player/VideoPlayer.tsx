@@ -14,6 +14,7 @@ import {
 } from '@/lib/transcode'
 import type { ProxyMode } from '@/lib/transcode'
 import { normalizeShowKey } from '@/lib/utils'
+import { parseVttBlock } from '@/lib/vtt'
 import { PlayerControls } from './PlayerControls'
 
 const SAVE_INTERVAL_MS = 5000
@@ -26,32 +27,6 @@ function isProxyVideo(channel: { type: string; url: string } | null): boolean {
   return channel.type === 'movie' || channel.type === 'series' || VIDEO_EXT.test(channel.url)
 }
 
-function parseVttTimestamp(s: string): number {
-  const m = s.match(/^(?:(\d+):)?(\d+):(\d+)\.(\d+)$/)
-  if (!m) return NaN
-  const h = m[1] ? Number(m[1]) : 0
-  return h * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4].padEnd(3, '0').slice(0, 3)) / 1000
-}
-
-function parseVttBlock(block: string): VTTCue | null {
-  const lines = block.split('\n').filter(l => l.length > 0)
-  if (lines.length === 0) return null
-  if (lines[0].startsWith('WEBVTT')) return null
-  if (/^(NOTE|STYLE|REGION)\b/.test(lines[0])) return null
-  const tsIdx = lines.findIndex(l => l.includes('-->'))
-  if (tsIdx < 0) return null
-  const [rawStart, rawEnd] = lines[tsIdx].split('-->').map(s => s.trim().split(/\s+/)[0] ?? '')
-  const start = parseVttTimestamp(rawStart)
-  const end = parseVttTimestamp(rawEnd)
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null
-  const content = lines.slice(tsIdx + 1).join('\n').trim()
-  if (!content) return null
-  try {
-    return new VTTCue(start, end, content)
-  } catch {
-    return null
-  }
-}
 
 type VideoWithAudioTracks = HTMLVideoElement & {
   audioTracks?: EventTarget & {
@@ -337,7 +312,7 @@ export function VideoPlayer() {
       const aborted = (err as { name?: string }).name === 'AbortError'
       if (aborted && !stalled) return
       const msg = stalled
-        ? 'Subtitle extraction stalled — no data from proxy in 60 s'
+        ? 'Subtitle extraction stalled — no data from proxy in 5 min'
         : (err instanceof Error ? err.message : 'Subtitle load failed')
       console.warn('[subtitle] attach failed:', err)
       flashSubtitleNotice(msg)
