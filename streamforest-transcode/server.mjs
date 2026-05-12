@@ -115,7 +115,7 @@ function handleTranscode(reqUrl, res) {
   } else if (H264_ENCODER === 'h264_vaapi') {
     args.push(
       '-c:v', 'h264_vaapi',
-      '-vf', `format=nv12,hwupload,scale_vaapi=w='min(iw,${VIDEO_MAX_WIDTH})':h=-2`,
+      '-vf', `scale='min(iw,${VIDEO_MAX_WIDTH})':-2,format=nv12,hwupload`,
       '-b:v', VIDEO_BITRATE,
       '-maxrate', VIDEO_MAX_BITRATE,
       '-bufsize', `${parseInt(VIDEO_MAX_BITRATE) * 2}k`,
