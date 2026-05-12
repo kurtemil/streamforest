@@ -63,7 +63,7 @@ export function MovieDetailModal({ channel, tmdbMeta, isWatchLater, onClose, onP
             initial={{ opacity: 0, y: 40, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1, transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] } }}
             exit={{ opacity: 0, y: 20, scale: 0.97, transition: { duration: 0.22 } }}
-            className="fixed inset-x-4 top-6 bottom-6 z-40 md:inset-x-[10%] lg:inset-x-[15%] xl:inset-x-[20%] rounded-2xl overflow-hidden flex flex-col bg-surface-200 shadow-cinema ring-1 ring-white/8"
+            className="fixed inset-x-4 top-6 bottom-6 z-40 md:inset-x-[10%] lg:inset-x-[15%] xl:inset-x-[20%] rounded-2xl overflow-hidden flex flex-col bg-surface-200 shadow-cinema outline-none"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Backdrop header */}

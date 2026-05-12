@@ -63,7 +63,7 @@ export function Dialog({ open, onClose, title, children, size = 'md', persistent
             role="dialog"
             aria-modal="true"
             variants={panelVariants}
-            className={`relative w-full ${SIZE[size]} bg-surface-200 rounded-2xl ring-1 ring-white/8 shadow-cinema overflow-hidden ${className}`}
+            className={`relative w-full ${SIZE[size]} bg-surface-200 rounded-2xl shadow-cinema overflow-hidden outline-none ${className}`}
           >
             {title != null && (
               <div className="flex items-center justify-between px-5 py-4 border-b border-white/6">
