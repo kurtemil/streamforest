@@ -14,8 +14,8 @@ import { MovieDetailModal } from '@/components/home/MovieDetailModal'
 import { SearchBar } from '@/components/ui/SearchBar'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { GroupSidebar } from '@/components/ui/GroupSidebar'
-import { VirtualPosterGrid } from '@/ui'
 import { useTmdbEnrich } from '@/hooks/useTmdbEnrich'
+import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
 
 const RECENT_COUNT = 200          // when no group/search is active, show the 200 most recent
 const ENRICH_LIMIT = 200          // max items to enrich per view
@@ -107,6 +107,12 @@ export function MoviesPage() {
     play(m)
   }, [filtered, navigate, play])
 
+  const { count, sentinelRef, reset } = useInfiniteScroll()
+  useEffect(() => {
+    reset()
+    document.querySelector('main')?.scrollTo({ top: 0 })
+  }, [search, selectedGroup, reset])
+
   const [detailChannel, setDetailChannel] = useState<Channel | null>(null)
   const [detailTmdb, setDetailTmdb] = useState<TmdbMeta | null>(null)
 
@@ -152,8 +158,8 @@ export function MoviesPage() {
     : 'Recently Added'
 
   return (
-    <div className="flex flex-col md:flex-row h-full overflow-hidden">
-      <div className="md:p-4 md:pt-6 md:overflow-y-auto md:scrollbar-hide md:border-r md:border-white/5 md:shrink-0">
+    <div className="flex flex-col md:flex-row">
+      <div className="md:sticky md:top-0 md:self-start md:h-screen md:overflow-y-auto md:scrollbar-hide md:border-r md:border-white/5 md:shrink-0 md:p-4 md:pt-6">
         <GroupSidebar
           groups={groups}
           selected={selectedGroup}
@@ -163,9 +169,8 @@ export function MoviesPage() {
         />
       </div>
 
-      <div className="flex-1 flex flex-col min-w-0 min-h-0">
-        {/* Header — stacks vertically on mobile */}
-        <div className="px-4 sm:px-6 pt-5 pb-3 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
+      <div className="flex-1 min-w-0">
+        <div className="px-4 sm:px-6 pt-5 pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
           <div className="flex items-center justify-between sm:justify-start gap-3">
             <h1 className="text-xl font-bold text-white truncate">{heading}</h1>
             <p className="text-neutral-500 text-caption shrink-0">{filtered.length.toLocaleString()} titles</p>
@@ -184,44 +189,30 @@ export function MoviesPage() {
         </div>
 
         {filtered.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center">
+          <div className="flex items-center justify-center py-24">
             <EmptyState icon={<Film size={36} />} title="No results" description="Try a different search term." />
           </div>
         ) : (
           <>
-            {/* Mobile: plain scrollable grid — avoids VirtualPosterGrid height measurement issues */}
-            <div className="md:hidden overflow-y-auto flex-1 px-4 pb-6">
-              <div className="grid grid-cols-2 gap-4">
-                {filtered.map((m) => (
-                  <MovieCard
-                    key={m.id}
-                    channel={m}
-                    progress={progressMap?.[m.id]}
-                    isWatchLater={watchLaterSet?.has(m.id)}
-                    tmdbMeta={tmdbMap.get(m.id)}
-                    onClick={() => handleOpenDetail(m)}
-                    onWatchLater={(e) => toggleWatchLater(m.id, e)}
-                  />
-                ))}
-              </div>
+            <div className="px-4 sm:px-6 pb-12 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+              {filtered.slice(0, count).map((m) => (
+                <MovieCard
+                  key={m.id}
+                  channel={m}
+                  progress={progressMap?.[m.id]}
+                  isWatchLater={watchLaterSet?.has(m.id)}
+                  tmdbMeta={tmdbMap.get(m.id)}
+                  onClick={() => handleOpenDetail(m)}
+                  onWatchLater={(e) => toggleWatchLater(m.id, e)}
+                />
+              ))}
             </div>
-            {/* Desktop: virtualized grid */}
-            <div className="hidden md:block flex-1 min-h-0 px-6 pb-6 overflow-hidden">
-              <VirtualPosterGrid
-                items={filtered}
-                getKey={(m) => m.id}
-                renderItem={(m) => (
-                  <MovieCard
-                    channel={m}
-                    progress={progressMap?.[m.id]}
-                    isWatchLater={watchLaterSet?.has(m.id)}
-                    tmdbMeta={tmdbMap.get(m.id)}
-                    onClick={() => handleOpenDetail(m)}
-                    onWatchLater={(e) => toggleWatchLater(m.id, e)}
-                  />
-                )}
-              />
-            </div>
+            <div ref={sentinelRef} className="h-1" />
+            {count < filtered.length && (
+              <p className="text-center text-xs text-neutral-600 pb-8">
+                Showing {Math.min(count, filtered.length).toLocaleString()} of {filtered.length.toLocaleString()}
+              </p>
+            )}
           </>
         )}
       </div>

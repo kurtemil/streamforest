@@ -1,4 +1,5 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
+import { useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { BottomNav } from './BottomNav'
 import { CommandPalette } from '@/components/search/CommandPalette'
@@ -7,6 +8,12 @@ import { useSearchStore } from '@/stores/searchStore'
 
 export function Layout({ children }: { children: ReactNode }) {
   const { toggle } = useSearchStore()
+  const mainRef = useRef<HTMLElement>(null)
+  const { pathname } = useLocation()
+
+  useEffect(() => {
+    mainRef.current?.scrollTo(0, 0)
+  }, [pathname])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -22,7 +29,7 @@ export function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-full overflow-hidden">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto min-w-0 pb-16 md:pb-0">
+      <main ref={mainRef} className="flex-1 overflow-y-auto min-w-0 pb-16 md:pb-0">
         {children}
       </main>
       <BottomNav />

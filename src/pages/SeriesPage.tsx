@@ -12,10 +12,10 @@ import { Poster } from '@/ui'
 import { SearchBar } from '@/components/ui/SearchBar'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { GroupSidebar } from '@/components/ui/GroupSidebar'
-import { ProgressRing } from '@/components/ui/ProgressRing'
 import type { Channel, TmdbMeta } from '@/types'
 import { formatTime } from '@/lib/time'
 import { useTmdbEnrich } from '@/hooks/useTmdbEnrich'
+import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
 import { backdropUrl, posterUrl } from '@/services/tmdb'
 
 const RECENT_SHOWS = 40
@@ -107,52 +107,46 @@ function EpisodeRow({ ep, progress, onClick }: {
 }) {
   const pct = progress && progress.duration > 0 ? (progress.position / progress.duration) * 100 : 0
 
+  const epLabel = ep.episode !== undefined ? `E${String(ep.episode).padStart(2, '0')}` : null
+
   return (
-    <button onClick={onClick} className="flex items-start gap-3 w-full text-left p-3 rounded-lg hover:bg-white/5 transition-colors group">
-      {/* Thumbnail */}
-      <div className="relative w-36 aspect-video rounded-md overflow-hidden shrink-0 bg-[#1e1e1e]">
-        <Poster src={ep.logo} alt={ep.name} type="series" className="w-full h-full" />
+    <button onClick={onClick} className="flex items-center gap-4 w-full text-left py-3 px-2 rounded-lg hover:bg-white/5 transition-colors group">
+      {/* Episode number */}
+      <span className="w-8 shrink-0 text-center text-sm font-medium text-neutral-500 group-hover:text-neutral-300 transition-colors">
+        {epLabel ?? <Play size={13} className="mx-auto" />}
+      </span>
+
+      {/* Title + progress */}
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-white font-medium leading-snug truncate">
+          {ep.episodeTitle || ep.name}
+        </p>
         {pct > 0 && !progress?.completed && (
-          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/10">
-            <div className="h-full bg-accent-500" style={{ width: `${pct}%` }} />
+          <div className="mt-1.5 h-0.5 rounded-full bg-white/10 overflow-hidden">
+            <div className="h-full bg-accent-500 rounded-full" style={{ width: `${pct}%` }} />
           </div>
         )}
         {progress?.completed && (
-          <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-            <div className="w-7 h-7 rounded-full bg-accent-600/80 flex items-center justify-center">
-              <Check size={13} className="text-white" />
-            </div>
-          </div>
-        )}
-        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40">
-          <div className="w-9 h-9 rounded-full bg-black/60 flex items-center justify-center">
-            <Play size={16} fill="white" className="text-white ml-0.5" />
-          </div>
-        </div>
-      </div>
-
-      {/* Info */}
-      <div className="flex-1 min-w-0 pt-0.5">
-        <p className="text-sm text-white font-medium leading-snug">
-          {ep.episode !== undefined ? `E${String(ep.episode).padStart(2, '0')}` : ''}
-          {ep.episodeTitle ? ` · ${ep.episodeTitle}` : ''}
-        </p>
-        {progress && (
-          <p className="text-xs text-neutral-500 mt-1">
-            {progress.completed
-              ? 'Watched'
-              : progress.duration > 0
-              ? `${formatTime(progress.position)} / ${formatTime(progress.duration)}`
-              : 'Not started'}
-          </p>
+          <p className="text-xs text-neutral-500 mt-0.5">Watched</p>
         )}
       </div>
 
-      {pct > 0 && !progress?.completed && (
-        <div className="shrink-0 self-center mr-1">
-          <ProgressRing pct={pct} size={28} stroke={2} />
+      {/* Duration / progress time */}
+      {progress && progress.duration > 0 && !progress.completed && (
+        <span className="shrink-0 text-xs text-neutral-500">
+          {formatTime(progress.position)} / {formatTime(progress.duration)}
+        </span>
+      )}
+
+      {/* Completed badge */}
+      {progress?.completed && (
+        <div className="shrink-0 w-5 h-5 rounded-full bg-accent-600/80 flex items-center justify-center">
+          <Check size={11} className="text-white" />
         </div>
       )}
+
+      {/* Play icon on hover */}
+      <Play size={14} fill="white" className="shrink-0 text-white opacity-0 group-hover:opacity-60 transition-opacity" />
     </button>
   )
 }
@@ -338,6 +332,18 @@ export function SeriesPage() {
     return sortedSeasons[0] ?? 1
   }, [selectedSeason, progressRecords, currentShowData, sortedSeasons])
 
+  const handleSurprise = useCallback(() => {
+    if (!visibleShowNames.length) return
+    const name = visibleShowNames[Math.floor(Math.random() * visibleShowNames.length)]
+    navigate(`/series?show=${encodeURIComponent(name)}`)
+  }, [visibleShowNames, navigate])
+
+  const { count: gridCount, sentinelRef: gridSentinel, reset: resetGrid } = useInfiniteScroll()
+  useEffect(() => {
+    resetGrid()
+    document.querySelector('main')?.scrollTo({ top: 0 })
+  }, [search, selectedGroup, showFavs, resetGrid])
+
   // ── Detail view ────────────────────────────────────────────────────────────
 
   if (selectedShow) {
@@ -355,7 +361,7 @@ export function SeriesPage() {
     const poster = posterUrl(showTmdb?.posterPath ?? null, 342)
 
     return (
-      <div className="overflow-y-auto h-full flex flex-col">
+      <div className="flex flex-col">
         {/* Backdrop header */}
         <div className="relative h-64 shrink-0 overflow-hidden bg-surface-300">
           {backdrop && (
@@ -476,12 +482,6 @@ export function SeriesPage() {
     )
   }
 
-  const handleSurprise = useCallback(() => {
-    if (!visibleShowNames.length) return
-    const name = visibleShowNames[Math.floor(Math.random() * visibleShowNames.length)]
-    navigate(`/series?show=${encodeURIComponent(name)}`)
-  }, [visibleShowNames, navigate])
-
   const heading = search.trim()
     ? `Results for "${search}"`
     : showFavs ? 'Favorites'
@@ -489,9 +489,9 @@ export function SeriesPage() {
     : 'Recently Added'
 
   return (
-    <div className="flex flex-col md:flex-row h-full overflow-hidden">
+    <div className="flex flex-col md:flex-row">
       {/* Group sidebar / mobile pills */}
-      <div className="md:p-4 md:pt-6 md:overflow-y-auto md:scrollbar-hide md:border-r md:border-white/5 md:shrink-0">
+      <div className="md:sticky md:top-0 md:self-start md:h-screen md:overflow-y-auto md:scrollbar-hide md:border-r md:border-white/5 md:shrink-0 md:p-4 md:pt-6">
         <GroupSidebar
           groups={groups}
           selected={showFavs ? '__favs__' : selectedGroup}
@@ -507,7 +507,7 @@ export function SeriesPage() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6 pb-12 min-w-0">
+      <div className="flex-1 p-6 pb-12 min-w-0">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mb-4">
           <div className="flex items-center justify-between sm:justify-start gap-3">
             <h1 className="text-xl font-bold text-white truncate">{heading}</h1>
@@ -537,25 +537,33 @@ export function SeriesPage() {
             description={showFavs ? 'No favorites yet.' : 'Try a different search.'}
           />
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-            {visibleShowNames.map((name) => {
-              const data = showMap.get(name)!
-              const allEps = Array.from(data.seasons.values()).flat()
-              return (
-                <ShowCard
-                  key={name}
-                  showName={data.displayName}
-                  poster={data.logo}
-                  seasons={data.seasons.size}
-                  episodes={allEps.length}
-                  isWatchLater={watchLaterIds?.has(name)}
-                  tmdbMeta={tmdbMap.get(name)}
-                  onClick={() => navigate(`/series?show=${encodeURIComponent(name)}`)}
-                  onWatchLater={(e) => toggleWatchLater(e, name)}
-                />
-              )
-            })}
-          </div>
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+              {visibleShowNames.slice(0, gridCount).map((name) => {
+                const data = showMap.get(name)!
+                const allEps = Array.from(data.seasons.values()).flat()
+                return (
+                  <ShowCard
+                    key={name}
+                    showName={data.displayName}
+                    poster={data.logo}
+                    seasons={data.seasons.size}
+                    episodes={allEps.length}
+                    isWatchLater={watchLaterIds?.has(name)}
+                    tmdbMeta={tmdbMap.get(name)}
+                    onClick={() => navigate(`/series?show=${encodeURIComponent(name)}`)}
+                    onWatchLater={(e) => toggleWatchLater(e, name)}
+                  />
+                )
+              })}
+            </div>
+            <div ref={gridSentinel} className="h-1" />
+            {gridCount < visibleShowNames.length && (
+              <p className="text-center text-xs text-neutral-600 pb-8">
+                Showing {Math.min(gridCount, visibleShowNames.length).toLocaleString()} of {visibleShowNames.length.toLocaleString()}
+              </p>
+            )}
+          </>
         )}
       </div>
     </div>
