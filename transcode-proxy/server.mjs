@@ -16,6 +16,7 @@ const FFPROBE_PATH = process.env.FFPROBE_PATH || FFMPEG_PATH.replace(/ffmpeg(\.e
 const H264_ENCODER = process.env.H264_ENCODER || 'libx264'
 const H264_PRESET = process.env.H264_PRESET || 'ultrafast'
 const VAAPI_DEVICE = process.env.VAAPI_DEVICE || '/dev/dri/renderD128'
+const VAAPI_QP = process.env.VAAPI_QP || '23'
 const FFMPEG_LOGLEVEL = process.env.FFMPEG_LOGLEVEL || 'warning'
 const VIDEO_MAX_WIDTH = Number(process.env.VIDEO_MAX_WIDTH) || 1280
 const VIDEO_BITRATE = process.env.VIDEO_BITRATE || '1500k'
@@ -116,9 +117,7 @@ function handleTranscode(reqUrl, res) {
     args.push(
       '-c:v', 'h264_vaapi',
       '-vf', `scale='min(iw,${VIDEO_MAX_WIDTH})':-2,format=nv12,hwupload`,
-      '-b:v', VIDEO_BITRATE,
-      '-maxrate', VIDEO_MAX_BITRATE,
-      '-bufsize', `${parseInt(VIDEO_MAX_BITRATE) * 2}k`,
+      '-qp', VAAPI_QP,
       '-c:a', 'aac',
       '-b:a', AUDIO_BITRATE,
       '-ac', '2',
