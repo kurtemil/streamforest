@@ -12,7 +12,6 @@ import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { ProfilePicker } from '@/components/ProfilePicker'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { useProfileStore } from '@/stores/profileStore'
-import { PasswordGate } from '@/components/PasswordGate'
 import { syncFromRemote, syncWatchLaterFromRemote } from '@/services/sync'
 import { kidRestrictionsStore } from '@/stores/kidRestrictionsStore'
 import { PROFILES } from '@/stores/profileStore'
@@ -47,7 +46,7 @@ export default function App() {
   }
 
   return (
-    <PasswordGate>
+    <>
       <Layout>
         <AnimatePresence mode="wait" initial={false}>
           <Routes location={location} key={location.pathname.split('/')[1] || 'home'}>
@@ -66,6 +65,6 @@ export default function App() {
       {(!activeProfileId || showPicker) && (
         <ProfilePicker forced={!activeProfileId} />
       )}
-    </PasswordGate>
+    </>
   )
 }
