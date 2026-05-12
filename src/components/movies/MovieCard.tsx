@@ -1,5 +1,5 @@
 import { Play, Check, Bookmark, Star, X } from 'lucide-react'
-import { Poster } from '@/components/ui/Poster'
+import { Poster } from '@/ui'
 import { ProgressRing } from '@/components/ui/ProgressRing'
 import type { Channel, WatchProgress, TmdbMeta } from '@/types'
 

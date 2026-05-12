@@ -3,7 +3,9 @@
 
 export { Button } from './Button'
 export { Chip } from './Chip'
+export { Dialog } from './Dialog'
+export { PageTransition } from './PageTransition'
+export { Poster } from './Poster'
 export { Skeleton, SkeletonText, SkeletonCard } from './Skeleton'
 export { Tooltip } from './Tooltip'
 export { VirtualPosterGrid } from './VirtualPosterGrid'
-export { PageTransition } from './PageTransition'
