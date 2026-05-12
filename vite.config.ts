@@ -2,8 +2,37 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
+import { createHash } from 'crypto'
 import type { Connect } from 'vite'
 import type { IncomingMessage, ServerResponse } from 'http'
+
+// Hashes only — plaintext PINs are stored in D1 (production)
+const DEV_PIN_HASHES: Record<string, string> = {
+  elof:   'd982309a461bcc3abc15489201522c8df291aa650eabafda45f1583b03992cc9',
+  jossan: 'd982309a461bcc3abc15489201522c8df291aa650eabafda45f1583b03992cc9',
+  vera:   'd07164a628596323ebcf8796dee0e5c164620e0922b52483bc805f54416ee73c',
+  noah:   '8cfecd937a9328ecb71d3c08e5dd312058ca7d75171e7ba6e3af7573e210cd6c',
+}
+
+function devPinMiddleware(): Connect.NextHandleFunction {
+  return (req: IncomingMessage, res: ServerResponse, next) => {
+    if (req.method !== 'POST' || req.url !== '/api/pin') return next()
+    let body = ''
+    req.on('data', (chunk: Buffer) => { body += chunk })
+    req.on('end', () => {
+      try {
+        const { profile_id, pin } = JSON.parse(body) as { profile_id: string; pin: string }
+        const hash = createHash('sha256').update(pin).digest('hex')
+        const ok = DEV_PIN_HASHES[profile_id] === hash
+        res.setHeader('Content-Type', 'application/json')
+        res.end(JSON.stringify({ ok }))
+      } catch {
+        res.statusCode = 400
+        res.end('{"ok":false}')
+      }
+    })
+  }
+}
 
 // Dev-only middleware that mimics the Cloudflare Pages Function at /proxy
 function devProxyMiddleware(): Connect.NextHandleFunction {
@@ -75,6 +104,7 @@ export default defineConfig({
     {
       name: 'dev-proxy',
       configureServer(server) {
+        server.middlewares.use(devPinMiddleware())
         server.middlewares.use(devProxyMiddleware())
       },
     },
