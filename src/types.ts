@@ -96,6 +96,8 @@ export interface TmdbMeta {
   cast: TmdbCastMember[]
   director: string | null // movie only
   similar: TmdbSimilarItem[]
+  blurhashPoster?: string | null
+  blurhashBackdrop?: string | null
   cachedAt: number
   notFound?: true       // searched but no result — skip retrying until TTL expires
 }

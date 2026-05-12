@@ -65,6 +65,9 @@ interface TmdbSearchResult {
 
 interface TmdbSearchResponse { results: TmdbSearchResult[] }
 
+interface TmdbImage { file_path: string; blur_hash: string; iso_639_1?: string | null; vote_average?: number }
+interface TmdbImages { posters: TmdbImage[]; backdrops: TmdbImage[] }
+
 interface TmdbMovieDetail {
   id: number
   title: string
@@ -81,6 +84,7 @@ interface TmdbMovieDetail {
     crew: Array<{ name: string; job: string; profile_path: string | null }>
   }
   similar: { results: TmdbSearchResult[] }
+  images?: TmdbImages
 }
 
 interface TmdbTVDetail {
@@ -98,6 +102,7 @@ interface TmdbTVDetail {
     cast: Array<{ name: string; character: string; profile_path: string | null; order: number }>
   }
   similar: { results: TmdbSearchResult[] }
+  images?: TmdbImages
 }
 
 // ── Search helpers ─────────────────────────────────────────────────────────────
@@ -133,6 +138,15 @@ function matchScore(query: string, candidate: string, queryYear: number | null, 
     else if (Math.abs(queryYear - candidateYear) <= 1) score += 8
   }
   return score
+}
+
+function pickBlurhash(images: TmdbImage[] | undefined, primaryPath: string | null): string | null {
+  if (!images?.length) return null
+  if (primaryPath) {
+    const match = images.find((i) => i.file_path === primaryPath)
+    if (match?.blur_hash) return match.blur_hash
+  }
+  return images[0]?.blur_hash ?? null
 }
 
 // ── Public enrichment functions ────────────────────────────────────────────────
@@ -176,7 +190,7 @@ export async function enrichMovie(cacheId: string, title: string, year: number |
     return null
   }
 
-  const detail = await tmdbFetch<TmdbMovieDetail>(`/movie/${best.r.id}`, { append_to_response: 'credits,similar' })
+  const detail = await tmdbFetch<TmdbMovieDetail>(`/movie/${best.r.id}`, { append_to_response: 'credits,similar,images' })
   if (!detail) return null
 
   const cast: TmdbCastMember[] = (detail.credits?.cast ?? [])
@@ -201,6 +215,8 @@ export async function enrichMovie(cacheId: string, title: string, year: number |
     overview: detail.overview,
     posterPath: detail.poster_path,
     backdropPath: detail.backdrop_path,
+    blurhashPoster: pickBlurhash(detail.images?.posters, detail.poster_path),
+    blurhashBackdrop: pickBlurhash(detail.images?.backdrops, detail.backdrop_path),
     year: detail.release_date ? parseInt(detail.release_date) : year,
     rating: Math.round(detail.vote_average * 10) / 10,
     ratingCount: detail.vote_count,
@@ -241,7 +257,7 @@ export async function enrichTV(cacheId: string, showName: string): Promise<TmdbM
     return null
   }
 
-  const detail = await tmdbFetch<TmdbTVDetail>(`/tv/${best.r.id}`, { append_to_response: 'credits,similar' })
+  const detail = await tmdbFetch<TmdbTVDetail>(`/tv/${best.r.id}`, { append_to_response: 'credits,similar,images' })
   if (!detail) return null
 
   const cast: TmdbCastMember[] = (detail.credits?.cast ?? [])
@@ -264,6 +280,8 @@ export async function enrichTV(cacheId: string, showName: string): Promise<TmdbM
     overview: detail.overview,
     posterPath: detail.poster_path,
     backdropPath: detail.backdrop_path,
+    blurhashPoster: pickBlurhash(detail.images?.posters, detail.poster_path),
+    blurhashBackdrop: pickBlurhash(detail.images?.backdrops, detail.backdrop_path),
     year: detail.first_air_date ? parseInt(detail.first_air_date) : null,
     rating: Math.round(detail.vote_average * 10) / 10,
     ratingCount: detail.vote_count,

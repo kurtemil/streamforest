@@ -168,7 +168,7 @@ function ShowCard({ showName, poster, seasons, episodes, isWatchLater, tmdbMeta,
   return (
     <button onClick={onClick} className="group text-left w-full">
       <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-surface-300 ring-1 ring-white/5 group-hover:ring-accent-600/50 transition-all duration-200 group-hover:scale-[1.02] shadow-card group-hover:shadow-card-hover">
-        <Poster src={poster} alt={showName} type="series" className="w-full h-full" tmdbPosterPath={tmdbMeta?.posterPath} />
+        <Poster src={poster} alt={showName} type="series" className="w-full h-full" tmdbPosterPath={tmdbMeta?.posterPath} blurhash={tmdbMeta?.blurhashPoster} />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
           <div className="w-11 h-11 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center ring-2 ring-white/30">

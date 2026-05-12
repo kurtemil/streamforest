@@ -32,6 +32,7 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
           type={channel.type}
           className="w-full h-full"
           tmdbPosterPath={tmdbMeta?.posterPath}
+          blurhash={tmdbMeta?.blurhashPoster}
         />
 
         {/* Hover overlay */}

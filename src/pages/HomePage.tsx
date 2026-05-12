@@ -30,7 +30,7 @@ function ContinueCard({ channel, progress, tmdbMeta, onClick, onRemove }: {
     <div className="group relative flex-shrink-0 w-44">
       <button onClick={onClick} className="block w-full text-left">
         <div className="relative w-full aspect-[2/3] rounded-lg overflow-hidden bg-surface-300 ring-1 ring-white/5 group-hover:ring-accent-600/50 transition-all group-hover:scale-[1.03] shadow-card group-hover:shadow-card-hover">
-          <Poster src={channel.logo} alt={channel.name} type={channel.type} className="w-full h-full" tmdbPosterPath={tmdbMeta?.posterPath} />
+          <Poster src={channel.logo} alt={channel.name} type={channel.type} className="w-full h-full" tmdbPosterPath={tmdbMeta?.posterPath} blurhash={tmdbMeta?.blurhashPoster} />
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
           <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
             <div className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center ring-2 ring-white/30">
