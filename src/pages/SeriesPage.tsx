@@ -1,37 +1,62 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Tv, ChevronRight, ChevronDown, Star, Play, Check, Bookmark, Shuffle } from 'lucide-react'
+import {
+  Tv,
+  ChevronRight,
+  ChevronDown,
+  Star,
+  Play,
+  Check,
+  Bookmark,
+  Shuffle,
+} from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useProfileStore } from '@/stores/profileStore'
 import { useActiveExclusions } from '@/hooks/useActiveExclusions'
-import { db, toggleFavorite, addToWatchLater, removeFromWatchLater } from '@/services/db'
-import { pushWatchLater, deleteRemoteWatchLater } from '@/services/sync'
+import {
+  db,
+  toggleFavorite,
+  addToWatchLater,
+  removeFromWatchLater,
+  clearProgress,
+} from '@/services/db'
+import { pushWatchLater, deleteRemoteWatchLater, deleteRemoteProgress } from '@/services/sync'
 import { Poster } from '@/ui'
 import { SearchBar } from '@/components/ui/SearchBar'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { GroupSidebar } from '@/components/ui/GroupSidebar'
-import type { Channel, TmdbMeta } from '@/types'
+import { ScrollableRow, SectionHeader } from '@/components/ui/MediaRow'
+import { ContinueCard } from '@/components/ui/ContinueCard'
+import type { Channel, TmdbMeta, WatchProgress } from '@/types'
 import { formatTime } from '@/lib/time'
 import { useTmdbEnrich } from '@/hooks/useTmdbEnrich'
 import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
 import { backdropUrl, posterUrl } from '@/services/tmdb'
+import { normalizeShowKey } from '@/lib/utils'
 
 const RECENT_SHOWS = 40
 
-// ─── Data helpers ──────────────────────────────────────────────────────────────
-
-import { normalizeShowKey } from '@/lib/utils'
-
-type ShowEntry = { seasons: Map<number, Channel[]>; logo: string; group: string; displayName: string }
+type ShowEntry = {
+  seasons: Map<number, Channel[]>
+  logo: string
+  group: string
+  displayName: string
+}
 
 function buildShowMap(channels: Channel[]) {
   const shows = new Map<string, ShowEntry>()
   for (const ch of channels) {
     const rawName = ch.showName ?? ch.name
     const key = normalizeShowKey(rawName)
-    if (!shows.has(key)) shows.set(key, { seasons: new Map(), logo: ch.logo, group: ch.groupTitle, displayName: rawName })
+    if (!shows.has(key))
+      shows.set(key, {
+        seasons: new Map(),
+        logo: ch.logo,
+        group: ch.groupTitle,
+        displayName: rawName,
+      })
     const entry = shows.get(key)!
     if (!entry.logo && ch.logo) entry.logo = ch.logo
     const s = ch.season ?? 0
@@ -48,7 +73,11 @@ function buildShowMap(channels: Channel[]) {
 
 // ─── Season dropdown ───────────────────────────────────────────────────────────
 
-function SeasonDropdown({ seasons, selected, onChange }: {
+function SeasonDropdown({
+  seasons,
+  selected,
+  onChange,
+}: {
   seasons: number[]
   selected: number
   onChange: (s: number) => void
@@ -81,7 +110,10 @@ function SeasonDropdown({ seasons, selected, onChange }: {
           {seasons.map((s) => (
             <button
               key={s}
-              onClick={() => { onChange(s); setOpen(false) }}
+              onClick={() => {
+                onChange(s)
+                setOpen(false)
+              }}
               className={`flex items-center gap-2 w-full text-left px-4 py-2 text-sm transition-colors ${
                 s === selected
                   ? 'text-accent-400 bg-accent-600/10'
@@ -100,23 +132,27 @@ function SeasonDropdown({ seasons, selected, onChange }: {
 
 // ─── Episode row ───────────────────────────────────────────────────────────────
 
-function EpisodeRow({ ep, progress, onClick }: {
+function EpisodeRow({
+  ep,
+  progress,
+  onClick,
+}: {
   ep: Channel
   progress?: { position: number; duration: number; completed: boolean; lastWatched?: number }
   onClick: () => void
 }) {
-  const pct = progress && progress.duration > 0 ? (progress.position / progress.duration) * 100 : 0
-
+  const pct =
+    progress && progress.duration > 0 ? (progress.position / progress.duration) * 100 : 0
   const epLabel = ep.episode !== undefined ? `E${String(ep.episode).padStart(2, '0')}` : null
 
   return (
-    <button onClick={onClick} className="flex items-center gap-4 w-full text-left py-3 px-2 rounded-lg hover:bg-white/5 transition-colors group">
-      {/* Episode number */}
+    <button
+      onClick={onClick}
+      className="flex items-center gap-4 w-full text-left py-3 px-2 rounded-lg hover:bg-white/5 transition-colors group"
+    >
       <span className="w-8 shrink-0 text-center text-sm font-medium text-neutral-500 group-hover:text-neutral-300 transition-colors">
         {epLabel ?? <Play size={13} className="mx-auto" />}
       </span>
-
-      {/* Title + progress */}
       <div className="flex-1 min-w-0">
         <p className="text-sm text-white font-medium leading-snug truncate">
           {ep.episodeTitle || ep.name}
@@ -126,43 +162,61 @@ function EpisodeRow({ ep, progress, onClick }: {
             <div className="h-full bg-accent-500 rounded-full" style={{ width: `${pct}%` }} />
           </div>
         )}
-        {progress?.completed && (
-          <p className="text-xs text-neutral-500 mt-0.5">Watched</p>
-        )}
+        {progress?.completed && <p className="text-xs text-neutral-500 mt-0.5">Watched</p>}
       </div>
-
-      {/* Duration / progress time */}
       {progress && progress.duration > 0 && !progress.completed && (
         <span className="shrink-0 text-xs text-neutral-500">
           {formatTime(progress.position)} / {formatTime(progress.duration)}
         </span>
       )}
-
-      {/* Completed badge */}
       {progress?.completed && (
         <div className="shrink-0 w-5 h-5 rounded-full bg-accent-600/80 flex items-center justify-center">
           <Check size={11} className="text-white" />
         </div>
       )}
-
-      {/* Play icon on hover */}
-      <Play size={14} fill="white" className="shrink-0 text-white opacity-0 group-hover:opacity-60 transition-opacity" />
+      <Play
+        size={14}
+        fill="white"
+        className="shrink-0 text-white opacity-0 group-hover:opacity-60 transition-opacity"
+      />
     </button>
   )
 }
 
 // ─── Show card ─────────────────────────────────────────────────────────────────
 
-function ShowCard({ showName, poster, seasons, episodes, isWatchLater, tmdbMeta, onClick, onWatchLater }: {
-  showName: string; poster: string; seasons: number; episodes: number
-  isWatchLater?: boolean; tmdbMeta?: TmdbMeta; onClick: () => void; onWatchLater?: (e: React.MouseEvent) => void
+function ShowCard({
+  showName,
+  poster,
+  seasons,
+  episodes,
+  isWatchLater,
+  tmdbMeta,
+  onClick,
+  onWatchLater,
+}: {
+  showName: string
+  poster: string
+  seasons: number
+  episodes: number
+  isWatchLater?: boolean
+  tmdbMeta?: TmdbMeta
+  onClick: () => void
+  onWatchLater?: (e: React.MouseEvent) => void
 }) {
   const rating = tmdbMeta && !tmdbMeta.notFound && tmdbMeta.rating > 0 ? tmdbMeta.rating : null
 
   return (
     <button onClick={onClick} className="group text-left w-full">
       <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-surface-300 ring-1 ring-white/5 group-hover:ring-accent-600/50 transition-all duration-200 group-hover:scale-[1.02] shadow-card group-hover:shadow-card-hover">
-        <Poster src={poster} alt={showName} type="series" className="w-full h-full" tmdbPosterPath={tmdbMeta?.posterPath} blurhash={tmdbMeta?.blurhashPoster} />
+        <Poster
+          src={poster}
+          alt={showName}
+          type="series"
+          className="w-full h-full"
+          tmdbPosterPath={tmdbMeta?.posterPath}
+          blurhash={tmdbMeta?.blurhashPoster}
+        />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
         <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
           <div className="w-11 h-11 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center ring-2 ring-white/30">
@@ -189,16 +243,28 @@ function ShowCard({ showName, poster, seasons, episodes, isWatchLater, tmdbMeta,
           </div>
         ) : (
           <div className="absolute bottom-0 left-0 right-0 p-2">
-            <p className="text-xs text-neutral-300">{seasons}S · {episodes}ep</p>
+            <p className="text-xs text-neutral-300">
+              {seasons}S · {episodes}ep
+            </p>
           </div>
         )}
       </div>
       <div className="mt-2 px-0.5">
-        <p className="text-body text-white font-medium leading-tight line-clamp-2">{tmdbMeta?.title ?? showName}</p>
+        <p className="text-body text-white font-medium leading-tight line-clamp-2">
+          {tmdbMeta?.title ?? showName}
+        </p>
         <div className="flex items-center gap-1.5 mt-0.5">
-          {tmdbMeta?.year && <span className="text-caption text-neutral-500">{tmdbMeta.year}</span>}
-          {tmdbMeta?.genres?.[0] && <span className="text-caption text-neutral-600 truncate">{tmdbMeta.genres[0]}</span>}
-          {!tmdbMeta && <span className="text-caption text-neutral-600">{seasons}S · {episodes}ep</span>}
+          {tmdbMeta?.year && (
+            <span className="text-caption text-neutral-500">{tmdbMeta.year}</span>
+          )}
+          {tmdbMeta?.genres?.[0] && (
+            <span className="text-caption text-neutral-600 truncate">{tmdbMeta.genres[0]}</span>
+          )}
+          {!tmdbMeta && (
+            <span className="text-caption text-neutral-600">
+              {seasons}S · {episodes}ep
+            </span>
+          )}
         </div>
       </div>
     </button>
@@ -213,7 +279,15 @@ export function SeriesPage() {
   const { channels } = usePlaylistStore()
   const { play } = usePlayerStore()
   const [search, setSearch] = useState('')
-  const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(
+    () => searchParams.get('group'),
+  )
+
+  useEffect(() => {
+    const g = searchParams.get('group')
+    if (g !== null) setSelectedGroup(g)
+  }, [searchParams])
+
   const selectedShow = searchParams.get('show')
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null)
   useEffect(() => { setSelectedSeason(null) }, [selectedShow])
@@ -221,6 +295,8 @@ export function SeriesPage() {
 
   const { activeProfileId } = useProfileStore()
   const { series: excludedSeries } = useActiveExclusions()
+
+  const isRowMode = !search.trim() && selectedGroup === null && !showFavs
 
   const watchLaterIds = useLiveQuery(async () => {
     if (!activeProfileId) return new Set<string>()
@@ -239,9 +315,10 @@ export function SeriesPage() {
       pushWatchLater(entry)
     }
   }
+
   const seriesChannels = useMemo(
     () => channels.filter((c) => c.type === 'series' && !excludedSeries.has(c.groupTitle)),
-    [channels, excludedSeries]
+    [channels, excludedSeries],
   )
   const showMap = useMemo(() => buildShowMap(seriesChannels), [seriesChannels])
 
@@ -250,14 +327,17 @@ export function SeriesPage() {
     for (const ch of seriesChannels) seen.add(ch.groupTitle)
     return Array.from(seen).map((title) => ({
       title,
-      count: new Set(seriesChannels.filter((c) => c.groupTitle === title).map((c) => normalizeShowKey(c.showName ?? c.name))).size,
+      count: new Set(
+        seriesChannels
+          .filter((c) => c.groupTitle === title)
+          .map((c) => normalizeShowKey(c.showName ?? c.name)),
+      ).size,
     }))
   }, [seriesChannels])
 
   const favorites = useLiveQuery(() => db.favorites.where('kind').equals('series').toArray())
   const favIds = useMemo(() => new Set(favorites?.map((f) => f.id) ?? []), [favorites])
 
-  // Only load progress for the currently open show
   const progressRecords = useLiveQuery(async () => {
     if (!selectedShow || !activeProfileId) return {}
     const showData = showMap.get(selectedShow)
@@ -267,6 +347,12 @@ export function SeriesPage() {
     const rows = await db.watchProgress.where('id').anyOf(profileIds).toArray()
     return Object.fromEntries(rows.map((r) => [r.channelId, r]))
   }, [selectedShow, showMap, activeProfileId])
+
+  const recentProgress = useLiveQuery(async () => {
+    if (!activeProfileId) return []
+    const all = await db.watchProgress.where('profileId').equals(activeProfileId).toArray()
+    return all.sort((a, b) => b.lastWatched - a.lastWatched)
+  }, [activeProfileId])
 
   const allShowNames = useMemo(() => Array.from(showMap.keys()), [showMap])
 
@@ -282,32 +368,101 @@ export function SeriesPage() {
     return names
   }, [allShowNames, showFavs, selectedGroup, search, showMap, favIds])
 
-  // Representative channels for TMDB enrichment (one per visible show + selected show)
+  // Continue Watching — one entry per show
+  const continueWatchingSeries = useMemo(() => {
+    if (!recentProgress?.length || !seriesChannels.length) return []
+    const chanById = new Map(seriesChannels.map((c) => [c.id, c]))
+    const seenShows = new Set<string>()
+    const result: Array<{ progress: WatchProgress; channel: Channel; showKey: string }> = []
+    for (const p of recentProgress) {
+      if (p.completed || p.position <= 10) continue
+      const ch = chanById.get(p.channelId)
+      if (!ch) continue
+      const showKey = normalizeShowKey(ch.showName ?? ch.name)
+      if (seenShows.has(showKey)) continue
+      seenShows.add(showKey)
+      result.push({ progress: p as WatchProgress, channel: ch, showKey })
+      if (result.length >= 12) break
+    }
+    return result
+  }, [recentProgress, seriesChannels])
+
+  // M3U group rows (top 6 by show count)
+  const groupRows = useMemo(() => {
+    if (!isRowMode) return []
+    const byGroup = new Map<string, string[]>()
+    for (const [key, entry] of showMap.entries()) {
+      if (!byGroup.has(entry.group)) byGroup.set(entry.group, [])
+      byGroup.get(entry.group)!.push(key)
+    }
+    return Array.from(byGroup.entries())
+      .sort((a, b) => b[1].length - a[1].length)
+      .slice(0, 6)
+      .map(([rawTitle, keys]) => ({
+        rawTitle,
+        title: rawTitle.replace(/^Series:\s*/, ''),
+        keys: keys.slice(0, 20),
+      }))
+  }, [showMap, isRowMode])
+
+  // Enrich shows for row mode (prioritise continue watching, then first N shows)
   const enrichChannels = useMemo(() => {
-    const keys = [...visibleShowNames]
-    if (selectedShow && !visibleShowNames.includes(selectedShow)) keys.push(selectedShow)
-    return keys.flatMap((key) => {
+    const baseKeys = isRowMode
+      ? (() => {
+          const seen = new Set<string>()
+          const result: string[] = []
+          for (const { showKey } of continueWatchingSeries) {
+            if (!seen.has(showKey)) { seen.add(showKey); result.push(showKey) }
+          }
+          for (const name of allShowNames) {
+            if (result.length >= 200) break
+            if (!seen.has(name)) { seen.add(name); result.push(name) }
+          }
+          return result
+        })()
+      : [...visibleShowNames]
+    const keys =
+      selectedShow && !baseKeys.includes(selectedShow)
+        ? [...baseKeys, selectedShow]
+        : baseKeys
+    return keys.slice(0, 200).flatMap((key) => {
       const entry = showMap.get(key)
       if (!entry) return []
       const firstSeason = Array.from(entry.seasons.values())[0]
       return firstSeason?.[0] ? [firstSeason[0]] : []
     })
-  }, [visibleShowNames, showMap, selectedShow])
+  }, [isRowMode, continueWatchingSeries, allShowNames, visibleShowNames, showMap, selectedShow])
 
   const tmdbMap = useTmdbEnrich(enrichChannels)
 
-  // Auto-play episode from URL params on initial load (e.g. page reload)
+  // TMDB genre rows — built from enriched show data, populates progressively
+  const tmdbGenreRows = useMemo(() => {
+    if (!isRowMode) return []
+    const byGenre = new Map<string, string[]>() // genre → showKeys
+    for (const name of allShowNames) {
+      const meta = tmdbMap.get(name)
+      if (!meta || meta.notFound || !meta.genres?.length) continue
+      for (const genre of meta.genres.slice(0, 3)) {
+        if (!byGenre.has(genre)) byGenre.set(genre, [])
+        byGenre.get(genre)!.push(name)
+      }
+    }
+    return Array.from(byGenre.entries())
+      .filter(([, keys]) => keys.length >= 3)
+      .sort((a, b) => b[1].length - a[1].length)
+      .slice(0, 6)
+      .map(([genre, keys]) => ({ genre, keys: keys.slice(0, 20) }))
+  }, [allShowNames, tmdbMap, isRowMode])
+
   const didAutoPlay = useRef(false)
   useEffect(() => {
     if (didAutoPlay.current || !seriesChannels.length) return
     didAutoPlay.current = true
     const playingId = searchParams.get('playing')
     if (!playingId) return
-    const ep = seriesChannels.find(c => c.id === playingId)
+    const ep = seriesChannels.find((c) => c.id === playingId)
     if (ep) play(ep)
   }, [seriesChannels, searchParams, play])
-
-  // ── Detail view data (hooks must stay outside conditionals) ───────────────
 
   const currentShowData = selectedShow ? showMap.get(selectedShow) : undefined
 
@@ -333,10 +488,11 @@ export function SeriesPage() {
   }, [selectedSeason, progressRecords, currentShowData, sortedSeasons])
 
   const handleSurprise = useCallback(() => {
-    if (!visibleShowNames.length) return
-    const name = visibleShowNames[Math.floor(Math.random() * visibleShowNames.length)]
+    const pool = isRowMode ? allShowNames : visibleShowNames
+    if (!pool.length) return
+    const name = pool[Math.floor(Math.random() * pool.length)]
     navigate(`/series?show=${encodeURIComponent(name)}`)
-  }, [visibleShowNames, navigate])
+  }, [isRowMode, allShowNames, visibleShowNames, navigate])
 
   const { count: gridCount, sentinelRef: gridSentinel, reset: resetGrid } = useInfiniteScroll()
   useEffect(() => {
@@ -354,18 +510,21 @@ export function SeriesPage() {
     const isWL = watchLaterIds?.has(selectedShow) ?? false
     const totalEps = Array.from(seasons.values()).reduce((a, b) => a + b.length, 0)
     const showTmdb = tmdbMap.get(selectedShow)
-
     const episodes = seasons.get(autoSeason) ?? []
-
     const backdrop = backdropUrl(showTmdb?.backdropPath ?? null, 1280)
     const poster = posterUrl(showTmdb?.posterPath ?? null, 342)
 
     return (
       <div className="flex flex-col">
-        {/* Backdrop header */}
         <div className="relative h-64 shrink-0 overflow-hidden bg-surface-300">
           {backdrop && (
-            <img src={backdrop} alt="" aria-hidden="true" className="w-full h-full object-cover" decoding="async" />
+            <img
+              src={backdrop}
+              alt=""
+              aria-hidden="true"
+              className="w-full h-full object-cover"
+              decoding="async"
+            />
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-surface-100 via-surface-100/40 to-transparent" />
           <button
@@ -376,9 +535,7 @@ export function SeriesPage() {
           </button>
         </div>
 
-        {/* Scrollable content */}
         <div className="flex-1 px-6 pb-12 -mt-16 relative">
-          {/* Poster + title row */}
           <div className="flex gap-5 items-end mb-6">
             <div className="w-24 aspect-[2/3] rounded-lg overflow-hidden shrink-0 ring-1 ring-white/15 shadow-cinema bg-surface-300">
               <img
@@ -386,11 +543,13 @@ export function SeriesPage() {
                 alt={showData.displayName}
                 className="w-full h-full object-cover"
                 decoding="async"
-                onError={(e) => { (e.target as HTMLImageElement).src = logo }}
+                onError={(e) => { ;(e.target as HTMLImageElement).src = logo }}
               />
             </div>
             <div className="flex-1 min-w-0 pb-1">
-              <h1 className="text-heading-xl text-white leading-tight mb-1">{showTmdb?.title ?? showData.displayName}</h1>
+              <h1 className="text-heading-xl text-white leading-tight mb-1">
+                {showTmdb?.title ?? showData.displayName}
+              </h1>
               <div className="flex items-center gap-3 flex-wrap text-caption text-neutral-400">
                 <span>{sortedSeasons.length}S · {totalEps} ep</span>
                 {showTmdb?.year && <span>{showTmdb.year}</span>}
@@ -407,7 +566,6 @@ export function SeriesPage() {
             </div>
           </div>
 
-          {/* CTAs */}
           <div className="flex gap-3 mb-5">
             {episodes[0] && (
               <button
@@ -442,18 +600,12 @@ export function SeriesPage() {
             </button>
           </div>
 
-          {/* Overview */}
           {showTmdb?.overview && (
             <p className="text-body text-neutral-300 leading-relaxed mb-6">{showTmdb.overview}</p>
           )}
 
-          {/* Season selector + episodes */}
           <div className="flex items-center gap-3 mb-4">
-            <SeasonDropdown
-              seasons={sortedSeasons}
-              selected={autoSeason}
-              onChange={(s) => setSelectedSeason(s)}
-            />
+            <SeasonDropdown seasons={sortedSeasons} selected={autoSeason} onChange={(s) => setSelectedSeason(s)} />
             <span className="text-neutral-500 text-sm">{episodes.length} episodes</span>
           </div>
 
@@ -472,8 +624,6 @@ export function SeriesPage() {
     )
   }
 
-  // ── Grid view ──────────────────────────────────────────────────────────────
-
   if (seriesChannels.length === 0) {
     return (
       <div className="p-8">
@@ -482,15 +632,9 @@ export function SeriesPage() {
     )
   }
 
-  const heading = search.trim()
-    ? `Results for "${search}"`
-    : showFavs ? 'Favorites'
-    : selectedGroup !== null ? selectedGroup.replace(/^Series:\s*/, '')
-    : 'Recently Added'
-
   return (
     <div className="flex flex-col md:flex-row">
-      {/* Group sidebar / mobile pills */}
+      {/* Sidebar — always visible */}
       <div className="md:sticky md:top-0 md:self-start md:h-screen md:overflow-y-auto md:scrollbar-hide md:border-r md:border-white/5 md:shrink-0 md:p-4 md:pt-6">
         <GroupSidebar
           groups={groups}
@@ -499,71 +643,230 @@ export function SeriesPage() {
           recentLabel="Recently Added"
           cleanTitle={(t) => t.replace(/^Series:\s*/, '')}
           prefixItem={{
-            label: <><Star size={12} fill={showFavs ? 'currentColor' : 'none'} className="shrink-0" /> Favorites</>,
+            label: (
+              <>
+                <Star size={12} fill={showFavs ? 'currentColor' : 'none'} className="shrink-0" />{' '}
+                Favorites
+              </>
+            ),
             active: showFavs,
             onClick: () => { setShowFavs(!showFavs); setSelectedGroup(null); setSearch('') },
           }}
         />
       </div>
 
-      {/* Content */}
-      <div className="flex-1 p-6 pb-12 min-w-0">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mb-4">
-          <div className="flex items-center justify-between sm:justify-start gap-3">
-            <h1 className="text-xl font-bold text-white truncate">{heading}</h1>
-            <p className="text-neutral-500 text-sm shrink-0">{visibleShowNames.length} shows</p>
-            <button
-              onClick={handleSurprise}
-              title="Surprise me — pick a random show"
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
-            >
-              <Shuffle size={13} />
-              <span className="hidden sm:inline">Surprise me</span>
-            </button>
-          </div>
-          <div className="sm:w-52">
-            <SearchBar
-              value={search}
-              onChange={(v) => { setSearch(v); setSelectedGroup(null); setShowFavs(false) }}
-              placeholder="Search shows…"
-            />
-          </div>
-        </div>
-
-        {visibleShowNames.length === 0 ? (
-          <EmptyState
-            icon={<Tv size={36} />}
-            title="No results"
-            description={showFavs ? 'No favorites yet.' : 'Try a different search.'}
-          />
-        ) : (
-          <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-              {visibleShowNames.slice(0, gridCount).map((name) => {
-                const data = showMap.get(name)!
-                const allEps = Array.from(data.seasons.values()).flat()
-                return (
-                  <ShowCard
-                    key={name}
-                    showName={data.displayName}
-                    poster={data.logo}
-                    seasons={data.seasons.size}
-                    episodes={allEps.length}
-                    isWatchLater={watchLaterIds?.has(name)}
-                    tmdbMeta={tmdbMap.get(name)}
-                    onClick={() => navigate(`/series?show=${encodeURIComponent(name)}`)}
-                    onWatchLater={(e) => toggleWatchLater(e, name)}
+      <div className="flex-1 min-w-0">
+        {isRowMode ? (
+          // ── Netflix row mode ─────────────────────────────────────────────────
+          <div className="px-4 sm:px-6 pb-12">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-5 pb-6">
+              <div>
+                <h1 className="text-2xl font-bold text-white">TV Shows</h1>
+                <p className="text-neutral-500 text-sm mt-0.5">
+                  {allShowNames.length.toLocaleString()} shows
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleSurprise}
+                  title="Surprise me — pick a random show"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
+                >
+                  <Shuffle size={13} />
+                  <span className="hidden sm:inline">Surprise me</span>
+                </button>
+                <div className="w-full sm:w-52">
+                  <SearchBar
+                    value={search}
+                    onChange={(v) => { setSearch(v); setSelectedGroup(null); setShowFavs(false) }}
+                    placeholder="Search shows…"
                   />
-                )
-              })}
+                </div>
+              </div>
             </div>
-            <div ref={gridSentinel} className="h-1" />
-            {gridCount < visibleShowNames.length && (
-              <p className="text-center text-xs text-neutral-600 pb-8">
-                Showing {Math.min(gridCount, visibleShowNames.length).toLocaleString()} of {visibleShowNames.length.toLocaleString()}
-              </p>
+
+            <div className="space-y-10">
+              {continueWatchingSeries.length > 0 && (
+                <section>
+                  <SectionHeader title="Continue Watching" />
+                  <ScrollableRow>
+                    {continueWatchingSeries.map(({ channel, progress, showKey }) => (
+                      <div key={channel.id} className="flex-shrink-0 w-40">
+                        <ContinueCard
+                          channel={channel}
+                          progress={progress}
+                          tmdbMeta={tmdbMap.get(showKey)}
+                          onClick={() => {
+                            navigate(`/series?show=${encodeURIComponent(showKey)}&playing=${channel.id}`)
+                            play(channel)
+                          }}
+                          onRemove={() => {
+                            if (activeProfileId) {
+                              clearProgress(activeProfileId, channel.id)
+                              deleteRemoteProgress(activeProfileId, channel.id)
+                            }
+                          }}
+                        />
+                      </div>
+                    ))}
+                  </ScrollableRow>
+                </section>
+              )}
+
+              <section>
+                <SectionHeader title="Recently Added" />
+                <ScrollableRow>
+                  {allShowNames.slice(0, 20).map((name) => {
+                    const data = showMap.get(name)!
+                    const allEps = Array.from(data.seasons.values()).flat()
+                    return (
+                      <div key={name} className="flex-shrink-0 w-40">
+                        <ShowCard
+                          showName={data.displayName}
+                          poster={data.logo}
+                          seasons={data.seasons.size}
+                          episodes={allEps.length}
+                          isWatchLater={watchLaterIds?.has(name)}
+                          tmdbMeta={tmdbMap.get(name)}
+                          onClick={() => navigate(`/series?show=${encodeURIComponent(name)}`)}
+                          onWatchLater={(e) => toggleWatchLater(e, name)}
+                        />
+                      </div>
+                    )
+                  })}
+                </ScrollableRow>
+              </section>
+
+              {/* TMDB genre rows */}
+              {tmdbGenreRows.map(({ genre, keys }) => (
+                <section key={genre}>
+                  <SectionHeader title={genre} />
+                  <ScrollableRow>
+                    {keys.map((name) => {
+                      const data = showMap.get(name)
+                      if (!data) return null
+                      const allEps = Array.from(data.seasons.values()).flat()
+                      return (
+                        <div key={name} className="flex-shrink-0 w-40">
+                          <ShowCard
+                            showName={data.displayName}
+                            poster={data.logo}
+                            seasons={data.seasons.size}
+                            episodes={allEps.length}
+                            isWatchLater={watchLaterIds?.has(name)}
+                            tmdbMeta={tmdbMap.get(name)}
+                            onClick={() => navigate(`/series?show=${encodeURIComponent(name)}`)}
+                            onWatchLater={(e) => toggleWatchLater(e, name)}
+                          />
+                        </div>
+                      )
+                    })}
+                  </ScrollableRow>
+                </section>
+              ))}
+
+              {/* M3U group rows */}
+              {groupRows.map(({ rawTitle, title, keys }) => (
+                <section key={rawTitle}>
+                  <SectionHeader
+                    title={title}
+                    onSeeAll={() => { setSelectedGroup(rawTitle); setShowFavs(false) }}
+                  />
+                  <ScrollableRow>
+                    {keys.map((name) => {
+                      const data = showMap.get(name)
+                      if (!data) return null
+                      const allEps = Array.from(data.seasons.values()).flat()
+                      return (
+                        <div key={name} className="flex-shrink-0 w-40">
+                          <ShowCard
+                            showName={data.displayName}
+                            poster={data.logo}
+                            seasons={data.seasons.size}
+                            episodes={allEps.length}
+                            isWatchLater={watchLaterIds?.has(name)}
+                            tmdbMeta={tmdbMap.get(name)}
+                            onClick={() => navigate(`/series?show=${encodeURIComponent(name)}`)}
+                            onWatchLater={(e) => toggleWatchLater(e, name)}
+                          />
+                        </div>
+                      )
+                    })}
+                  </ScrollableRow>
+                </section>
+              ))}
+            </div>
+          </div>
+        ) : (
+          // ── Grid mode ─────────────────────────────────────────────────────────
+          <div className="p-6 pb-12">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mb-4">
+              <div className="flex items-center justify-between sm:justify-start gap-3">
+                <h1 className="text-xl font-bold text-white truncate">
+                  {search.trim()
+                    ? `Results for "${search}"`
+                    : showFavs
+                    ? 'Favorites'
+                    : selectedGroup !== null
+                    ? selectedGroup.replace(/^Series:\s*/, '')
+                    : 'Recently Added'}
+                </h1>
+                <p className="text-neutral-500 text-sm shrink-0">{visibleShowNames.length} shows</p>
+                <button
+                  onClick={handleSurprise}
+                  title="Surprise me — pick a random show"
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
+                >
+                  <Shuffle size={13} />
+                  <span className="hidden sm:inline">Surprise me</span>
+                </button>
+              </div>
+              <div className="sm:w-52">
+                <SearchBar
+                  value={search}
+                  onChange={(v) => { setSearch(v); setSelectedGroup(null); setShowFavs(false) }}
+                  placeholder="Search shows…"
+                />
+              </div>
+            </div>
+
+            {visibleShowNames.length === 0 ? (
+              <EmptyState
+                icon={<Tv size={36} />}
+                title="No results"
+                description={showFavs ? 'No favorites yet.' : 'Try a different search.'}
+              />
+            ) : (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                  {visibleShowNames.slice(0, gridCount).map((name) => {
+                    const data = showMap.get(name)!
+                    const allEps = Array.from(data.seasons.values()).flat()
+                    return (
+                      <ShowCard
+                        key={name}
+                        showName={data.displayName}
+                        poster={data.logo}
+                        seasons={data.seasons.size}
+                        episodes={allEps.length}
+                        isWatchLater={watchLaterIds?.has(name)}
+                        tmdbMeta={tmdbMap.get(name)}
+                        onClick={() => navigate(`/series?show=${encodeURIComponent(name)}`)}
+                        onWatchLater={(e) => toggleWatchLater(e, name)}
+                      />
+                    )
+                  })}
+                </div>
+                <div ref={gridSentinel} className="h-1" />
+                {gridCount < visibleShowNames.length && (
+                  <p className="text-center text-xs text-neutral-600 pb-8">
+                    Showing {Math.min(gridCount, visibleShowNames.length).toLocaleString()} of{' '}
+                    {visibleShowNames.length.toLocaleString()}
+                  </p>
+                )}
+              </>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>
