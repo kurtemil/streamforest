@@ -15,6 +15,7 @@ const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg'
 const FFPROBE_PATH = process.env.FFPROBE_PATH || FFMPEG_PATH.replace(/ffmpeg(\.exe)?$/i, (m, ext) => 'ffprobe' + (ext ?? ''))
 const H264_ENCODER = process.env.H264_ENCODER || 'libx264'
 const H264_PRESET = process.env.H264_PRESET || 'ultrafast'
+const VAAPI_DEVICE = process.env.VAAPI_DEVICE || '/dev/dri/renderD128'
 const FFMPEG_LOGLEVEL = process.env.FFMPEG_LOGLEVEL || 'warning'
 const VIDEO_MAX_WIDTH = Number(process.env.VIDEO_MAX_WIDTH) || 1280
 const VIDEO_BITRATE = process.env.VIDEO_BITRATE || '1500k'
@@ -91,6 +92,9 @@ function handleTranscode(reqUrl, res) {
   if (vstart > 0 && !live) {
     args.push('-itsoffset', String(-vstart))
   }
+  if (H264_ENCODER === 'h264_vaapi' && mode === 'transcode') {
+    args.push('-vaapi_device', VAAPI_DEVICE)
+  }
   args.push('-i', target,
     '-map', '0:v:0',
     '-map', audioIdx !== null ? `0:${audioIdx}` : '0:a:0?',
@@ -105,6 +109,20 @@ function handleTranscode(reqUrl, res) {
     if (live) args.push('-bsf:a', 'aac_adtstoasc')
     args.push(
       '-movflags', movflags,
+      '-f', 'mp4',
+      'pipe:1',
+    )
+  } else if (H264_ENCODER === 'h264_vaapi') {
+    args.push(
+      '-c:v', 'h264_vaapi',
+      '-vf', `format=nv12,hwupload,scale_vaapi=w='min(iw,${VIDEO_MAX_WIDTH})':h=-2`,
+      '-b:v', VIDEO_BITRATE,
+      '-maxrate', VIDEO_MAX_BITRATE,
+      '-bufsize', `${parseInt(VIDEO_MAX_BITRATE) * 2}k`,
+      '-c:a', 'aac',
+      '-b:a', AUDIO_BITRATE,
+      '-ac', '2',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
       '-f', 'mp4',
       'pipe:1',
     )
