@@ -1,6 +1,10 @@
-FROM node:20-alpine
+FROM node:20-bookworm-slim
 
-RUN apk add --no-cache ffmpeg
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    intel-media-va-driver \
+    vainfo \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY package.json server.mjs ./
