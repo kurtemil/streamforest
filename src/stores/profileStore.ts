@@ -8,14 +8,13 @@ export interface Profile {
   name: string
   color: string
   role: ProfileRole
-  pin: string
 }
 
 export const PROFILES: Profile[] = [
-  { id: 'elof',   name: 'Elof',   color: '#3b82f6', role: 'admin',  pin: '9119' },
-  { id: 'jossan', name: 'Jossan', color: '#a855f7', role: 'parent', pin: '9119' },
-  { id: 'vera',   name: 'Vera',   color: '#ec4899', role: 'kid',    pin: '6767' },
-  { id: 'noah',   name: 'Noah',   color: '#22c55e', role: 'kid',    pin: '1379' },
+  { id: 'elof',   name: 'Elof',   color: '#3b82f6', role: 'admin'  },
+  { id: 'jossan', name: 'Jossan', color: '#a855f7', role: 'parent' },
+  { id: 'vera',   name: 'Vera',   color: '#ec4899', role: 'kid'    },
+  { id: 'noah',   name: 'Noah',   color: '#22c55e', role: 'kid'    },
 ]
 
 export function getProfile(id: string | null): Profile | undefined {

@@ -7,6 +7,20 @@ import { kidRestrictionsStore } from '@/stores/kidRestrictionsStore'
 const KID_IDS = PROFILES.filter((p) => p.role === 'kid').map((p) => p.id)
 const NUMPAD = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '←']
 
+async function verifyPin(profileId: string, pin: string): Promise<boolean> {
+  try {
+    const res = await fetch('/api/pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profile_id: profileId, pin }),
+    })
+    const data = (await res.json()) as { ok: boolean }
+    return data.ok
+  } catch {
+    return false
+  }
+}
+
 function PinEntry({
   profile,
   onSuccess,
@@ -18,10 +32,14 @@ function PinEntry({
 }) {
   const [digits, setDigits] = useState<string[]>([])
   const [error, setError] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   const submit = useCallback(
-    (pin: string[]) => {
-      if (pin.join('') === profile.pin) {
+    async (pin: string[]) => {
+      setLoading(true)
+      const ok = await verifyPin(profile.id, pin.join(''))
+      setLoading(false)
+      if (ok) {
         onSuccess()
       } else {
         setError(true)
@@ -31,12 +49,12 @@ function PinEntry({
         }, 600)
       }
     },
-    [profile.pin, onSuccess],
+    [profile.id, onSuccess],
   )
 
   const addDigit = useCallback(
     (d: string) => {
-      if (error) return
+      if (error || loading) return
       setDigits((prev) => {
         if (prev.length >= 4) return prev
         const next = [...prev, d]
@@ -44,7 +62,7 @@ function PinEntry({
         return next
       })
     },
-    [error, submit],
+    [error, loading, submit],
   )
 
   const removeDigit = useCallback(() => {
@@ -80,9 +98,11 @@ function PinEntry({
             className={`w-4 h-4 rounded-full border-2 transition-all duration-150 ${
               error
                 ? 'border-red-500 bg-red-500'
-                : digits.length > i
-                  ? 'border-white bg-white'
-                  : 'border-neutral-600 bg-transparent'
+                : loading
+                  ? 'border-neutral-400 bg-neutral-400 animate-pulse'
+                  : digits.length > i
+                    ? 'border-white bg-white'
+                    : 'border-neutral-600 bg-transparent'
             }`}
           />
         ))}
