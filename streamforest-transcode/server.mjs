@@ -298,11 +298,20 @@ function handleProbe(reqUrl, res) {
   ff.stdout.on('data', (c) => { out += c.toString() })
   ff.stderr.on('data', (c) => { err += c.toString() })
 
+  const probeTimeout = setTimeout(() => {
+    ff.kill('SIGKILL')
+    if (!res.headersSent) {
+      res.writeHead(504, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'probe timeout' }))
+    }
+  }, 20000)
+
   ff.on('error', (e) => {
+    clearTimeout(probeTimeout)
     res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: e.message }))
   })
 
   ff.on('exit', (code) => {
+    clearTimeout(probeTimeout)
     if (code !== 0) {
       res.writeHead(502, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: err || `ffprobe exit ${code}` }))
       return
