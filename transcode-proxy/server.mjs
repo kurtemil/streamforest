@@ -204,6 +204,19 @@ function handleTranscode(reqUrl, res) {
   let headersSent = false
   let sawStderrError = false
 
+  // First-byte timeout: if ffmpeg never produces output (upstream stream hangs or
+  // is unreachable), Cloudflare Tunnel's own ~30 s timeout would fire first and
+  // return a 502 without CORS headers. Kill ffmpeg ourselves and return a proper
+  // error before that happens — mirroring the same fix applied to /probe.
+  const firstByteTimeout = setTimeout(() => {
+    if (!headersSent) {
+      ff.kill('SIGKILL')
+      headersSent = true
+      res.writeHead(504, { 'Content-Type': 'application/json' })
+        .end(JSON.stringify({ error: 'stream timeout — upstream did not respond' }))
+    }
+  }, 20000)
+
   ff.stderr.on('data', (chunk) => {
     const line = chunk.toString()
     process.stderr.write(line)
@@ -213,6 +226,7 @@ function handleTranscode(reqUrl, res) {
   })
 
   ff.stdout.once('data', (chunk) => {
+    clearTimeout(firstByteTimeout)
     if (headersSent) return
     headersSent = true
     res.writeHead(200, {
@@ -225,6 +239,7 @@ function handleTranscode(reqUrl, res) {
   })
 
   ff.on('error', (err) => {
+    clearTimeout(firstByteTimeout)
     console.error('ffmpeg spawn error:', err)
     if (!headersSent) {
       headersSent = true
@@ -235,6 +250,7 @@ function handleTranscode(reqUrl, res) {
   })
 
   ff.on('exit', (code, signal) => {
+    clearTimeout(firstByteTimeout)
     if (!headersSent) {
       headersSent = true
       const msg = sawStderrError ? 'Upstream fetch failed' : `ffmpeg exited ${code ?? signal}`
@@ -298,11 +314,20 @@ function handleProbe(reqUrl, res) {
   ff.stdout.on('data', (c) => { out += c.toString() })
   ff.stderr.on('data', (c) => { err += c.toString() })
 
+  const probeTimeout = setTimeout(() => {
+    ff.kill('SIGKILL')
+    if (!res.headersSent) {
+      res.writeHead(504, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'probe timeout' }))
+    }
+  }, 20000)
+
   ff.on('error', (e) => {
+    clearTimeout(probeTimeout)
     res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: e.message }))
   })
 
   ff.on('exit', (code) => {
+    clearTimeout(probeTimeout)
     if (code !== 0) {
       res.writeHead(502, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: err || `ffprobe exit ${code}` }))
       return

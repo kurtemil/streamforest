@@ -17,9 +17,12 @@ Personal IPTV web player. React SPA on Cloudflare Pages; home transcode server o
   functions/              Cloudflare Pages Functions
     proxy.ts              /proxy — CORS bypass for 50 MB M3U download
     api/progress.ts       /api/progress — D1-backed cross-device watch state
-  streamforest-transcode/ Node.js HTTP proxy that drives ffmpeg
+  transcode-proxy/        Node.js HTTP proxy that drives ffmpeg (runs on HP ProDesk)
     server.mjs            THE server — only file that matters at runtime
-    Dockerfile            Alpine + ffmpeg + Node (used for HA add-on; NOT used on the ProDesk)
+    Dockerfile            node:20-bookworm-slim + intel-media-va-driver (ProDesk image)
+    fly.toml              Fly.io config (alternative cloud deployment, not active)
+  streamforest-transcode/ Legacy Home Assistant add-on packaging (Alpine-based)
+    server.mjs            Must be kept in sync with transcode-proxy/server.mjs
 ```
 
 ---
@@ -52,17 +55,16 @@ VITE_TMDB_API_KEY=<your key>
 **Transcode server** — manual deploy on the HP ProDesk:
 ```bash
 # SSH to server (LAN, see below), then:
-cd ~/services/streamforest-transcode   # or wherever it lives
-git pull
-sudo systemctl restart streamforest-transcode
-# or: docker compose pull && docker compose up -d
+cd ~/services          # Docker Compose lives here
+git pull               # pulls transcode-proxy/server.mjs (the live copy)
+docker compose up -d --force-recreate
 ```
 
 ---
 
 ## Transcode server (HP ProDesk 400 G4)
 
-**What it does:** Node.js HTTP server (`streamforest-transcode/server.mjs`) that wraps ffmpeg. Endpoints:
+**What it does:** Node.js HTTP server (`transcode-proxy/server.mjs`) that wraps ffmpeg. Endpoints:
 - `GET /transcode?url=&start=&mode=copy|transcode&live=1&audio=&subs=` → `video/mp4` stream
 - `GET /probe?url=` → JSON `{ duration, audioCodec, videoCodec, audioStreams, subtitleStreams }`
 - `GET /subtitle?url=&index=&start=&vstart=` → WebVTT stream
@@ -85,7 +87,7 @@ sudo systemctl restart streamforest-transcode
 | `ALLOWED_HOSTS` | `iptvworld.xyz` | Comma-separated allowlist |
 | `FFMPEG_PATH` | `ffmpeg` | |
 
-**Important:** `streamforest-transcode/server.mjs` is the canonical copy. There is a second copy at `transcode-proxy/server.mjs` (legacy HA add-on path) — keep them in sync.
+**Important:** `transcode-proxy/server.mjs` is the canonical copy (runs on the ProDesk). `streamforest-transcode/server.mjs` is the legacy HA add-on copy — keep both in sync whenever server.mjs changes.
 
 **Live TV specifics:**
 - Live channels are MPEG-TS over HTTP (Xtream Codes). Browsers can't play raw MPEG-TS.
