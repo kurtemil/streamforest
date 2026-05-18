@@ -55,10 +55,11 @@ VITE_TMDB_API_KEY=<your key>
 **Transcode server** — manual deploy on the HP ProDesk:
 ```bash
 # SSH to server (LAN, see below), then:
-cd ~/services          # Docker Compose lives here
-git pull               # pulls transcode-proxy/server.mjs (the live copy)
-docker compose up -d --force-recreate
+cd ~/streamforest && git pull
+cd ~/services && docker compose up -d --build --force-recreate
 ```
+
+The repo lives at `~/streamforest` on the ProDesk. Docker Compose lives at `~/services/docker-compose.yml` and builds from `~/streamforest/transcode-proxy/`. The `--build` flag is required because the Dockerfile COPYs server.mjs at image build time.
 
 ---
 
