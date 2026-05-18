@@ -1,0 +1,147 @@
+# StreamForest — Agent Guide
+
+Personal IPTV web player. React SPA on Cloudflare Pages; home transcode server on HP ProDesk 400 G4 exposed via Cloudflare Tunnel.
+
+---
+
+## Repo structure
+
+```
+/                         React+TS+Vite SPA (Cloudflare Pages)
+  src/
+    components/player/    VideoPlayer.tsx — main playback component
+    lib/transcode.ts      URL builders + probe helper for the transcode proxy
+    services/db.ts        Dexie (IndexedDB) schema + helpers
+    stores/               Zustand stores (player, playlist, profile, etc.)
+    pages/                Route-level pages
+  functions/              Cloudflare Pages Functions
+    proxy.ts              /proxy — CORS bypass for 50 MB M3U download
+    api/progress.ts       /api/progress — D1-backed cross-device watch state
+  streamforest-transcode/ Node.js HTTP proxy that drives ffmpeg
+    server.mjs            THE server — only file that matters at runtime
+    Dockerfile            Alpine + ffmpeg + Node (used for HA add-on; NOT used on the ProDesk)
+```
+
+---
+
+## Local dev
+
+```bash
+npm install
+npm run dev          # Vite on :5173, dev proxy middleware handles /proxy
+npm run dev:pages    # wrangler pages dev — needed for /api/* (D1) routes
+npm test             # vitest unit tests
+```
+
+Required `.env.local` (copy from `.env.example`):
+```
+VITE_TRANSCODE_PROXY_URL=http://localhost:8787
+VITE_TMDB_BEARER=<your token>
+VITE_TMDB_API_KEY=<your key>
+```
+
+---
+
+## Production deployment
+
+**Frontend** — push to `main` → Cloudflare Pages auto-deploys.
+- Live: https://streamforest.krutofv.se (also streamforest.pages.dev)
+- GitHub: https://github.com/kurtemil/streamforest
+- D1 database binding: `streamforest-profiles` (id in wrangler.toml)
+
+**Transcode server** — manual deploy on the HP ProDesk:
+```bash
+# SSH to server (LAN, see below), then:
+cd ~/services/streamforest-transcode   # or wherever it lives
+git pull
+sudo systemctl restart streamforest-transcode
+# or: docker compose pull && docker compose up -d
+```
+
+---
+
+## Transcode server (HP ProDesk 400 G4)
+
+**What it does:** Node.js HTTP server (`streamforest-transcode/server.mjs`) that wraps ffmpeg. Endpoints:
+- `GET /transcode?url=&start=&mode=copy|transcode&live=1&audio=&subs=` → `video/mp4` stream
+- `GET /probe?url=` → JSON `{ duration, audioCodec, videoCodec, audioStreams, subtitleStreams }`
+- `GET /subtitle?url=&index=&start=&vstart=` → WebVTT stream
+- `GET /health` → `ok`
+
+**Hardware:** HP ProDesk 400 G4 Desktop Mini, Intel HD Graphics 630 (Kaby Lake). QuickSync via `h264_vaapi + -qp 23` (no CQP support on iHD driver → fixed QP only).
+
+**Docker Compose:** runs in `~/services/` on the ProDesk. Port 8787 bound to `127.0.0.1` only.
+
+**Cloudflare Tunnel:** `7878bd57-streamforest-transcode.krutofv.se` → `localhost:8787`
+- Tunnel UUID: `629a0479-9537-40ad-94ad-af55706dc9cf`
+- Ingress configured via API (not dashboard)
+
+**Environment variables for the server:**
+| Var | Used on ProDesk | Notes |
+|-----|-----------------|-------|
+| `H264_ENCODER` | `h264_vaapi` | Kaby Lake QuickSync |
+| `VAAPI_DEVICE` | `/dev/dri/renderD128` | |
+| `VAAPI_QP` | `23` | Fixed QP (no bitrate control on this driver) |
+| `ALLOWED_HOSTS` | `iptvworld.xyz` | Comma-separated allowlist |
+| `FFMPEG_PATH` | `ffmpeg` | |
+
+**Important:** `streamforest-transcode/server.mjs` is the canonical copy. There is a second copy at `transcode-proxy/server.mjs` (legacy HA add-on path) — keep them in sync.
+
+**Live TV specifics:**
+- Live channels are MPEG-TS over HTTP (Xtream Codes). Browsers can't play raw MPEG-TS.
+- Routed through `/transcode?live=1&mode=copy` — cheap remux to fragmented MP4, no re-encode.
+- `-bsf:a aac_adtstoasc` is mandatory for AAC in MPEG-TS → MP4 (ADTS → ASC).
+- `-fflags +genpts+discardcorrupt` for flaky IPTV timestamps.
+- A 20 s first-byte timeout kills ffmpeg before Cloudflare Tunnel's own ~30 s timeout fires — prevents CORS-less 502 reaching the browser.
+
+---
+
+## SSH to the server
+
+**Within home network (LAN):** SSH works directly. Find the server's IP from your router admin panel (hostname: probably `prodesk` or similar).
+
+```bash
+ssh <your-username>@<lan-ip>     # e.g. ssh elof@192.168.1.x
+```
+
+**Outside home network:** External SSH is NOT currently configured. Options (pick one):
+
+### Option A — Tailscale (recommended, 5 min setup)
+```bash
+# On the ProDesk (SSH in from home first):
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+
+# On your laptop:
+# Install Tailscale → sign in with the same account → ProDesk appears in the network
+ssh <your-username>@<tailscale-ip-or-hostname>
+```
+
+### Option B — Cloudflare Access SSH (zero-trust, more setup)
+Uses the existing Cloudflare infrastructure. Requires:
+1. Create a Cloudflare Access application for SSH on the same tunnel or a new one.
+2. Install `cloudflared` on client for `ProxyCommand`.
+3. See Cloudflare docs: *Connect with SSH through Cloudflare Tunnel*.
+
+---
+
+## Key architecture facts
+
+- **No HLS for live:** providers serve HLS at `host:port/live/USER/PASS/{id}.m3u8` but that's HTTP → mixed-content blocked on HTTPS. Use the transcode proxy instead.
+- **VideoPlayer routing:**
+  - `type === 'live'` → `liveStreamUrl()` → transcode proxy (copy mode, no probe)
+  - `type === 'movie' | 'series'` → `probeMedia()` first, then `transcodeUrl()`
+  - `.m3u8` URLs → HLS.js
+- **Probe before play (VOD only):** needed to detect AC3/DTS audio (→ `mode=transcode`) and enumerate embedded subtitle tracks.
+- **Subtitle extraction:** co-extracted in-process via `pipe:3+` alongside the video transcode. Falls back to a standalone ffmpeg run if the transcode finishes first. Cached on disk under `SUB_CACHE_DIR`.
+- **Profiles:** 4 profiles (Elof/Jossan/Vera/Noah). Watch progress synced to D1 via `/api/progress`. Local IndexedDB is the primary store; D1 is cross-device sync.
+- **Continue Watching bug:** items may not appear after watching — suspected stale closure on `profileId` in VideoPlayer save-on-close. Not yet fixed.
+
+---
+
+## Cloudflare account
+
+- Pages project: `streamforest`
+- D1 database: `streamforest-profiles` (`1b607c87-bab2-485b-94c8-5722f9f8f9a6`)
+- Tunnel: `streamforest-transcode` (`629a0479-9537-40ad-94ad-af55706dc9cf`)
+- Domain: `krutofv.se`
