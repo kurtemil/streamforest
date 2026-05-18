@@ -496,14 +496,17 @@ export function VideoPlayer() {
           proxyModeRef.current = mode
           isTranscodedRef.current = true
           videoStartTimeRef.current = info?.startTime ?? 0
-          // For copy mode, the actual stream start is the nearest keyframe K ≤ startTime.
-          // Use K as the offset so subtitle timestamps (absolute) stay in sync.
-          let videoOffset = startTime
+          playbackOffsetRef.current = startTime
+          // For copy mode, correct the offset to the actual keyframe K async so
+          // video starts immediately (no extra wait on top of the probe).
           if (mode === 'copy' && startTime > 0) {
-            videoOffset = await keyframeP
-            if (usePlayerStore.getState().current !== current) return
+            const capturedCurrent = current
+            keyframeP.then(keyframe => {
+              if (usePlayerStore.getState().current === capturedCurrent) {
+                playbackOffsetRef.current = keyframe
+              }
+            }).catch(() => {})
           }
-          playbackOffsetRef.current = videoOffset
           transcodedDurationRef.current = info?.duration ?? null
           if (info?.duration) setDuration(info.duration)
           video.src = transcodeUrl(current.url, {

@@ -398,7 +398,7 @@ function handleKeyframe(reqUrl, res) {
     '-v', 'error',
     '-select_streams', 'v:0',
     '-show_entries', 'packet=pts_time,flags',
-    '-read_intervals', `${lookback.toFixed(3)}%+#200`,
+    '-read_intervals', `${lookback.toFixed(3)}%${(start + 0.5).toFixed(3)}`,
     '-of', 'json',
     target,
   ]
