@@ -378,6 +378,75 @@ function handleProbe(reqUrl, res) {
   })
 }
 
+// Return the actual I-frame (keyframe) time at or just before `start`.
+// Used by the client to correct playbackOffset after a copy-mode seek, because
+// -ss snaps to the nearest keyframe K ≤ start, causing subtitle drift of start-K.
+function handleKeyframe(reqUrl, res) {
+  const target = parseTargetUrl(reqUrl, res)
+  if (!target) return
+  const startParam = Number(reqUrl.searchParams.get('start') || 0)
+  const start = Number.isFinite(startParam) && startParam > 0 ? startParam : 0
+
+  if (start === 0) {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' })
+      .end(JSON.stringify({ keyframe: 0 }))
+    return
+  }
+
+  const lookback = Math.max(0, start - 10)
+  const args = [
+    '-v', 'error',
+    '-select_streams', 'v:0',
+    '-show_entries', 'packet=pts_time,flags',
+    '-read_intervals', `${lookback.toFixed(3)}%+#200`,
+    '-of', 'json',
+    target,
+  ]
+
+  const ff = spawn(FFPROBE_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] })
+  let out = ''
+
+  const timeout = setTimeout(() => {
+    ff.kill('SIGKILL')
+    process.stderr.write(`[keyframe] timeout start=${start} — falling back\n`)
+    if (!res.headersSent) {
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ keyframe: start }))
+    }
+  }, 8000)
+
+  ff.stdout.on('data', d => { out += d.toString() })
+
+  ff.on('error', () => {
+    clearTimeout(timeout)
+    if (!res.headersSent) {
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ keyframe: start }))
+    }
+  })
+
+  ff.on('exit', () => {
+    clearTimeout(timeout)
+    if (res.headersSent) return
+    try {
+      const data = JSON.parse(out)
+      const candidates = (data?.packets ?? [])
+        .filter(p => typeof p.pts_time === 'string' && p.flags?.includes('K'))
+        .map(p => Number(p.pts_time))
+        .filter(t => Number.isFinite(t) && t <= start + 0.1)
+      const keyframe = candidates.length > 0 ? candidates[candidates.length - 1] : start
+      process.stderr.write(`[keyframe] start=${start} → keyframe=${keyframe.toFixed(3)} (${candidates.length} candidates)\n`)
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' })
+        .end(JSON.stringify({ keyframe }))
+    } catch {
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ keyframe: start }))
+    }
+  })
+
+  res.on('close', () => {
+    clearTimeout(timeout)
+    if (!ff.killed) ff.kill('SIGKILL')
+  })
+}
+
 function subCachePath(url, index, vstart, seekBucket) {
   const hash = createHash('sha1').update(`${url}|${index}|${vstart}|${seekBucket}`).digest('hex')
   return path.join(SUB_CACHE_DIR, `${hash}.vtt`)
@@ -582,6 +651,11 @@ const server = http.createServer((req, res) => {
 
   if (reqUrl.pathname === '/probe') {
     handleProbe(reqUrl, res)
+    return
+  }
+
+  if (reqUrl.pathname === '/keyframe') {
+    handleKeyframe(reqUrl, res)
     return
   }
 

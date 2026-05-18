@@ -112,6 +112,21 @@ export function subtitleVttUrl(url: string, index: number, vstart = 0, start = 0
   return `${base}/subtitle?${params.toString()}`
 }
 
+export async function getKeyframeTime(url: string, start: number): Promise<number> {
+  const base = proxyBase()
+  if (!base || start <= 0) return start
+  try {
+    const res = await fetch(
+      `${base}/keyframe?${new URLSearchParams({ url, start: String(Math.floor(start)) }).toString()}`,
+    )
+    if (!res.ok) return start
+    const data = (await res.json()) as { keyframe?: number }
+    return typeof data.keyframe === 'number' && isFinite(data.keyframe) ? data.keyframe : start
+  } catch {
+    return start
+  }
+}
+
 export async function probeMedia(url: string, signal?: AbortSignal): Promise<MediaInfo | null> {
   const base = proxyBase()
   if (!base) return null

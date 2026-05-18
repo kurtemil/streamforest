@@ -10,7 +10,7 @@ import { useProfileStore } from '@/stores/profileStore'
 import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import {
   isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, probeMedia, pickProxyMode,
-  subtitleVttUrl, audioStreamLabel, subtitleStreamLabel,
+  subtitleVttUrl, audioStreamLabel, subtitleStreamLabel, getKeyframeTime,
 } from '@/lib/transcode'
 import type { ProxyMode } from '@/lib/transcode'
 import { normalizeShowKey } from '@/lib/utils'
@@ -370,9 +370,27 @@ export function VideoPlayer() {
     })
     video.play().catch(() => {})
     console.log('[seekTo] src rebuilt at', clamped, '— activeSubtitle:', activeSubtitleRef.current, 'tracks:', subtitleTracksRef.current.length)
-    if (activeSubtitleRef.current >= 0) {
+    if (proxyModeRef.current === 'copy') {
+      // Copy mode: ffmpeg snaps to the nearest keyframe K ≤ clamped.
+      // Correct playbackOffset to K async so subtitle timestamps stay aligned.
+      const seekTarget = clamped
+      getKeyframeTime(current.url, Math.floor(clamped))
+        .then(keyframe => {
+          if (playbackOffsetRef.current !== seekTarget) return // superseded by another seek
+          playbackOffsetRef.current = keyframe
+          if (activeSubtitleRef.current >= 0) {
+            const track = subtitleTracksRef.current.find(t => t.id === activeSubtitleRef.current)
+            if (track) attachSubtitleTrack(track.id, track.name, track.lang, seekTarget)
+          }
+        })
+        .catch(() => {
+          if (activeSubtitleRef.current >= 0) {
+            const track = subtitleTracksRef.current.find(t => t.id === activeSubtitleRef.current)
+            if (track) attachSubtitleTrack(track.id, track.name, track.lang, clamped)
+          }
+        })
+    } else if (activeSubtitleRef.current >= 0) {
       const track = subtitleTracksRef.current.find(t => t.id === activeSubtitleRef.current)
-      console.log('[seekTo] re-attaching subtitle track', track)
       if (track) attachSubtitleTrack(track.id, track.name, track.lang, clamped)
     }
   }, [current, attachSubtitleTrack])
@@ -435,10 +453,14 @@ export function VideoPlayer() {
         // expose embedded MKV tracks via the <video> element, so the picker
         // depends on probe + ffmpeg routing. Movie/series URLs from many
         // providers omit the .mkv extension, so we trust the channel type.
-        const info = isProxyVideo(current)
-          ? await probeMedia(current.url)
-          : null
+        // Start both fetches in parallel: probe for codec info, keyframe for
+        // copy-mode offset correction. getKeyframeTime is cheap if start=0.
+        const probeP = isProxyVideo(current) ? probeMedia(current.url) : Promise.resolve(null)
+        const keyframeP = isProxyVideo(current) && startTime > 0
+          ? getKeyframeTime(current.url, startTime)
+          : Promise.resolve(startTime)
 
+        const info = await probeP
         if (usePlayerStore.getState().current !== current) return // navigated away during probe
 
         if (info) {
@@ -474,7 +496,14 @@ export function VideoPlayer() {
           proxyModeRef.current = mode
           isTranscodedRef.current = true
           videoStartTimeRef.current = info?.startTime ?? 0
-          playbackOffsetRef.current = startTime
+          // For copy mode, the actual stream start is the nearest keyframe K ≤ startTime.
+          // Use K as the offset so subtitle timestamps (absolute) stay in sync.
+          let videoOffset = startTime
+          if (mode === 'copy' && startTime > 0) {
+            videoOffset = await keyframeP
+            if (usePlayerStore.getState().current !== current) return
+          }
+          playbackOffsetRef.current = videoOffset
           transcodedDurationRef.current = info?.duration ?? null
           if (info?.duration) setDuration(info.duration)
           video.src = transcodeUrl(current.url, {
