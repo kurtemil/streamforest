@@ -498,7 +498,7 @@ function handleSubtitle(reqUrl, res) {
   const startParam = Number(reqUrl.searchParams.get('start') || 0)
   const start = Number.isFinite(startParam) && startParam > 0 ? startParam : 0
   const seekBucket = start > 0 ? Math.floor(start / 300) * 300 : 0
-  const seekTo = seekBucket > 0 ? Math.max(0, seekBucket - 60) : 0
+  const seekTo = start > 0 ? Math.max(0, start - 5) : 0
   const cacheFile = subCachePath(target, index, vstart, seekBucket)
 
   // 1. Permanent cache hit.

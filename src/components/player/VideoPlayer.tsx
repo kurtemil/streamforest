@@ -294,7 +294,7 @@ export function VideoPlayer() {
           if (cue) { pending.push({ start: cue.startTime, end: cue.endTime, text: cue.text }); cueCount++ }
           buffer = ''
         }
-        if (pending.length >= 5 || (final && pending.length > 0)) {
+        if ((!gotFirst && pending.length >= 1) || (gotFirst && pending.length >= 20) || (final && pending.length > 0)) {
           const batch = pending.splice(0)
           if (!gotFirst) {
             gotFirst = true
