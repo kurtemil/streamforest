@@ -45,6 +45,13 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
       if (data.m3u_url && data.m3u_url !== get().m3uUrl) {
         localStorage.setItem(STORAGE_KEY, data.m3u_url)
         set({ m3uUrl: data.m3u_url })
+      } else if (!data.m3u_url && get().m3uUrl) {
+        // Local has a URL but D1 doesn't — push it up so other devices/PWA can sync
+        fetch('/api/preferences', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profileId: '_global', key: 'm3u_url', value: get().m3uUrl }),
+        }).catch(() => {})
       }
     } catch {
       // offline or D1 not configured — silent

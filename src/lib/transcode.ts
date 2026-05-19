@@ -127,10 +127,34 @@ export async function getKeyframeTime(url: string, start: number): Promise<numbe
   }
 }
 
-export function epgProxyUrl(url: string): string | null {
+export function epgProxyUrl(url: string, force = false): string | null {
   const base = proxyBase()
   if (!base) return null
-  return `${base}/epg?${new URLSearchParams({ url }).toString()}`
+  const params = new URLSearchParams({ url })
+  if (force) params.set('force', '1')
+  return `${base}/epg?${params.toString()}`
+}
+
+export async function tmdbCacheGet(id: string): Promise<unknown> {
+  const base = proxyBase()
+  if (!base) return null
+  try {
+    const res = await fetch(`${base}/tmdb?${new URLSearchParams({ id }).toString()}`)
+    if (!res.ok) return null
+    return res.json()
+  } catch {
+    return null
+  }
+}
+
+export function tmdbCachePut(meta: object): void {
+  const base = proxyBase()
+  if (!base) return
+  fetch(`${base}/tmdb`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(meta),
+  }).catch(() => {})
 }
 
 export async function probeMedia(url: string, signal?: AbortSignal): Promise<MediaInfo | null> {

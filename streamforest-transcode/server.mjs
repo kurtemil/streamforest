@@ -26,9 +26,12 @@ const SUB_CACHE_DIR = process.env.SUB_CACHE_DIR || path.join(os.tmpdir(), 'strea
 const SUB_CACHE_TTL_MS = Number(process.env.SUB_CACHE_TTL_MS) || 7 * 24 * 60 * 60 * 1000
 const EPG_CACHE_DIR = process.env.EPG_CACHE_DIR || path.join(os.tmpdir(), 'streamforest-epg')
 const EPG_CACHE_TTL_MS = 24 * 60 * 60 * 1000
+const TMDB_CACHE_DIR = process.env.TMDB_CACHE_DIR || path.join(os.tmpdir(), 'streamforest-tmdb')
+const TMDB_CACHE_TTL_MS = 90 * 24 * 60 * 60 * 1000  // 90 days
 
 fs.mkdirSync(SUB_CACHE_DIR, { recursive: true })
 fs.mkdirSync(EPG_CACHE_DIR, { recursive: true })
+fs.mkdirSync(TMDB_CACHE_DIR, { recursive: true })
 
 // Active transcode registry.
 // key: sha1(url|seekBucket)
@@ -657,14 +660,17 @@ async function fetchAndCacheEpg(target, cacheKey) {
 async function handleEpg(reqUrl, res) {
   const target = parseTargetUrl(reqUrl, res)
   if (!target) return
+  const force = reqUrl.searchParams.get('force') === '1'
   const cacheKey = createHash('sha1').update(target).digest('hex')
   const { xml: cacheFile, meta: metaFile } = epgCachePaths(cacheKey)
 
   let cacheHit = false
-  try {
-    const meta = JSON.parse(fs.readFileSync(metaFile, 'utf8'))
-    if (Date.now() - meta.fetchedAt < EPG_CACHE_TTL_MS && fs.existsSync(cacheFile)) cacheHit = true
-  } catch {}
+  if (!force) {
+    try {
+      const meta = JSON.parse(fs.readFileSync(metaFile, 'utf8'))
+      if (Date.now() - meta.fetchedAt < EPG_CACHE_TTL_MS && fs.existsSync(cacheFile)) cacheHit = true
+    } catch {}
+  }
 
   if (!cacheHit) {
     try {
@@ -717,12 +723,60 @@ function scheduleEpgRefresh() {
 
 scheduleEpgRefresh()
 
+// ── TMDB metadata disk cache ───────────────────────────────────────────────────
+
+function tmdbCacheFile(id) {
+  return path.join(TMDB_CACHE_DIR, createHash('sha1').update(id).digest('hex') + '.json')
+}
+
+function handleTmdbGet(reqUrl, res) {
+  const id = reqUrl.searchParams.get('id')
+  if (!id) {
+    res.writeHead(400).end('Missing id')
+    return
+  }
+  const cacheFile = tmdbCacheFile(id)
+  try {
+    const stat = fs.statSync(cacheFile)
+    if (Date.now() - stat.mtimeMs < TMDB_CACHE_TTL_MS) {
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'public, max-age=3600',
+        'X-Cache': 'HIT',
+      })
+      fs.createReadStream(cacheFile).pipe(res)
+      return
+    }
+    fs.unlinkSync(cacheFile)
+  } catch { /* ENOENT */ }
+  res.writeHead(404).end('Not found')
+}
+
+function handleTmdbPost(req, res) {
+  let body = ''
+  req.on('data', (c) => { body += c.toString() })
+  req.on('end', () => {
+    try {
+      const meta = JSON.parse(body)
+      if (!meta.id || meta.notFound) {
+        res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}')
+        return
+      }
+      const cacheFile = tmdbCacheFile(String(meta.id))
+      fs.writeFileSync(cacheFile, JSON.stringify(meta))
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end('{}')
+    } catch {
+      res.writeHead(400).end('Bad JSON')
+    }
+  })
+}
+
 const server = http.createServer((req, res) => {
   const reqUrl = new URL(req.url ?? '/', `http://${req.headers.host}`)
   process.stderr.write(`[req] ${req.method} ${reqUrl.pathname}\n`)
 
   res.setHeader('Access-Control-Allow-Origin', '*')
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', '*')
 
   if (req.method === 'OPTIONS') {
@@ -757,6 +811,17 @@ const server = http.createServer((req, res) => {
 
   if (reqUrl.pathname === '/epg') {
     handleEpg(reqUrl, res)
+    return
+  }
+
+  if (reqUrl.pathname === '/tmdb') {
+    if (req.method === 'GET') {
+      handleTmdbGet(reqUrl, res)
+    } else if (req.method === 'POST') {
+      handleTmdbPost(req, res)
+    } else {
+      res.writeHead(405).end('Method not allowed')
+    }
     return
   }
 

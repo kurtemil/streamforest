@@ -110,10 +110,11 @@ function parseChannelBlock(block: string): { id: string; names: string[] } | nul
  */
 export async function fetchAndParseEpg(
   epgUrl: string,
+  force = false,
   onProgress?: (count: number) => void,
 ): Promise<{ programs: EpgProgram[]; displayNameMap: Map<string, string> }> {
   // Prefer the transcode-proxy /epg endpoint (server-side cache, no CF timeout)
-  const fetchUrl = epgProxyUrl(epgUrl) ?? proxyUrl(epgUrl)
+  const fetchUrl = epgProxyUrl(epgUrl, force) ?? proxyUrl(epgUrl)
   const res = await fetch(fetchUrl)
   if (!res.ok) throw new Error(`EPG fetch failed with status ${res.status}`)
   if (!res.body) throw new Error('EPG response had no body')

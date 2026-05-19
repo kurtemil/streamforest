@@ -54,6 +54,13 @@ export const useEpgStore = create<EpgState>((set, get) => ({
       if (data.epg_url && data.epg_url !== get().epgUrl) {
         localStorage.setItem(EPG_URL_KEY, data.epg_url)
         set({ epgUrl: data.epg_url })
+      } else if (!data.epg_url && get().epgUrl) {
+        // Local has a URL but D1 doesn't — push it up so other devices/PWA can sync
+        fetch('/api/preferences', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profileId: '_global', key: 'epg_url', value: get().epgUrl }),
+        }).catch(() => {})
       }
     } catch {
       // offline or D1 not configured — silent
@@ -95,7 +102,7 @@ export const useEpgStore = create<EpgState>((set, get) => ({
     }
     set({ status: 'loading', error: null, progress: 'Connecting…' })
     try {
-      const { programs: flat, displayNameMap } = await fetchAndParseEpg(url, (count) => {
+      const { programs: flat, displayNameMap } = await fetchAndParseEpg(url, true, (count) => {
         set({ progress: `Parsed ${count.toLocaleString()} programs…` })
       })
       set({ progress: 'Saving…' })

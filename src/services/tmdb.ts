@@ -1,5 +1,6 @@
 import type { TmdbMeta, TmdbCastMember, TmdbSimilarItem } from '@/types'
 import { saveTmdbMeta } from './db'
+import { tmdbCacheGet, tmdbCachePut } from '@/lib/transcode'
 
 const BASE = 'https://api.themoviedb.org/3'
 const IMG  = 'https://image.tmdb.org/t/p'
@@ -149,10 +150,30 @@ function pickBlurhash(images: TmdbImage[] | undefined, primaryPath: string | nul
   return images[0]?.blur_hash ?? null
 }
 
+// ── Server cache helpers ───────────────────────────────────────────────────────
+
+async function getFromServerCache(id: string): Promise<TmdbMeta | null> {
+  const data = await tmdbCacheGet(id)
+  if (!data) return null
+  const meta = data as TmdbMeta
+  return { ...meta, cachedAt: Date.now() }
+}
+
+function saveToServerCache(meta: TmdbMeta): void {
+  if (meta.notFound) return
+  tmdbCachePut(meta)
+}
+
 // ── Public enrichment functions ────────────────────────────────────────────────
 
 /** Fetch + cache TMDB metadata for a movie. Returns null if not found. */
 export async function enrichMovie(cacheId: string, title: string, year: number | null): Promise<TmdbMeta | null> {
+  const serverHit = await getFromServerCache(cacheId)
+  if (serverHit) {
+    await saveTmdbMeta(serverHit)
+    return serverHit
+  }
+
   const query = normalizeForSearch(title)
 
   const searchData = await tmdbFetch<TmdbSearchResponse>('/search/movie', {
@@ -229,11 +250,18 @@ export async function enrichMovie(cacheId: string, title: string, year: number |
   }
 
   await saveTmdbMeta(meta)
+  saveToServerCache(meta)
   return meta
 }
 
 /** Fetch + cache TMDB metadata for a TV show. Returns null if not found. */
 export async function enrichTV(cacheId: string, showName: string): Promise<TmdbMeta | null> {
+  const serverHit = await getFromServerCache(cacheId)
+  if (serverHit) {
+    await saveTmdbMeta(serverHit)
+    return serverHit
+  }
+
   const query = normalizeForSearch(showName)
 
   const searchData = await tmdbFetch<TmdbSearchResponse>('/search/tv', { query })
@@ -294,5 +322,6 @@ export async function enrichTV(cacheId: string, showName: string): Promise<TmdbM
   }
 
   await saveTmdbMeta(meta)
+  saveToServerCache(meta)
   return meta
 }
