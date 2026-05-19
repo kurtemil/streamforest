@@ -125,6 +125,8 @@ export function VideoPlayer() {
   // iOS WebKit won't stream fMP4 from video.src without Content-Length/range support,
   // but fetch() + SourceBuffer works on iOS 17+ where MSE is fully supported.
   // Returns false if MSE is unavailable so the caller can fall back to video.src.
+  // When true is returned, play() will be called internally after the first data chunk —
+  // callers must NOT call video.play() themselves for the MSE path.
   const startMsePlayback = useCallback((video: HTMLVideoElement, url: string): boolean => {
     mseAbortRef.current?.abort()
     mseAbortRef.current = null
@@ -133,10 +135,16 @@ export function VideoPlayer() {
     const objUrl = URL.createObjectURL(ms)
     const abort = new AbortController()
     mseAbortRef.current = abort
+    let playTriggered = false
     ms.addEventListener('sourceopen', async () => {
       URL.revokeObjectURL(objUrl)
       let sb: SourceBuffer
-      try { sb = ms.addSourceBuffer(MSE_MIME) } catch { return }
+      try {
+        sb = ms.addSourceBuffer(MSE_MIME)
+      } catch {
+        if (ms.readyState === 'open') ms.endOfStream('network')
+        return
+      }
       const drain = () => sb.updating
         ? new Promise<void>(r => sb.addEventListener('updateend', () => r(), { once: true }))
         : Promise.resolve()
@@ -150,7 +158,18 @@ export function VideoPlayer() {
           if (ms.readyState !== 'open') break
           await drain()
           if (ms.readyState !== 'open') break
-          try { sb.appendBuffer(value) } catch { break }
+          try {
+            sb.appendBuffer(value)
+            // iOS Safari requires play() to be called after data is in the buffer.
+            // Calling it before sourceopen / before the first append is too early.
+            if (!playTriggered) {
+              playTriggered = true
+              video.play().catch(() => {})
+            }
+          } catch {
+            if (ms.readyState === 'open') ms.endOfStream('decode')
+            break
+          }
         }
       } catch (e) {
         if ((e as Error).name !== 'AbortError' && ms.readyState === 'open') ms.endOfStream('network')
@@ -418,8 +437,11 @@ export function VideoPlayer() {
       subtitleIndices: subtitleStreamIndicesRef.current,
       vstart: videoStartTimeRef.current || undefined,
     })
-    if (!(IS_IOS && startMsePlayback(video, seekUrl))) video.src = seekUrl
-    video.play().catch(() => {})
+    const mseSeek = IS_IOS && startMsePlayback(video, seekUrl)
+    if (!mseSeek) {
+      video.src = seekUrl
+      video.play().catch(() => {})
+    }
     console.log('[seekTo] src rebuilt at', clamped, '— activeSubtitle:', activeSubtitleRef.current, 'tracks:', subtitleTracksRef.current.length)
     if (proxyModeRef.current === 'copy') {
       // Copy mode: ffmpeg snaps to the nearest keyframe K ≤ clamped.
@@ -468,6 +490,7 @@ export function VideoPlayer() {
     detachSubtitleTrack()
 
     const load = async () => {
+      let msePlaying = false
       // Live channels (Xtream Codes MPEG-TS over HTTP). Browsers can't play
       // raw MPEG-TS, and on HTTPS pages the HTTP source is mixed-content
       // blocked anyway. Route through the transcode-proxy in copy mode (cheap
@@ -485,8 +508,11 @@ export function VideoPlayer() {
         // endpoint so mixed-content is avoided and segment URLs are rewritten.
         const streamSrc = liveStreamUrl(current.url)
         if (streamSrc) {
-          if (!(IS_IOS && startMsePlayback(video, streamSrc))) video.src = streamSrc
-          video.play().catch(() => {})
+          const mseLive = IS_IOS && startMsePlayback(video, streamSrc)
+          if (!mseLive) {
+            video.src = streamSrc
+            video.play().catch(() => {})
+          }
         }
         return
       }
@@ -574,7 +600,8 @@ export function VideoPlayer() {
             subtitleIndices: subtitleStreamIndicesRef.current,
             vstart: info?.startTime,
           })
-          if (!(IS_IOS && startMsePlayback(video, vodUrl))) video.src = vodUrl
+          msePlaying = IS_IOS && startMsePlayback(video, vodUrl)
+          if (!msePlaying) video.src = vodUrl
         } else {
           isTranscodedRef.current = false
           videoStartTimeRef.current = 0
@@ -639,7 +666,7 @@ export function VideoPlayer() {
         }
       }
 
-      video.play().catch(() => {})
+      if (!msePlaying) video.play().catch(() => {})
     }
 
     load()
@@ -755,6 +782,13 @@ export function VideoPlayer() {
     const onWaiting  = () => setIsBuffering(true)
     const onCanPlay  = () => setIsBuffering(false)
     const onPlaying  = () => setIsBuffering(false)
+    const onVideoError = () => {
+      const err = video.error
+      if (err) {
+        setError(`Playback error (code ${err.code})${err.message ? `: ${err.message}` : ''}`)
+        setIsBuffering(false)
+      }
+    }
 
     video.addEventListener('timeupdate', onTimeUpdate)
     video.addEventListener('durationchange', onDurationChange)
@@ -767,6 +801,7 @@ export function VideoPlayer() {
     video.addEventListener('waiting', onWaiting)
     video.addEventListener('canplay', onCanPlay)
     video.addEventListener('playing', onPlaying)
+    video.addEventListener('error', onVideoError)
     nativeAudioTracks?.addEventListener('addtrack', syncNativeAudioTracks)
     nativeAudioTracks?.addEventListener('change', syncNativeAudioTracks)
     video.textTracks.addEventListener('addtrack', onNativeSubtitleChange)
@@ -782,6 +817,7 @@ export function VideoPlayer() {
       video.removeEventListener('waiting', onWaiting)
       video.removeEventListener('canplay', onCanPlay)
       video.removeEventListener('playing', onPlaying)
+      video.removeEventListener('error', onVideoError)
       nativeAudioTracks?.removeEventListener('addtrack', syncNativeAudioTracks)
       nativeAudioTracks?.removeEventListener('change', syncNativeAudioTracks)
       video.textTracks.removeEventListener('addtrack', onNativeSubtitleChange)
@@ -894,14 +930,18 @@ export function VideoPlayer() {
       setCurrentTime(realTime)
       setBuffered(realTime)
       setActiveAudioTrack(id)
-      video.src = transcodeUrl(current.url, {
+      const audioUrl = transcodeUrl(current.url, {
         startSeconds: realTime,
         audioIndex: id,
         mode: proxyModeRef.current ?? undefined,
         subtitleIndices: subtitleStreamIndicesRef.current,
         vstart: videoStartTimeRef.current || undefined,
       })
-      video.play().catch(() => {})
+      const mseAudio = IS_IOS && startMsePlayback(video, audioUrl)
+      if (!mseAudio) {
+        video.src = audioUrl
+        video.play().catch(() => {})
+      }
       if (previousSubInfo) {
         attachSubtitleTrack(previousSubInfo.id, previousSubInfo.name, previousSubInfo.lang)
       }
