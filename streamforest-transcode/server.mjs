@@ -28,6 +28,8 @@ const EPG_CACHE_DIR = process.env.EPG_CACHE_DIR || path.join(os.tmpdir(), 'strea
 const EPG_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const TMDB_CACHE_DIR = process.env.TMDB_CACHE_DIR || path.join(os.tmpdir(), 'streamforest-tmdb')
 const TMDB_CACHE_TTL_MS = 90 * 24 * 60 * 60 * 1000  // 90 days
+const CLIENT_LOG_FILE = process.env.CLIENT_LOG_FILE || path.join(os.tmpdir(), 'streamforest-client.log')
+const CLIENT_LOG_MAX_BYTES = 1 * 1024 * 1024  // 1 MB, then rotate
 
 fs.mkdirSync(SUB_CACHE_DIR, { recursive: true })
 fs.mkdirSync(EPG_CACHE_DIR, { recursive: true })
@@ -905,6 +907,24 @@ const server = http.createServer((req, res) => {
     } else {
       res.writeHead(405).end('Method not allowed')
     }
+    return
+  }
+
+  if (reqUrl.pathname === '/clientlog' && req.method === 'POST') {
+    let body = ''
+    req.on('data', (chunk) => { body += chunk.toString() })
+    req.on('end', () => {
+      try {
+        const entry = JSON.stringify({ ...JSON.parse(body), _ip: req.socket.remoteAddress, _srv: Date.now() })
+        try {
+          const stat = fs.statSync(CLIENT_LOG_FILE)
+          if (stat.size > CLIENT_LOG_MAX_BYTES) fs.writeFileSync(CLIENT_LOG_FILE, '')
+        } catch {}
+        fs.appendFile(CLIENT_LOG_FILE, entry + '\n', () => {})
+        console.log(`[clientlog] ${entry}`)
+      } catch {}
+      res.writeHead(200).end('ok')
+    })
     return
   }
 

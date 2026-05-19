@@ -10,7 +10,7 @@ import { useProfileStore } from '@/stores/profileStore'
 import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import {
   isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, liveHlsProxyUrl, probeMedia, pickProxyMode,
-  subtitleVttUrl, audioStreamLabel, subtitleStreamLabel, getKeyframeTime,
+  subtitleVttUrl, audioStreamLabel, subtitleStreamLabel, getKeyframeTime, logDiagnostic,
 } from '@/lib/transcode'
 import type { ProxyMode } from '@/lib/transcode'
 import { normalizeShowKey } from '@/lib/utils'
@@ -27,10 +27,18 @@ const IS_IOS = typeof navigator !== 'undefined' && (
   /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 )
-// avc1.640033 = H264 High Profile Level 5.1 — covers most H264 IPTV content.
-// iOS Safari rejects appendBuffer when the bitstream level exceeds what was declared,
-// so we declare a high level to avoid that mismatch.
-const MSE_MIME = 'video/mp4; codecs="avc1.640033,mp4a.40.2"'
+// Try codec strings in order. iOS Safari strictly matches the H264 level declared in
+// addSourceBuffer against the actual bitstream, so we try higher levels first.
+const MSE_MIME_CANDIDATES = [
+  'video/mp4; codecs="avc1.640033,mp4a.40.2"',  // H264 HP L5.1
+  'video/mp4; codecs="avc1.64002a,mp4a.40.2"',  // H264 HP L4.2
+  'video/mp4; codecs="avc1.640028,mp4a.40.2"',  // H264 HP L4.0
+  'video/mp4; codecs="avc1.42E01E,mp4a.40.2"',  // H264 Baseline L3.0
+]
+function pickMseMime(): string | null {
+  if (typeof MediaSource === 'undefined') return null
+  return MSE_MIME_CANDIDATES.find(m => MediaSource.isTypeSupported(m)) ?? null
+}
 
 interface Track { id: number; name: string; lang: string }
 
@@ -124,6 +132,12 @@ export function VideoPlayer() {
     }
   }, [])
 
+  // Tracks the iOS playback strategy for the current item so the error handler
+  // can fall back from HLS → MSE when the HLS proxy fails (e.g. provider 404).
+  const iosStrategyRef = useRef<'hls' | 'mse' | null>(null)
+  // fMP4 proxy URL stored when using HLS; used for MSE fallback on HLS error.
+  const iosFallbackUrlRef = useRef<string | null>(null)
+
   // Pipe a proxy fMP4 stream via MSE instead of setting video.src directly.
   // iOS WebKit won't stream fMP4 from video.src without Content-Length/range support,
   // but fetch() + SourceBuffer works on iOS 17+ where MSE is fully supported.
@@ -133,10 +147,9 @@ export function VideoPlayer() {
   const startMsePlayback = useCallback((video: HTMLVideoElement, url: string): boolean => {
     mseAbortRef.current?.abort()
     mseAbortRef.current = null
-    const mseAvail = typeof MediaSource !== 'undefined'
-    const mseSupported = mseAvail && MediaSource.isTypeSupported(MSE_MIME)
-    console.log('[MSE] available:', mseAvail, 'mimeSupported:', mseSupported, 'mime:', MSE_MIME)
-    if (!mseAvail || !mseSupported) return false
+    const mime = pickMseMime()
+    logDiagnostic('mse-start', { mseAvail: typeof MediaSource !== 'undefined', mime, url: url.slice(-40) })
+    if (!mime) return false
     const ms = new MediaSource()
     const objUrl = URL.createObjectURL(ms)
     const abort = new AbortController()
@@ -146,10 +159,9 @@ export function VideoPlayer() {
       URL.revokeObjectURL(objUrl)
       let sb: SourceBuffer
       try {
-        sb = ms.addSourceBuffer(MSE_MIME)
-        console.log('[MSE] addSourceBuffer OK')
+        sb = ms.addSourceBuffer(mime)
       } catch (e) {
-        console.error('[MSE] addSourceBuffer failed:', e)
+        logDiagnostic('mse-add-source-buffer-failed', { mime, err: String(e) })
         if (ms.readyState === 'open') ms.endOfStream('network')
         return
       }
@@ -158,7 +170,11 @@ export function VideoPlayer() {
         : Promise.resolve()
       try {
         const res = await fetch(url, { signal: abort.signal })
-        if (!res.ok || !res.body) { if (ms.readyState === 'open') ms.endOfStream('network'); return }
+        if (!res.ok || !res.body) {
+          logDiagnostic('mse-fetch-failed', { status: res.status })
+          if (ms.readyState === 'open') ms.endOfStream('network')
+          return
+        }
         const reader = res.body.getReader()
         while (true) {
           const { done, value } = await reader.read()
@@ -168,21 +184,21 @@ export function VideoPlayer() {
           if (ms.readyState !== 'open') break
           try {
             sb.appendBuffer(value)
-            // iOS Safari requires play() to be called after data is in the buffer.
-            // Calling it before sourceopen / before the first append is too early.
             if (!playTriggered) {
               playTriggered = true
-              console.log('[MSE] first chunk appended, triggering play()')
-              video.play().catch((e) => console.warn('[MSE] play() rejected:', e))
+              video.play().catch((e) => logDiagnostic('mse-play-rejected', { err: String(e) }))
             }
           } catch (e) {
-            console.error('[MSE] appendBuffer failed:', e)
+            logDiagnostic('mse-append-failed', { mime, err: String(e) })
             if (ms.readyState === 'open') ms.endOfStream('decode')
             break
           }
         }
       } catch (e) {
-        if ((e as Error).name !== 'AbortError' && ms.readyState === 'open') ms.endOfStream('network')
+        if ((e as Error).name !== 'AbortError') {
+          logDiagnostic('mse-stream-error', { err: String(e) })
+          if (ms.readyState === 'open') ms.endOfStream('network')
+        }
       }
     }, { once: true })
     video.src = objUrl
@@ -222,6 +238,8 @@ export function VideoPlayer() {
     setNextEpCountdown(null)
     autoAudioSelectedRef.current = false
     subtitleStreamIndicesRef.current = []
+    iosStrategyRef.current = null
+    iosFallbackUrlRef.current = null
   }, [current?.id])
 
   const resetControlsTimer = useCallback(() => {
@@ -519,19 +537,18 @@ export function VideoPlayer() {
         const streamSrc = liveStreamUrl(current.url)
         if (streamSrc) {
           if (IS_IOS) {
-            // iOS native HLS is the most reliable path: proxy rewrites the
-            // provider's .m3u8 so segments flow through our HTTPS server,
-            // avoiding mixed-content blocks. Supported on all iOS versions.
             const hlsSrc = liveHlsProxyUrl(current.url)
-            console.log('[live-ios] hlsSrc:', hlsSrc, 'canPlayHls:', video.canPlayType('application/vnd.apple.mpegurl'))
-            if (hlsSrc && video.canPlayType('application/vnd.apple.mpegurl')) {
+            const canHls = !!video.canPlayType('application/vnd.apple.mpegurl')
+            logDiagnostic('live-ios', { hlsSrc: !!hlsSrc, canHls })
+            if (hlsSrc && canHls) {
+              iosStrategyRef.current = 'hls'
+              iosFallbackUrlRef.current = streamSrc
               video.src = hlsSrc
               video.play().catch(() => {})
             } else {
-              // HLS not available: fall back to MSE fMP4 streaming
-              console.log('[live-ios] HLS unavailable, trying MSE')
+              iosStrategyRef.current = 'mse'
+              iosFallbackUrlRef.current = null
               const mseLive = startMsePlayback(video, streamSrc)
-              console.log('[live-ios] MSE started:', mseLive)
               if (!mseLive) {
                 video.src = streamSrc
                 video.play().catch(() => {})
@@ -628,6 +645,7 @@ export function VideoPlayer() {
             subtitleIndices: subtitleStreamIndicesRef.current,
             vstart: info?.startTime,
           })
+          if (IS_IOS) iosStrategyRef.current = 'mse'
           msePlaying = IS_IOS && startMsePlayback(video, vodUrl)
           if (!msePlaying) video.src = vodUrl
         } else {
@@ -812,10 +830,25 @@ export function VideoPlayer() {
     const onPlaying  = () => setIsBuffering(false)
     const onVideoError = () => {
       const err = video.error
-      if (err) {
-        setError(`Playback error (code ${err.code})${err.message ? `: ${err.message}` : ''}`)
-        setIsBuffering(false)
+      const code = err?.code ?? 0
+      const msg = err?.message ?? ''
+      const strategy = iosStrategyRef.current
+      logDiagnostic('video-error', { code, msg, strategy, isIos: IS_IOS })
+      // HLS path failed (provider 404, wrong URL, etc.) — retry with MSE fMP4
+      if (strategy === 'hls' && iosFallbackUrlRef.current) {
+        const fallbackUrl = iosFallbackUrlRef.current
+        iosStrategyRef.current = 'mse'
+        iosFallbackUrlRef.current = null
+        logDiagnostic('live-hls-failed-trying-mse', { code })
+        const mseLive = startMsePlayback(video, fallbackUrl)
+        if (!mseLive) {
+          setError(`Live TV: HLS unavailable, MSE not supported (code ${code})`)
+          setIsBuffering(false)
+        }
+        return
       }
+      setError(`Playback error (code ${code}, strategy: ${strategy ?? 'direct'})`)
+      setIsBuffering(false)
     }
 
     video.addEventListener('timeupdate', onTimeUpdate)

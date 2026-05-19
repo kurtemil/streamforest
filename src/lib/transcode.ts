@@ -180,6 +180,19 @@ export function tmdbCachePut(meta: object): void {
   }).catch(() => {})
 }
 
+// Fire-and-forget diagnostic log → /clientlog on the proxy.
+// Use this to capture device info and playback errors that are hard to debug remotely.
+export function logDiagnostic(message: string, data: Record<string, unknown> = {}): void {
+  const base = proxyBase()
+  if (!base) return
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown'
+  fetch(`${base}/clientlog`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ts: Date.now(), ua, message, ...data }),
+  }).catch(() => {})
+}
+
 export async function probeMedia(url: string, signal?: AbortSignal): Promise<MediaInfo | null> {
   const base = proxyBase()
   if (!base) return null
