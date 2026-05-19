@@ -21,7 +21,7 @@ import { PROFILES } from '@/stores/profileStore'
 import { PageTransition } from '@/ui'
 
 export default function App() {
-  const { loadFromDB, loaded } = usePlaylistStore()
+  const { loadFromDB, loaded, syncM3uUrlFromRemote } = usePlaylistStore()
   const { activeProfileId, showPicker } = useProfileStore()
   const location = useLocation()
   const syncEpgUrl = useEpgStore((s) => s.syncEpgUrlFromRemote)
@@ -30,7 +30,8 @@ export default function App() {
     loadFromDB()
     PROFILES.filter((p) => p.role === 'kid').forEach((p) => kidRestrictionsStore.syncFromRemote(p.id))
     syncEpgUrl()
-  }, [loadFromDB, syncEpgUrl])
+    syncM3uUrlFromRemote()
+  }, [loadFromDB, syncEpgUrl, syncM3uUrlFromRemote])
 
   useEffect(() => {
     if (activeProfileId) {

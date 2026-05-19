@@ -12,6 +12,7 @@ interface PlaylistState {
   m3uUrl: string
 
   setM3uUrl: (url: string) => void
+  syncM3uUrlFromRemote: () => Promise<void>
   loadFromDB: () => Promise<void>
   refresh: () => Promise<void>
 }
@@ -29,6 +30,25 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
   setM3uUrl(url) {
     localStorage.setItem(STORAGE_KEY, url)
     set({ m3uUrl: url })
+    fetch('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileId: '_global', key: 'm3u_url', value: url }),
+    }).catch(() => {})
+  },
+
+  async syncM3uUrlFromRemote() {
+    try {
+      const res = await fetch('/api/preferences?profileId=_global')
+      if (!res.ok) return
+      const data = await res.json() as Record<string, string>
+      if (data.m3u_url && data.m3u_url !== get().m3uUrl) {
+        localStorage.setItem(STORAGE_KEY, data.m3u_url)
+        set({ m3uUrl: data.m3u_url })
+      }
+    } catch {
+      // offline or D1 not configured — silent
+    }
   },
 
   async loadFromDB() {
