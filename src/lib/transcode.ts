@@ -92,6 +92,22 @@ export function liveStreamUrl(url: string, mode: ProxyMode = 'copy'): string | n
   return `${base}/transcode?${params.toString()}`
 }
 
+// Derives the HLS (.m3u8) URL from an Xtream Codes stream URL and wraps it
+// through the server-side HLS proxy. iOS WebKit can't play fMP4 streams set
+// as video.src, but plays native HLS perfectly.
+export function liveHlsProxyUrl(streamUrl: string): string | null {
+  const base = proxyBase()
+  if (!base) return null
+  try {
+    const u = new URL(streamUrl)
+    const m3u8Path = u.pathname.replace(/\.ts$/, '.m3u8')
+    const hlsUrl = `${u.origin}${m3u8Path}${u.search}`
+    return `${base}/live-hls?${new URLSearchParams({ url: hlsUrl }).toString()}`
+  } catch {
+    return null
+  }
+}
+
 // Pick proxy mode from probe info: copy when the upstream codecs are
 // browser-compatible (cheap remux, no re-encode), transcode otherwise.
 export function pickProxyMode(info: MediaInfo | null): ProxyMode {

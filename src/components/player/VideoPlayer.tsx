@@ -9,7 +9,7 @@ import { pushProgress, deleteRemoteProgress } from '@/services/sync'
 import { useProfileStore } from '@/stores/profileStore'
 import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import {
-  isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, probeMedia, pickProxyMode,
+  isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, liveHlsProxyUrl, probeMedia, pickProxyMode,
   subtitleVttUrl, audioStreamLabel, subtitleStreamLabel, getKeyframeTime,
 } from '@/lib/transcode'
 import type { ProxyMode } from '@/lib/transcode'
@@ -421,16 +421,25 @@ export function VideoPlayer() {
       // blocked anyway. Route through the transcode-proxy in copy mode (cheap
       // remux to fragmented MP4). Saved progress is irrelevant for live.
       if (current.type === 'live') {
-        const proxied = isTranscodeProxyConfigured() ? liveStreamUrl(current.url) : null
-        if (proxied) {
-          isTranscodedRef.current = false
-          playbackOffsetRef.current = 0
-          transcodedDurationRef.current = null
-          video.src = proxied
-          video.play().catch(() => {})
+        if (!isTranscodeProxyConfigured()) {
+          setError('Live TV requires the transcode proxy. Set VITE_TRANSCODE_PROXY_URL.')
           return
         }
-        setError('Live TV requires the transcode proxy. Set VITE_TRANSCODE_PROXY_URL.')
+        isTranscodedRef.current = false
+        playbackOffsetRef.current = 0
+        transcodedDurationRef.current = null
+        // iOS WebKit can't stream fMP4 via video.src without range-request support.
+        // Use native HLS instead: proxy the provider's .m3u8 through our /live-hls
+        // endpoint so mixed-content is avoided and segment URLs are rewritten.
+        const isiOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+        const streamSrc = isiOS
+          ? (liveHlsProxyUrl(current.url) ?? liveStreamUrl(current.url))
+          : liveStreamUrl(current.url)
+        if (streamSrc) {
+          video.src = streamSrc
+          video.play().catch(() => {})
+        }
         return
       }
 
