@@ -9,7 +9,7 @@ import { pushProgress, deleteRemoteProgress } from '@/services/sync'
 import { useProfileStore } from '@/stores/profileStore'
 import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import {
-  isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, probeMedia, pickProxyMode,
+  isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, liveHlsProxyUrl, probeMedia, pickProxyMode,
   subtitleVttUrl, audioStreamLabel, subtitleStreamLabel, getKeyframeTime,
 } from '@/lib/transcode'
 import type { ProxyMode } from '@/lib/transcode'
@@ -27,7 +27,10 @@ const IS_IOS = typeof navigator !== 'undefined' && (
   /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 )
-const MSE_MIME = 'video/mp4; codecs="avc1.640028,mp4a.40.2"'
+// avc1.640033 = H264 High Profile Level 5.1 — covers most H264 IPTV content.
+// iOS Safari rejects appendBuffer when the bitstream level exceeds what was declared,
+// so we declare a high level to avoid that mismatch.
+const MSE_MIME = 'video/mp4; codecs="avc1.640033,mp4a.40.2"'
 
 interface Track { id: number; name: string; lang: string }
 
@@ -130,7 +133,10 @@ export function VideoPlayer() {
   const startMsePlayback = useCallback((video: HTMLVideoElement, url: string): boolean => {
     mseAbortRef.current?.abort()
     mseAbortRef.current = null
-    if (typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported(MSE_MIME)) return false
+    const mseAvail = typeof MediaSource !== 'undefined'
+    const mseSupported = mseAvail && MediaSource.isTypeSupported(MSE_MIME)
+    console.log('[MSE] available:', mseAvail, 'mimeSupported:', mseSupported, 'mime:', MSE_MIME)
+    if (!mseAvail || !mseSupported) return false
     const ms = new MediaSource()
     const objUrl = URL.createObjectURL(ms)
     const abort = new AbortController()
@@ -141,7 +147,9 @@ export function VideoPlayer() {
       let sb: SourceBuffer
       try {
         sb = ms.addSourceBuffer(MSE_MIME)
-      } catch {
+        console.log('[MSE] addSourceBuffer OK')
+      } catch (e) {
+        console.error('[MSE] addSourceBuffer failed:', e)
         if (ms.readyState === 'open') ms.endOfStream('network')
         return
       }
@@ -164,9 +172,11 @@ export function VideoPlayer() {
             // Calling it before sourceopen / before the first append is too early.
             if (!playTriggered) {
               playTriggered = true
-              video.play().catch(() => {})
+              console.log('[MSE] first chunk appended, triggering play()')
+              video.play().catch((e) => console.warn('[MSE] play() rejected:', e))
             }
-          } catch {
+          } catch (e) {
+            console.error('[MSE] appendBuffer failed:', e)
             if (ms.readyState === 'open') ms.endOfStream('decode')
             break
           }
@@ -508,8 +518,26 @@ export function VideoPlayer() {
         // endpoint so mixed-content is avoided and segment URLs are rewritten.
         const streamSrc = liveStreamUrl(current.url)
         if (streamSrc) {
-          const mseLive = IS_IOS && startMsePlayback(video, streamSrc)
-          if (!mseLive) {
+          if (IS_IOS) {
+            // iOS native HLS is the most reliable path: proxy rewrites the
+            // provider's .m3u8 so segments flow through our HTTPS server,
+            // avoiding mixed-content blocks. Supported on all iOS versions.
+            const hlsSrc = liveHlsProxyUrl(current.url)
+            console.log('[live-ios] hlsSrc:', hlsSrc, 'canPlayHls:', video.canPlayType('application/vnd.apple.mpegurl'))
+            if (hlsSrc && video.canPlayType('application/vnd.apple.mpegurl')) {
+              video.src = hlsSrc
+              video.play().catch(() => {})
+            } else {
+              // HLS not available: fall back to MSE fMP4 streaming
+              console.log('[live-ios] HLS unavailable, trying MSE')
+              const mseLive = startMsePlayback(video, streamSrc)
+              console.log('[live-ios] MSE started:', mseLive)
+              if (!mseLive) {
+                video.src = streamSrc
+                video.play().catch(() => {})
+              }
+            }
+          } else {
             video.src = streamSrc
             video.play().catch(() => {})
           }

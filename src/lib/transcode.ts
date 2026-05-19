@@ -100,8 +100,15 @@ export function liveHlsProxyUrl(streamUrl: string): string | null {
   if (!base) return null
   try {
     const u = new URL(streamUrl)
-    const m3u8Path = u.pathname.replace(/\.ts$/, '.m3u8')
-    const hlsUrl = `${u.origin}${m3u8Path}${u.search}`
+    // Xtream Codes: /live/USER/PASS/id.ts → /live/USER/PASS/id.m3u8
+    // Non-.ts URLs: strip any extension (or none) and append .m3u8
+    let p = u.pathname
+    if (p.endsWith('.ts')) {
+      p = p.slice(0, -3) + '.m3u8'
+    } else if (!p.endsWith('.m3u8')) {
+      p = p.replace(/\.[^./]*$/, '') + '.m3u8'
+    }
+    const hlsUrl = `${u.origin}${p}${u.search}`
     return `${base}/live-hls?${new URLSearchParams({ url: hlsUrl }).toString()}`
   } catch {
     return null
