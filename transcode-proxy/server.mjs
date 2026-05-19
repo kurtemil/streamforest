@@ -24,8 +24,11 @@ const VIDEO_MAX_BITRATE = process.env.VIDEO_MAX_BITRATE || '2000k'
 const AUDIO_BITRATE = process.env.AUDIO_BITRATE || '128k'
 const SUB_CACHE_DIR = process.env.SUB_CACHE_DIR || path.join(os.tmpdir(), 'streamforest-subs')
 const SUB_CACHE_TTL_MS = Number(process.env.SUB_CACHE_TTL_MS) || 7 * 24 * 60 * 60 * 1000
+const EPG_CACHE_DIR = process.env.EPG_CACHE_DIR || path.join(os.tmpdir(), 'streamforest-epg')
+const EPG_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 
 fs.mkdirSync(SUB_CACHE_DIR, { recursive: true })
+fs.mkdirSync(EPG_CACHE_DIR, { recursive: true })
 
 // Active transcode registry.
 // key: sha1(url|seekBucket)
@@ -626,6 +629,98 @@ function startStandaloneSubtitle(target, index, vstart, seekTo, seekBucket, cach
   })
 }
 
+// ── EPG proxy + disk cache ─────────────────────────────────────────────────────
+
+function epgCachePaths(cacheKey) {
+  return {
+    xml:  path.join(EPG_CACHE_DIR, `${cacheKey}.xml`),
+    meta: path.join(EPG_CACHE_DIR, `${cacheKey}.meta.json`),
+  }
+}
+
+async function fetchAndCacheEpg(target, cacheKey) {
+  const { xml: cacheFile, meta: metaFile } = epgCachePaths(cacheKey)
+  const tmpFile = `${cacheFile}.tmp`
+  process.stderr.write(`[epg] fetching ${target}\n`)
+  const upstream = await fetch(target, { headers: { 'User-Agent': 'StreamForest/1.0' } })
+  if (!upstream.ok) throw new Error(`upstream ${upstream.status}`)
+  const writer = fs.createWriteStream(tmpFile)
+  const reader = upstream.body.getReader()
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    writer.write(Buffer.from(value))
+  }
+  await new Promise((resolve, reject) => writer.end((err) => err ? reject(err) : resolve()))
+  fs.renameSync(tmpFile, cacheFile)
+  fs.writeFileSync(metaFile, JSON.stringify({ fetchedAt: Date.now(), url: target }))
+  process.stderr.write(`[epg] cached ${cacheKey.slice(0, 8)} (${fs.statSync(cacheFile).size} bytes)\n`)
+}
+
+async function handleEpg(reqUrl, res) {
+  const target = parseTargetUrl(reqUrl, res)
+  if (!target) return
+  const cacheKey = createHash('sha1').update(target).digest('hex')
+  const { xml: cacheFile, meta: metaFile } = epgCachePaths(cacheKey)
+
+  let cacheHit = false
+  try {
+    const meta = JSON.parse(fs.readFileSync(metaFile, 'utf8'))
+    if (Date.now() - meta.fetchedAt < EPG_CACHE_TTL_MS && fs.existsSync(cacheFile)) cacheHit = true
+  } catch {}
+
+  if (!cacheHit) {
+    try {
+      await fetchAndCacheEpg(target, cacheKey)
+    } catch (err) {
+      res.writeHead(502, { 'Content-Type': 'text/plain' }).end(`EPG fetch failed: ${err.message}`)
+      return
+    }
+  }
+
+  process.stderr.write(`[epg] serving from ${cacheHit ? 'cache' : 'fresh'}: ${cacheKey.slice(0, 8)}\n`)
+  res.writeHead(200, {
+    'Content-Type': 'text/xml; charset=utf-8',
+    'X-Cache': cacheHit ? 'HIT' : 'MISS',
+  })
+  fs.createReadStream(cacheFile).pipe(res)
+}
+
+// Refresh all cached EPG files (called daily at 07:00)
+async function refreshAllCachedEpg() {
+  try {
+    const files = fs.readdirSync(EPG_CACHE_DIR).filter((f) => f.endsWith('.meta.json'))
+    for (const file of files) {
+      try {
+        const meta = JSON.parse(fs.readFileSync(path.join(EPG_CACHE_DIR, file), 'utf8'))
+        if (meta.url) {
+          const cacheKey = file.replace('.meta.json', '')
+          await fetchAndCacheEpg(meta.url, cacheKey)
+        }
+      } catch (err) {
+        process.stderr.write(`[epg] refresh error for ${file}: ${err.message}\n`)
+      }
+    }
+  } catch (err) {
+    process.stderr.write(`[epg] refresh scan error: ${err.message}\n`)
+  }
+}
+
+function scheduleEpgRefresh() {
+  const now = new Date()
+  const next = new Date(now)
+  next.setHours(7, 0, 0, 0)
+  if (next <= now) next.setDate(next.getDate() + 1)
+  const delayMs = next - now
+  process.stderr.write(`[epg] next auto-refresh at ${next.toISOString()} (${Math.round(delayMs / 60000)} min)\n`)
+  setTimeout(async () => {
+    await refreshAllCachedEpg()
+    scheduleEpgRefresh()
+  }, delayMs)
+}
+
+scheduleEpgRefresh()
+
 const server = http.createServer((req, res) => {
   const reqUrl = new URL(req.url ?? '/', `http://${req.headers.host}`)
   process.stderr.write(`[req] ${req.method} ${reqUrl.pathname}\n`)
@@ -661,6 +756,11 @@ const server = http.createServer((req, res) => {
 
   if (reqUrl.pathname === '/subtitle') {
     handleSubtitle(reqUrl, res)
+    return
+  }
+
+  if (reqUrl.pathname === '/epg') {
+    handleEpg(reqUrl, res)
     return
   }
 

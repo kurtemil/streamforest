@@ -127,6 +127,12 @@ export async function getKeyframeTime(url: string, start: number): Promise<numbe
   }
 }
 
+export function epgProxyUrl(url: string): string | null {
+  const base = proxyBase()
+  if (!base) return null
+  return `${base}/epg?${new URLSearchParams({ url }).toString()}`
+}
+
 export async function probeMedia(url: string, signal?: AbortSignal): Promise<MediaInfo | null> {
   const base = proxyBase()
   if (!base) return null

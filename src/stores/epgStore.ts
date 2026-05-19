@@ -14,8 +14,9 @@ export interface EpgState {
   progress: string | null                    // human-readable loading progress
   lastFetched: number | null
   error: string | null
-  epgUrl: string                             // explicit override URL (saved to localStorage)
+  epgUrl: string                             // explicit override URL (saved to localStorage + D1)
   setEpgUrl: (url: string) => void
+  syncEpgUrlFromRemote: () => Promise<void>
   resolveUrl: (m3uUrl: string) => string | null
   resolveByName: (name: string) => string | null
   loadFromDB: () => Promise<void>
@@ -38,6 +39,25 @@ export const useEpgStore = create<EpgState>((set, get) => ({
   setEpgUrl: (url: string) => {
     localStorage.setItem(EPG_URL_KEY, url)
     set({ epgUrl: url })
+    fetch('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileId: '_global', key: 'epg_url', value: url }),
+    }).catch(() => {})
+  },
+
+  syncEpgUrlFromRemote: async () => {
+    try {
+      const res = await fetch('/api/preferences?profileId=_global')
+      if (!res.ok) return
+      const data = await res.json() as Record<string, string>
+      if (data.epg_url && data.epg_url !== get().epgUrl) {
+        localStorage.setItem(EPG_URL_KEY, data.epg_url)
+        set({ epgUrl: data.epg_url })
+      }
+    } catch {
+      // offline or D1 not configured — silent
+    }
   },
 
   resolveUrl: (m3uUrl: string) => {

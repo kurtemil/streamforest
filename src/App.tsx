@@ -14,6 +14,9 @@ import { usePlaylistStore } from '@/stores/playlistStore'
 import { useProfileStore } from '@/stores/profileStore'
 import { syncFromRemote, syncWatchLaterFromRemote } from '@/services/sync'
 import { kidRestrictionsStore } from '@/stores/kidRestrictionsStore'
+import { useExclusionsStore } from '@/stores/exclusionsStore'
+import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
+import { useEpgStore } from '@/stores/epgStore'
 import { PROFILES } from '@/stores/profileStore'
 import { PageTransition } from '@/ui'
 
@@ -21,16 +24,20 @@ export default function App() {
   const { loadFromDB, loaded } = usePlaylistStore()
   const { activeProfileId, showPicker } = useProfileStore()
   const location = useLocation()
+  const syncEpgUrl = useEpgStore((s) => s.syncEpgUrlFromRemote)
 
   useEffect(() => {
     loadFromDB()
     PROFILES.filter((p) => p.role === 'kid').forEach((p) => kidRestrictionsStore.syncFromRemote(p.id))
-  }, [loadFromDB])
+    syncEpgUrl()
+  }, [loadFromDB, syncEpgUrl])
 
   useEffect(() => {
     if (activeProfileId) {
       syncFromRemote(activeProfileId)
       syncWatchLaterFromRemote(activeProfileId)
+      useExclusionsStore.getState().syncFromRemote(activeProfileId)
+      usePlaybackPrefsStore.getState().syncFromRemote(activeProfileId)
     }
   }, [activeProfileId])
 
