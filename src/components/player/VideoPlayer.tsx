@@ -9,7 +9,7 @@ import { pushProgress, deleteRemoteProgress } from '@/services/sync'
 import { useProfileStore } from '@/stores/profileStore'
 import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import {
-  isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, liveHlsProxyUrl, probeMedia, pickProxyMode,
+  isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, probeMedia, pickProxyMode,
   subtitleVttUrl, audioStreamLabel, subtitleStreamLabel, getKeyframeTime,
 } from '@/lib/transcode'
 import type { ProxyMode } from '@/lib/transcode'
@@ -19,6 +19,15 @@ import { PlayerControls } from './PlayerControls'
 
 const SAVE_INTERVAL_MS = 5000
 const VIDEO_EXT = /\.(mkv|mp4|avi|mov|wmv|flv|webm)$/i
+
+// iOS WebKit can't stream fMP4 via video.src without Content-Length / range
+// request support. We use the MediaSource API instead: fetch() streams the
+// proxy response and SourceBuffer.appendBuffer() feeds it chunk by chunk.
+const IS_IOS = typeof navigator !== 'undefined' && (
+  /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+)
+const MSE_MIME = 'video/mp4; codecs="avc1.640028,mp4a.40.2"'
 
 interface Track { id: number; name: string; lang: string }
 
@@ -48,6 +57,7 @@ export function VideoPlayer() {
   const preferredAudioLang = rawPlaybackPrefs?.preferredAudioLang ?? ''
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
+  const mseAbortRef = useRef<AbortController | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Baseline seconds baked into the source URL (for transcode-proxy resume).
@@ -109,6 +119,45 @@ export function VideoPlayer() {
       hlsRef.current.destroy()
       hlsRef.current = null
     }
+  }, [])
+
+  // Pipe a proxy fMP4 stream via MSE instead of setting video.src directly.
+  // iOS WebKit won't stream fMP4 from video.src without Content-Length/range support,
+  // but fetch() + SourceBuffer works on iOS 17+ where MSE is fully supported.
+  // Returns false if MSE is unavailable so the caller can fall back to video.src.
+  const startMsePlayback = useCallback((video: HTMLVideoElement, url: string): boolean => {
+    mseAbortRef.current?.abort()
+    mseAbortRef.current = null
+    if (typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported(MSE_MIME)) return false
+    const ms = new MediaSource()
+    const objUrl = URL.createObjectURL(ms)
+    const abort = new AbortController()
+    mseAbortRef.current = abort
+    ms.addEventListener('sourceopen', async () => {
+      URL.revokeObjectURL(objUrl)
+      let sb: SourceBuffer
+      try { sb = ms.addSourceBuffer(MSE_MIME) } catch { return }
+      const drain = () => sb.updating
+        ? new Promise<void>(r => sb.addEventListener('updateend', () => r(), { once: true }))
+        : Promise.resolve()
+      try {
+        const res = await fetch(url, { signal: abort.signal })
+        if (!res.ok || !res.body) { if (ms.readyState === 'open') ms.endOfStream('network'); return }
+        const reader = res.body.getReader()
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) { if (ms.readyState === 'open') ms.endOfStream(); break }
+          if (ms.readyState !== 'open') break
+          await drain()
+          if (ms.readyState !== 'open') break
+          try { sb.appendBuffer(value) } catch { break }
+        }
+      } catch (e) {
+        if ((e as Error).name !== 'AbortError' && ms.readyState === 'open') ms.endOfStream('network')
+      }
+    }, { once: true })
+    video.src = objUrl
+    return true
   }, [])
 
   const nextEpisode = useMemo(() => {
@@ -362,13 +411,14 @@ export function VideoPlayer() {
     if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current)
     countdownIntervalRef.current = null
     setNextEpCountdown(null)
-    video.src = transcodeUrl(current.url, {
+    const seekUrl = transcodeUrl(current.url, {
       startSeconds: clamped,
       audioIndex: audioStreamIndexRef.current,
       mode: proxyModeRef.current ?? undefined,
       subtitleIndices: subtitleStreamIndicesRef.current,
       vstart: videoStartTimeRef.current || undefined,
     })
+    if (!(IS_IOS && startMsePlayback(video, seekUrl))) video.src = seekUrl
     video.play().catch(() => {})
     console.log('[seekTo] src rebuilt at', clamped, '— activeSubtitle:', activeSubtitleRef.current, 'tracks:', subtitleTracksRef.current.length)
     if (proxyModeRef.current === 'copy') {
@@ -405,6 +455,8 @@ export function VideoPlayer() {
     setCurrentTime(0)
     setBuffered(0)
     destroyHls()
+    mseAbortRef.current?.abort()
+    mseAbortRef.current = null
 
     setAudioTracks([])
     setActiveAudioTrack(-1)
@@ -431,13 +483,9 @@ export function VideoPlayer() {
         // iOS WebKit can't stream fMP4 via video.src without range-request support.
         // Use native HLS instead: proxy the provider's .m3u8 through our /live-hls
         // endpoint so mixed-content is avoided and segment URLs are rewritten.
-        const isiOS = /iPhone|iPad|iPod/.test(navigator.userAgent) ||
-          (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-        const streamSrc = isiOS
-          ? (liveHlsProxyUrl(current.url) ?? liveStreamUrl(current.url))
-          : liveStreamUrl(current.url)
+        const streamSrc = liveStreamUrl(current.url)
         if (streamSrc) {
-          video.src = streamSrc
+          if (!(IS_IOS && startMsePlayback(video, streamSrc))) video.src = streamSrc
           video.play().catch(() => {})
         }
         return
@@ -519,13 +567,14 @@ export function VideoPlayer() {
           }
           transcodedDurationRef.current = info?.duration ?? null
           if (info?.duration) setDuration(info.duration)
-          video.src = transcodeUrl(current.url, {
+          const vodUrl = transcodeUrl(current.url, {
             startSeconds: startTime,
             audioIndex: audioStreamIndexRef.current,
             mode,
             subtitleIndices: subtitleStreamIndicesRef.current,
             vstart: info?.startTime,
           })
+          if (!(IS_IOS && startMsePlayback(video, vodUrl))) video.src = vodUrl
         } else {
           isTranscodedRef.current = false
           videoStartTimeRef.current = 0
