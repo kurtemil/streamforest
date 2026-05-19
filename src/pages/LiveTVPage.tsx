@@ -1,9 +1,12 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { Radio, RefreshCw, Clock, ChevronRight, AlertCircle, Shuffle } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useEpgStore } from '@/stores/epgStore'
+import { useProfileStore } from '@/stores/profileStore'
 import { useActiveExclusions } from '@/hooks/useActiveExclusions'
+import { db } from '@/services/db'
 import { SearchBar } from '@/components/ui/SearchBar'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { GroupSidebar } from '@/components/ui/GroupSidebar'
@@ -171,6 +174,7 @@ export function LiveTVPage() {
   const [search, setSearch] = useState('')
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
   const { live: excludedLive } = useActiveExclusions()
+  const activeProfileId = useProfileStore((s) => s.activeProfileId)
 
   useEffect(() => {
     loadFromDB()
@@ -181,6 +185,21 @@ export function LiveTVPage() {
     () => channels.filter((c) => c.type === 'live' && !excludedLive.has(c.groupTitle)),
     [channels, excludedLive]
   )
+
+  const recentProgress = useLiveQuery(async () => {
+    if (!activeProfileId) return []
+    const all = await db.watchProgress.where('profileId').equals(activeProfileId).toArray()
+    return all.sort((a, b) => b.lastWatched - a.lastWatched)
+  }, [activeProfileId]) ?? []
+
+  const recentLive = useMemo(() => {
+    if (!recentProgress.length || !live.length) return []
+    const liveById = new Map(live.map((c) => [c.id, c]))
+    return recentProgress
+      .map((p) => liveById.get(p.channelId))
+      .filter((c): c is Channel => c !== undefined)
+      .slice(0, 10)
+  }, [recentProgress, live])
 
 
   const groups = useMemo(() => {
@@ -264,6 +283,27 @@ export function LiveTVPage() {
 
         {/* EPG status / refresh prompt */}
         <EpgStatusBar m3uUrl={m3uUrl} />
+
+        {/* Latest watched */}
+        {!search.trim() && selectedGroup === null && recentLive.length > 0 && (
+          <div className="mb-6">
+            <p className="text-xs font-semibold text-neutral-500 uppercase tracking-widest mb-2">Latest watched</p>
+            <div className="flex flex-col gap-1.5">
+              {recentLive.map((ch) => {
+                const epgId = ch.tvgId || resolveByName(ch.name) || ''
+                return (
+                  <ChannelRow
+                    key={ch.id}
+                    channel={ch}
+                    programs={epgId ? (programs.get(epgId) ?? []) : []}
+                    onPlay={() => play(ch)}
+                  />
+                )
+              })}
+            </div>
+            <div className="mt-4 border-t border-white/5" />
+          </div>
+        )}
 
         {/* Channel rows */}
         <div className="flex flex-col gap-1.5">

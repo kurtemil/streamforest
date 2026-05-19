@@ -586,10 +586,14 @@ export function VideoPlayer() {
     load()
   }, [current, activeProfileId, destroyHls, detachSubtitleTrack])
 
-  // Progress saving (skipped for live — there's no resume point on a live feed)
+  // Progress saving; for live channels save once on start (just records lastWatched — no resume point)
   useEffect(() => {
     if (!current || current.type === 'live') {
       if (saveTimerRef.current) clearInterval(saveTimerRef.current)
+      if (current?.type === 'live') {
+        const profileId = useProfileStore.getState().activeProfileId
+        if (profileId) saveProgress(profileId, current.id, 0, 0).then((entry) => pushProgress(entry))
+      }
       return
     }
     saveTimerRef.current = setInterval(() => {
