@@ -103,13 +103,13 @@ function handleTranscode(reqUrl, res) {
   if (start > 0 && !live && mode === 'transcode') args.push('-ss', String(start))
 
   if (mode === 'copy') {
-    const movflags = live
-      ? 'frag_keyframe+empty_moov+default_base_moof'
-      : 'frag_keyframe+empty_moov+default_base_moof+faststart'
-    args.push('-c', 'copy')
-    if (live) args.push('-bsf:a', 'aac_adtstoasc')
+    // faststart requires a seekable output and doesn't work on pipe:1 — omit it.
+    // aac_adtstoasc converts ADTS-framed AAC (common in MPEG-TS) to the ASC format
+    // required by MP4; safe to apply even when the source already uses ASC.
     args.push(
-      '-movflags', movflags,
+      '-c', 'copy',
+      '-bsf:a', 'aac_adtstoasc',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
       '-f', 'mp4',
       'pipe:1',
     )

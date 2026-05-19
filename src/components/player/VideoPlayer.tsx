@@ -225,7 +225,8 @@ export function VideoPlayer() {
           .then((entry) => pushProgress(entry))
       }
     }
-    navigate(-1)
+    // Live channels don't push a route when opened, so navigate(-1) would leave /live
+    if (current?.type !== 'live') navigate(-1)
     close()
   }, [navigate, close, current])
 
