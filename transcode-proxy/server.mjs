@@ -867,9 +867,17 @@ function handleHlsStart(reqUrl, res) {
 
   const existing = hlsSessions.get(hash)
   if (existing) {
-    existing.lastAccess = Date.now()
-    res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ hash }))
-    return
+    // Only reuse if ffmpeg is still running or exited cleanly (exit 0 = ENDLIST written).
+    // Non-zero exit means provider truncated the stream — delete and start a fresh session.
+    if (existing.proc.exitCode === null || existing.proc.exitCode === 0) {
+      existing.lastAccess = Date.now()
+      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ hash }))
+      return
+    }
+    process.stderr.write(`[hls] reuse-rejected hash=${hash.slice(0, 8)} exitCode=${existing.proc.exitCode} — starting fresh\n`)
+    hlsSessions.delete(hash)
+    try { fs.rmSync(existing.dir, { recursive: true, force: true }) } catch {}
+    // Fall through to start a new session
   }
 
   const dir = path.join(HLS_DIR, hash)
@@ -917,6 +925,20 @@ function handleHlsStart(reqUrl, res) {
   proc.on('exit', (code) => {
     process.stderr.write(`[hls] exit hash=${hash.slice(0, 8)} code=${code}\n`)
     if (!live) {
+      // If ffmpeg exited non-zero (provider truncated the stream), write #EXT-X-ENDLIST
+      // so any iOS client already playing the playlist knows the stream is complete at
+      // its current length. Without this, iOS treats the VOD as a live stream and keeps
+      // polling for new segments — eventually timing out with a code 4 decode error.
+      if (code !== 0) {
+        const playlistPath = path.join(dir, 'playlist.m3u8')
+        try {
+          const content = fs.readFileSync(playlistPath, 'utf8')
+          if (!content.includes('#EXT-X-ENDLIST')) {
+            fs.appendFileSync(playlistPath, '\n#EXT-X-ENDLIST\n')
+            process.stderr.write(`[hls] appended ENDLIST hash=${hash.slice(0, 8)}\n`)
+          }
+        } catch {}
+      }
       // Only clean up if this session is still current — the poll-loop timeout may have
       // already deleted the Map entry and the dir, and a new session may have re-used
       // the same hash+dir. Deleting unconditionally would nuke the new session's dir.

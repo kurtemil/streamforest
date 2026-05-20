@@ -961,13 +961,13 @@ export function VideoPlayer() {
         networkState: video.networkState,
         paused: video.paused,
       })
-      // HLS-gen code 4 with non-zero start: provider stream died at seek position.
-      // Retry from start=0 so at least the beginning plays.
-      if (strategy === 'hls-gen' && code === 4 && !iosHlsRetriedRef.current && playbackOffsetRef.current > 0 && current) {
+      // HLS-gen code 4: provider stream failed (truncated file, stale session, etc.).
+      // Retry from start=0 — server discards any dead session and spawns fresh ffmpeg.
+      if (strategy === 'hls-gen' && code === 4 && !iosHlsRetriedRef.current && current) {
         iosHlsRetriedRef.current = true
         playbackOffsetRef.current = 0
         setIsBuffering(false)
-        setError('Stream failed at saved position — retrying from start…')
+        setError('Stream error — retrying from start…')
         const capturedCurrent = current
         startHlsSession(current.url, {
           mode: proxyModeRef.current ?? 'copy',
@@ -975,7 +975,7 @@ export function VideoPlayer() {
           startSeconds: 0,
         }).then((hlsUrl) => {
           if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
-          if (!hlsUrl) { setError(`iOS: Stream failed at saved position. Try again later. (${getLastHlsError() || 'network error'})`); return }
+          if (!hlsUrl) { setError(`iOS: Stream failed. Try again later. (${getLastHlsError() || 'network error'})`); return }
           setError(null)
           setIsBuffering(true)
           videoRef.current.src = hlsUrl
