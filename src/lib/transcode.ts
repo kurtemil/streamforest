@@ -180,6 +180,9 @@ export function tmdbCachePut(meta: object): void {
   }).catch(() => {})
 }
 
+let _lastHlsError = ''
+export function getLastHlsError(): string { return _lastHlsError }
+
 // Start a server-side HLS session for iOS native playback.
 // The server runs ffmpeg → HLS segments in /tmp; returns playlist URL once ready.
 export async function startHlsSession(
@@ -188,6 +191,7 @@ export async function startHlsSession(
 ): Promise<string | null> {
   const base = proxyBase()
   if (!base) return null
+  _lastHlsError = ''
   try {
     const params = new URLSearchParams({ url })
     if (opts.live) params.set('live', '1')
@@ -198,14 +202,24 @@ export async function startHlsSession(
     const timer = setTimeout(() => ctrl.abort(), 25000)
     try {
       const res = await fetch(`${base}/hls-start?${params}`, { signal: ctrl.signal })
-      if (!res.ok) return null
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        _lastHlsError = `HTTP ${res.status}${body ? ': ' + body.slice(0, 150) : ''}`
+        logDiagnostic('hls-start-failed', { status: res.status, body: body.slice(0, 200), url: url.slice(0, 80) })
+        return null
+      }
       const data = (await res.json()) as { hash?: string }
-      if (!data.hash) return null
+      if (!data.hash) {
+        _lastHlsError = 'no hash in response'
+        return null
+      }
       return `${base}/hls-file/${data.hash}/playlist.m3u8`
     } finally {
       clearTimeout(timer)
     }
-  } catch {
+  } catch (e) {
+    _lastHlsError = (e as Error).name === 'AbortError' ? 'client timeout (25s)' : String(e)
+    logDiagnostic('hls-start-error', { err: _lastHlsError, url: url.slice(0, 80) })
     return null
   }
 }

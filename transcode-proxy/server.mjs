@@ -80,7 +80,8 @@ function parseTargetUrl(reqUrl, res) {
     return null
   }
   if (!hostAllowed(targetUrl)) {
-    res.writeHead(403).end('Host not allowed')
+    process.stderr.write(`[host-blocked] ${targetUrl.hostname} — allowed: ${ALLOWED_HOSTS.join(',')}\n`)
+    res.writeHead(403).end(`Host not allowed: ${targetUrl.hostname}`)
     return null
   }
   return target

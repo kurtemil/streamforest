@@ -11,7 +11,7 @@ import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import {
   isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, probeMedia, pickProxyMode,
   subtitleVttUrl, audioStreamLabel, subtitleStreamLabel, getKeyframeTime, logDiagnostic,
-  startHlsSession,
+  startHlsSession, getLastHlsError,
 } from '@/lib/transcode'
 import type { ProxyMode } from '@/lib/transcode'
 import { normalizeShowKey } from '@/lib/utils'
@@ -541,7 +541,7 @@ export function VideoPlayer() {
         startSeconds: clamped,
       }).then((hlsUrl) => {
         if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
-        if (!hlsUrl) { setError('iOS: HLS seek failed'); setIsBuffering(false); return }
+        if (!hlsUrl) { setError(`iOS: HLS seek failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
         videoRef.current.src = hlsUrl
         videoRef.current.play().catch(() => {})
       })
@@ -621,7 +621,7 @@ export function VideoPlayer() {
           const capturedCurrent = current
           startHlsSession(current.url, { live: true, mode: 'transcode' }).then((hlsUrl) => {
             if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
-            if (!hlsUrl) { setError('iOS: HLS generation failed'); setIsBuffering(false); return }
+            if (!hlsUrl) { setError(`iOS: HLS generation failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
             videoRef.current.src = hlsUrl
             videoRef.current.play().catch(() => {})
           })
@@ -727,7 +727,7 @@ export function VideoPlayer() {
               startSeconds: startTime,
             }).then((hlsUrl) => {
               if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
-              if (!hlsUrl) { setError('iOS: HLS generation failed'); setIsBuffering(false); return }
+              if (!hlsUrl) { setError(`iOS: HLS generation failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
               videoRef.current.src = hlsUrl
               videoRef.current.play().catch(() => {})
             })
@@ -1084,6 +1084,22 @@ export function VideoPlayer() {
       setCurrentTime(realTime)
       setBuffered(realTime)
       setActiveAudioTrack(id)
+      if (IS_IOS) {
+        const capturedCurrent = current
+        const capturedSubInfo = previousSubInfo
+        startHlsSession(current.url, {
+          mode: proxyModeRef.current ?? 'copy',
+          audioIndex: id,
+          startSeconds: realTime,
+        }).then((hlsUrl) => {
+          if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
+          if (!hlsUrl) { setError(`iOS: Audio switch failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
+          videoRef.current.src = hlsUrl
+          videoRef.current.play().catch(() => {})
+          if (capturedSubInfo) attachSubtitleTrack(capturedSubInfo.id, capturedSubInfo.name, capturedSubInfo.lang)
+        })
+        return
+      }
       const audioUrl = transcodeUrl(current.url, {
         startSeconds: realTime,
         audioIndex: id,
@@ -1091,11 +1107,8 @@ export function VideoPlayer() {
         subtitleIndices: subtitleStreamIndicesRef.current,
         vstart: videoStartTimeRef.current || undefined,
       })
-      const mseAudio = IS_IOS && startMsePlayback(video, audioUrl)
-      if (!mseAudio) {
-        video.src = audioUrl
-        video.play().catch(() => {})
-      }
+      video.src = audioUrl
+      video.play().catch(() => {})
       if (previousSubInfo) {
         attachSubtitleTrack(previousSubInfo.id, previousSubInfo.name, previousSubInfo.lang)
       }
