@@ -413,8 +413,15 @@ export function VideoPlayer() {
   const attachSubtitleTrack = useCallback(async (streamIndex: number, _label: string, _lang: string, startSeconds?: number) => {
     if (!current) return
     const url = subtitleVttUrl(current.url, streamIndex, videoStartTimeRef.current, startSeconds ?? playbackOffsetRef.current)
-    console.log('[subtitle] attach streamIndex=%d startSeconds=%s url=%s', streamIndex, startSeconds ?? playbackOffsetRef.current, url)
     if (!url) return
+    logDiagnostic('subtitle-attach', {
+      streamIndex,
+      startSeconds: startSeconds ?? playbackOffsetRef.current,
+      videoCurrentTime: videoRef.current?.currentTime ?? -1,
+      playbackOffset: playbackOffsetRef.current,
+      isIos: IS_IOS,
+      url: url.slice(0, 150),
+    })
     detachSubtitleTrack()
     const ctrl = new AbortController()
     subtitleAbortRef.current = ctrl
@@ -465,6 +472,15 @@ export function VideoPlayer() {
           if (!gotFirst) {
             gotFirst = true
             setLoadingSubtitle((cur) => (cur === streamIndex ? null : cur))
+            logDiagnostic('subtitle-first-cues', {
+              streamIndex,
+              firstCueStart: batch[0]?.start,
+              firstCueEnd: batch[0]?.end,
+              cueCount: batch.length,
+              playbackOffset: playbackOffsetRef.current,
+              videoCurrentTime: videoRef.current?.currentTime ?? -1,
+              isIos: IS_IOS,
+            })
           }
           setParsedSubtitles(prev => [...prev, ...batch])
         }
