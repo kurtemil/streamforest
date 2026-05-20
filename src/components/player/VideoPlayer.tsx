@@ -27,16 +27,17 @@ const IS_IOS = typeof navigator !== 'undefined' && (
   /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 )
-// Try codec strings in order. iOS Safari strictly matches the H264 level declared in
-// addSourceBuffer against the actual bitstream, so we try higher levels first.
-// Bare 'video/mp4' is last-resort — Safari will accept it and infer codec from the stream.
+// Bare 'video/mp4' is tried first — Safari accepts it and infers the codec from the
+// stream header, which handles any source codec (H264, HEVC, AV1) without mismatch.
+// Specific strings are fallbacks for browsers that reject the bare container type.
 const MSE_MIME_CANDIDATES = [
+  'video/mp4',                                   // bare — browser infers codec from moov
   'video/mp4; codecs="avc1.640033,mp4a.40.2"',  // H264 HP L5.1
   'video/mp4; codecs="avc1.64002a,mp4a.40.2"',  // H264 HP L4.2
   'video/mp4; codecs="avc1.640028,mp4a.40.2"',  // H264 HP L4.0
   'video/mp4; codecs="avc1.42E01E,mp4a.40.2"',  // H264 Baseline L3.0
-  'video/mp4; codecs="avc1.42E01E"',             // H264 Baseline, no audio declared
-  'video/mp4',                                   // bare — last resort, Safari infers codec
+  'video/mp4; codecs="hvc1.1.6.L120.90,mp4a.40.2"', // HEVC Main L4.0
+  'video/mp4; codecs="hev1.1.6.L120.90,mp4a.40.2"', // HEVC (alternate box type)
 ]
 function pickMseMime(): string | null {
   if (typeof MediaSource === 'undefined') return null
@@ -44,13 +45,16 @@ function pickMseMime(): string | null {
 }
 // Returns a compact diagnostic string for the error UI so we can debug iOS remotely.
 function getMseDiag(): string {
-  if (typeof MediaSource === 'undefined') return '[MSE:undef]'
+  const ios = IS_IOS ? 'ios' : 'desktop'
+  if (typeof MediaSource === 'undefined') return `[${ios} MSE:undef]`
   const pairs = MSE_MIME_CANDIDATES.map((m) => {
     const label = m === 'video/mp4' ? 'bare'
+      : m.includes('hvc1') ? 'hvc1'
+      : m.includes('hev1') ? 'hev1'
       : m.replace('video/mp4; codecs="', '').replace(/"$/, '').split(',')[0]
     return `${label}:${MediaSource.isTypeSupported(m) ? 'Y' : 'N'}`
   })
-  return `[MSE ${pairs.join(' ')}]`
+  return `[${ios} ${pairs.join(' ')}]`
 }
 
 interface Track { id: number; name: string; lang: string }
@@ -866,7 +870,7 @@ export function VideoPlayer() {
         }
         return
       }
-      setError(`Playback error (code ${code}, strategy: ${strategy ?? 'direct'})${IS_IOS ? ` ${getMseDiag()}` : ''}`)
+      setError(`Playback error (code ${code}, strategy: ${strategy ?? 'direct'}) ${getMseDiag()}`)
       setIsBuffering(false)
     }
 
