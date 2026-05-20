@@ -722,16 +722,28 @@ export function VideoPlayer() {
           if (IS_IOS) {
             iosStrategyRef.current = 'hls-gen'
             const capturedCurrent = current
-            startHlsSession(current.url, {
+            let hlsUrl = await startHlsSession(current.url, {
               mode,
               audioIndex: audioStreamIndexRef.current,
               startSeconds: startTime,
-            }).then((hlsUrl) => {
-              if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
-              if (!hlsUrl) { setError(`iOS: HLS generation failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
-              videoRef.current.src = hlsUrl
-              videoRef.current.play().catch(() => {})
             })
+            if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
+            // Provider stream may be truncated short of the saved position — retry from 0.
+            if (!hlsUrl && startTime > 0 && !iosHlsRetriedRef.current) {
+              iosHlsRetriedRef.current = true
+              playbackOffsetRef.current = 0
+              setError('Saved position unavailable — loading from start…')
+              hlsUrl = await startHlsSession(current.url, {
+                mode,
+                audioIndex: audioStreamIndexRef.current,
+                startSeconds: 0,
+              })
+              if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
+              if (hlsUrl) setError(null)
+            }
+            if (!hlsUrl) { setError(`iOS: HLS generation failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
+            videoRef.current.src = hlsUrl
+            videoRef.current.play().catch(() => {})
           } else {
             video.src = vodUrl
           }
