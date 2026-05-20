@@ -29,15 +29,28 @@ const IS_IOS = typeof navigator !== 'undefined' && (
 )
 // Try codec strings in order. iOS Safari strictly matches the H264 level declared in
 // addSourceBuffer against the actual bitstream, so we try higher levels first.
+// Bare 'video/mp4' is last-resort — Safari will accept it and infer codec from the stream.
 const MSE_MIME_CANDIDATES = [
   'video/mp4; codecs="avc1.640033,mp4a.40.2"',  // H264 HP L5.1
   'video/mp4; codecs="avc1.64002a,mp4a.40.2"',  // H264 HP L4.2
   'video/mp4; codecs="avc1.640028,mp4a.40.2"',  // H264 HP L4.0
   'video/mp4; codecs="avc1.42E01E,mp4a.40.2"',  // H264 Baseline L3.0
+  'video/mp4; codecs="avc1.42E01E"',             // H264 Baseline, no audio declared
+  'video/mp4',                                   // bare — last resort, Safari infers codec
 ]
 function pickMseMime(): string | null {
   if (typeof MediaSource === 'undefined') return null
   return MSE_MIME_CANDIDATES.find(m => MediaSource.isTypeSupported(m)) ?? null
+}
+// Returns a compact diagnostic string for the error UI so we can debug iOS remotely.
+function getMseDiag(): string {
+  if (typeof MediaSource === 'undefined') return '[MSE:undef]'
+  const pairs = MSE_MIME_CANDIDATES.map((m) => {
+    const label = m === 'video/mp4' ? 'bare'
+      : m.replace('video/mp4; codecs="', '').replace(/"$/, '').split(',')[0]
+    return `${label}:${MediaSource.isTypeSupported(m) ? 'Y' : 'N'}`
+  })
+  return `[MSE ${pairs.join(' ')}]`
 }
 
 interface Track { id: number; name: string; lang: string }
@@ -148,7 +161,7 @@ export function VideoPlayer() {
     mseAbortRef.current?.abort()
     mseAbortRef.current = null
     const mime = pickMseMime()
-    logDiagnostic('mse-start', { mseAvail: typeof MediaSource !== 'undefined', mime, url: url.slice(-40) })
+    logDiagnostic('mse-start', { mseAvail: typeof MediaSource !== 'undefined', mime, diag: getMseDiag(), url: url.slice(-40) })
     if (!mime) return false
     const ms = new MediaSource()
     const objUrl = URL.createObjectURL(ms)
@@ -647,7 +660,13 @@ export function VideoPlayer() {
           })
           if (IS_IOS) iosStrategyRef.current = 'mse'
           msePlaying = IS_IOS && startMsePlayback(video, vodUrl)
-          if (!msePlaying) video.src = vodUrl
+          if (!msePlaying) {
+            if (IS_IOS) {
+              setError(`iOS: MSE unavailable ${getMseDiag()}`)
+              return
+            }
+            video.src = vodUrl
+          }
         } else {
           isTranscodedRef.current = false
           videoStartTimeRef.current = 0
@@ -842,12 +861,12 @@ export function VideoPlayer() {
         logDiagnostic('live-hls-failed-trying-mse', { code })
         const mseLive = startMsePlayback(video, fallbackUrl)
         if (!mseLive) {
-          setError(`Live TV: HLS unavailable, MSE not supported (code ${code})`)
+          setError(`Live TV: HLS unavailable, MSE not supported (code ${code}) ${getMseDiag()}`)
           setIsBuffering(false)
         }
         return
       }
-      setError(`Playback error (code ${code}, strategy: ${strategy ?? 'direct'})`)
+      setError(`Playback error (code ${code}, strategy: ${strategy ?? 'direct'})${IS_IOS ? ` ${getMseDiag()}` : ''}`)
       setIsBuffering(false)
     }
 
