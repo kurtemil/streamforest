@@ -155,6 +155,9 @@ export function VideoPlayer() {
   const iosStrategyRef = useRef<'hls' | 'mse' | null>(null)
   // fMP4 proxy URL stored when using HLS; used for MSE fallback on HLS error.
   const iosFallbackUrlRef = useRef<string | null>(null)
+  // Short event codes appended as MSE pipeline runs — shown in the error message
+  // so we can diagnose without needing server logs or USB cable.
+  const mseDiagLogRef = useRef<string[]>([])
 
   // Pipe a proxy fMP4 stream via MSE instead of setting video.src directly.
   // iOS WebKit won't stream fMP4 from video.src without Content-Length/range support,
@@ -164,48 +167,46 @@ export function VideoPlayer() {
     mseAbortRef.current?.abort()
     mseAbortRef.current = null
     const mime = pickMseMime()
+    const dl = mseDiagLogRef.current
+    dl.length = 0
     logDiagnostic('mse-start', { mseAvail: !!MediaSourceCtor, mime, diag: getMseDiag(), url: url.slice(-40) })
-    if (!mime || !MediaSourceCtor) return false
+    if (!mime || !MediaSourceCtor) { dl.push('NO_MSE'); return false }
     const isMMS = typeof window !== 'undefined' && 'ManagedMediaSource' in window
     let ms: MediaSource
-    let objUrl: string
     try {
       ms = new MediaSourceCtor()
-      objUrl = URL.createObjectURL(ms)
+      dl.push('CR')
     } catch (e) {
       logDiagnostic('mse-ctor-failed', { err: String(e) })
+      dl.push('CR_ERR')
       return false
     }
-    logDiagnostic('mse-created', { isMMS, objUrl: objUrl.slice(0, 50), msState: ms.readyState })
+    logDiagnostic('mse-created', { isMMS, msState: ms.readyState })
     const abort = new AbortController()
     mseAbortRef.current = abort
 
     ms.addEventListener('sourceopen', async () => {
+      dl.push('SO')
       logDiagnostic('mse-sourceopen', { msState: ms.readyState })
-      URL.revokeObjectURL(objUrl)
       let sb: SourceBuffer
       try {
         sb = ms.addSourceBuffer(mime)
+        dl.push('SB')
         logDiagnostic('mse-sb-ok', { mime })
       } catch (e) {
+        dl.push('SB_ERR')
         logDiagnostic('mse-sb-failed', { mime, err: String(e) })
         if (ms.readyState === 'open') ms.endOfStream('network')
         return
-      }
-      // For ManagedMediaSource: call play() after sourceopen so the MSE is open
-      // before iOS tries to start streaming. If play() is called before sourceopen,
-      // the closed MSE may trigger immediate code 4.
-      if (isMMS) {
-        video.play()
-          .then(() => logDiagnostic('mse-play-ok', {}))
-          .catch((e) => logDiagnostic('mse-play-rejected', { err: String(e) }))
       }
       const drain = () => sb.updating
         ? new Promise<void>(r => sb.addEventListener('updateend', () => r(), { once: true }))
         : Promise.resolve()
       try {
+        dl.push('FS')
         logDiagnostic('mse-fetch-start', { url: url.slice(-60) })
         const res = await fetch(url, { signal: abort.signal })
+        dl.push(`F${res.status}`)
         logDiagnostic('mse-fetch-response', { status: res.status, ok: res.ok, hasBody: !!res.body })
         if (!res.ok || !res.body) {
           if (ms.readyState === 'open') ms.endOfStream('network')
@@ -217,20 +218,22 @@ export function VideoPlayer() {
         while (true) {
           const { done, value } = await reader.read()
           if (done) { if (ms.readyState === 'open') ms.endOfStream(); break }
-          if (ms.readyState !== 'open') { logDiagnostic('mse-ms-closed-mid-stream', { chunkCount }); break }
+          if (ms.readyState !== 'open') { dl.push('MX'); logDiagnostic('mse-ms-closed-mid-stream', { chunkCount }); break }
           await drain()
           if (ms.readyState !== 'open') break
           try {
             sb.appendBuffer(value)
             chunkCount++
-            if (chunkCount === 1) logDiagnostic('mse-first-chunk', { size: value.byteLength, msState: ms.readyState })
+            if (chunkCount === 1) { dl.push('FC'); logDiagnostic('mse-first-chunk', { size: value.byteLength, msState: ms.readyState }) }
             if (!isMMS && !playTriggered) {
               playTriggered = true
+              dl.push('PL')
               video.play()
-                .then(() => logDiagnostic('mse-play-ok', {}))
-                .catch((e) => logDiagnostic('mse-play-rejected', { err: String(e) }))
+                .then(() => { dl.push('PO'); logDiagnostic('mse-play-ok', {}) })
+                .catch((e) => { dl.push('PR'); logDiagnostic('mse-play-rejected', { err: String(e) }) })
             }
           } catch (e) {
+            dl.push('AB_ERR')
             logDiagnostic('mse-append-failed', { mime, err: String(e), chunkCount })
             if (ms.readyState === 'open') ms.endOfStream('decode')
             break
@@ -238,22 +241,32 @@ export function VideoPlayer() {
         }
       } catch (e) {
         if ((e as Error).name !== 'AbortError') {
+          dl.push('SE')
           logDiagnostic('mse-stream-error', { err: String(e) })
           if (ms.readyState === 'open') ms.endOfStream('network')
         }
       }
     }, { once: true })
 
-    ms.addEventListener('sourceended', () => logDiagnostic('mse-sourceended', {}))
-    ms.addEventListener('sourceclose', () => logDiagnostic('mse-sourceclose', {}))
+    ms.addEventListener('sourceended', () => { dl.push('END'); logDiagnostic('mse-sourceended', {}) })
+    ms.addEventListener('sourceclose', () => { dl.push('CLOSE'); logDiagnostic('mse-sourceclose', {}) })
 
-    logDiagnostic('mse-setting-src', { objUrl: objUrl.slice(0, 50) })
-    video.src = objUrl
-    logDiagnostic('mse-src-set', { videoSrc: video.src.slice(0, 50), videoReadyState: video.readyState })
-    // For regular MediaSource: play() after first chunk (data-driven).
-    // For ManagedMediaSource: play() is called inside sourceopen (MSE must be open first).
-    if (!isMMS) {
-      // play() will be called after first chunk inside sourceopen handler
+    // ManagedMediaSource: assign srcObject directly so iOS manages the streaming
+    // lifecycle without needing a blob URL. Then call play() immediately — per
+    // Apple's docs, play() triggers sourceopen on MMS (not the src assignment).
+    // Regular MediaSource: use createObjectURL; play() happens after first chunk.
+    if (isMMS) {
+      dl.push('SRC_OBJ')
+      ;(video as HTMLVideoElement & { srcObject: MediaSource | null }).srcObject = ms
+      dl.push('PL')
+      video.play()
+        .then(() => { dl.push('PO'); logDiagnostic('mse-play-ok', {}) })
+        .catch((e) => { dl.push('PR'); logDiagnostic('mse-play-rejected', { err: String(e) }) })
+    } else {
+      const objUrl = URL.createObjectURL(ms)
+      ms.addEventListener('sourceopen', () => URL.revokeObjectURL(objUrl), { once: true })
+      dl.push('SRC_URL')
+      video.src = objUrl
     }
     return true
   }, [])
@@ -293,6 +306,7 @@ export function VideoPlayer() {
     subtitleStreamIndicesRef.current = []
     iosStrategyRef.current = null
     iosFallbackUrlRef.current = null
+    mseDiagLogRef.current = []
   }, [current?.id])
 
   const resetControlsTimer = useCallback(() => {
@@ -908,7 +922,8 @@ export function VideoPlayer() {
         }
         return
       }
-      setError(`Playback error (code ${code}, strategy: ${strategy ?? 'direct'}) ${getMseDiag()}`)
+      const mseLog = mseDiagLogRef.current.length ? ` [${mseDiagLogRef.current.join('→')}]` : ''
+      setError(`Playback error (code ${code}, strategy: ${strategy ?? 'direct'}) ${getMseDiag()}${mseLog}`)
       setIsBuffering(false)
     }
 
