@@ -9,7 +9,7 @@ import { pushProgress, deleteRemoteProgress } from '@/services/sync'
 import { useProfileStore } from '@/stores/profileStore'
 import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import {
-  isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, liveHlsProxyUrl, probeMedia, pickProxyMode,
+  isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, probeMedia, pickProxyMode,
   subtitleVttUrl, audioStreamLabel, subtitleStreamLabel, getKeyframeTime, logDiagnostic,
 } from '@/lib/transcode'
 import type { ProxyMode } from '@/lib/transcode'
@@ -166,50 +166,72 @@ export function VideoPlayer() {
     const mime = pickMseMime()
     logDiagnostic('mse-start', { mseAvail: !!MediaSourceCtor, mime, diag: getMseDiag(), url: url.slice(-40) })
     if (!mime || !MediaSourceCtor) return false
-    const ms = new MediaSourceCtor()
-    const objUrl = URL.createObjectURL(ms)
+    const isMMS = typeof window !== 'undefined' && 'ManagedMediaSource' in window
+    let ms: MediaSource
+    let objUrl: string
+    try {
+      ms = new MediaSourceCtor()
+      objUrl = URL.createObjectURL(ms)
+    } catch (e) {
+      logDiagnostic('mse-ctor-failed', { err: String(e) })
+      return false
+    }
+    logDiagnostic('mse-created', { isMMS, objUrl: objUrl.slice(0, 50), msState: ms.readyState })
     const abort = new AbortController()
     mseAbortRef.current = abort
-    // ManagedMediaSource (iOS 17+) requires play() before sourceopen to enter streaming
-    // state. Regular MediaSource plays fine with late play() after first chunk — but
-    // calling it early is harmless; it just waits for data.
-    const isMMS = typeof window !== 'undefined' && 'ManagedMediaSource' in window
+
     ms.addEventListener('sourceopen', async () => {
+      logDiagnostic('mse-sourceopen', { msState: ms.readyState })
       URL.revokeObjectURL(objUrl)
       let sb: SourceBuffer
       try {
         sb = ms.addSourceBuffer(mime)
+        logDiagnostic('mse-sb-ok', { mime })
       } catch (e) {
-        logDiagnostic('mse-add-source-buffer-failed', { mime, err: String(e) })
+        logDiagnostic('mse-sb-failed', { mime, err: String(e) })
         if (ms.readyState === 'open') ms.endOfStream('network')
         return
+      }
+      // For ManagedMediaSource: call play() after sourceopen so the MSE is open
+      // before iOS tries to start streaming. If play() is called before sourceopen,
+      // the closed MSE may trigger immediate code 4.
+      if (isMMS) {
+        video.play()
+          .then(() => logDiagnostic('mse-play-ok', {}))
+          .catch((e) => logDiagnostic('mse-play-rejected', { err: String(e) }))
       }
       const drain = () => sb.updating
         ? new Promise<void>(r => sb.addEventListener('updateend', () => r(), { once: true }))
         : Promise.resolve()
       try {
+        logDiagnostic('mse-fetch-start', { url: url.slice(-60) })
         const res = await fetch(url, { signal: abort.signal })
+        logDiagnostic('mse-fetch-response', { status: res.status, ok: res.ok, hasBody: !!res.body })
         if (!res.ok || !res.body) {
-          logDiagnostic('mse-fetch-failed', { status: res.status })
           if (ms.readyState === 'open') ms.endOfStream('network')
           return
         }
         const reader = res.body.getReader()
+        let chunkCount = 0
         let playTriggered = false
         while (true) {
           const { done, value } = await reader.read()
           if (done) { if (ms.readyState === 'open') ms.endOfStream(); break }
-          if (ms.readyState !== 'open') break
+          if (ms.readyState !== 'open') { logDiagnostic('mse-ms-closed-mid-stream', { chunkCount }); break }
           await drain()
           if (ms.readyState !== 'open') break
           try {
             sb.appendBuffer(value)
+            chunkCount++
+            if (chunkCount === 1) logDiagnostic('mse-first-chunk', { size: value.byteLength, msState: ms.readyState })
             if (!isMMS && !playTriggered) {
               playTriggered = true
-              video.play().catch((e) => logDiagnostic('mse-play-rejected', { err: String(e) }))
+              video.play()
+                .then(() => logDiagnostic('mse-play-ok', {}))
+                .catch((e) => logDiagnostic('mse-play-rejected', { err: String(e) }))
             }
           } catch (e) {
-            logDiagnostic('mse-append-failed', { mime, err: String(e) })
+            logDiagnostic('mse-append-failed', { mime, err: String(e), chunkCount })
             if (ms.readyState === 'open') ms.endOfStream('decode')
             break
           }
@@ -221,8 +243,18 @@ export function VideoPlayer() {
         }
       }
     }, { once: true })
+
+    ms.addEventListener('sourceended', () => logDiagnostic('mse-sourceended', {}))
+    ms.addEventListener('sourceclose', () => logDiagnostic('mse-sourceclose', {}))
+
+    logDiagnostic('mse-setting-src', { objUrl: objUrl.slice(0, 50) })
     video.src = objUrl
-    if (isMMS) video.play().catch((e) => logDiagnostic('mse-play-init', { err: String(e) }))
+    logDiagnostic('mse-src-set', { videoSrc: video.src.slice(0, 50), videoReadyState: video.readyState })
+    // For regular MediaSource: play() after first chunk (data-driven).
+    // For ManagedMediaSource: play() is called inside sourceopen (MSE must be open first).
+    if (!isMMS) {
+      // play() will be called after first chunk inside sourceopen handler
+    }
     return true
   }, [])
 
@@ -561,22 +593,15 @@ export function VideoPlayer() {
         const streamSrc = liveStreamUrl(current.url, IS_IOS ? 'transcode' : 'copy')
         if (streamSrc) {
           if (IS_IOS) {
-            const hlsSrc = liveHlsProxyUrl(current.url)
-            const canHls = !!video.canPlayType('application/vnd.apple.mpegurl')
-            logDiagnostic('live-ios', { hlsSrc: !!hlsSrc, canHls })
-            if (hlsSrc && canHls) {
-              iosStrategyRef.current = 'hls'
-              iosFallbackUrlRef.current = streamSrc
-              video.src = hlsSrc
-              video.play().catch(() => {})
-            } else {
-              iosStrategyRef.current = 'mse'
-              iosFallbackUrlRef.current = null
-              const mseLive = startMsePlayback(video, streamSrc)
-              if (!mseLive) {
-                video.src = streamSrc
-                video.play().catch(() => {})
-              }
+            // Go straight to MSE — no HLS-first. The provider HLS endpoint often
+            // doesn't exist, and switching from HLS error → MSE inside an error
+            // handler causes stale error events and bad video element state on iOS.
+            iosStrategyRef.current = 'mse'
+            logDiagnostic('live-ios-mse', { streamSrc: streamSrc.slice(-60) })
+            const mseLive = startMsePlayback(video, streamSrc)
+            if (!mseLive) {
+              setError(`iOS: MSE unavailable ${getMseDiag()}`)
+              setIsBuffering(false)
             }
           } else {
             video.src = streamSrc
@@ -863,7 +888,13 @@ export function VideoPlayer() {
       const code = err?.code ?? 0
       const msg = err?.message ?? ''
       const strategy = iosStrategyRef.current
-      logDiagnostic('video-error', { code, msg, strategy, isIos: IS_IOS })
+      logDiagnostic('video-error', {
+        code, msg, strategy, isIos: IS_IOS,
+        src: video.src.slice(0, 60),
+        readyState: video.readyState,
+        networkState: video.networkState,
+        paused: video.paused,
+      })
       // HLS path failed (provider 404, wrong URL, etc.) — retry with MSE fMP4
       if (strategy === 'hls' && iosFallbackUrlRef.current) {
         const fallbackUrl = iosFallbackUrlRef.current
