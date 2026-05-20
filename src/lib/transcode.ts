@@ -213,8 +213,15 @@ export async function startHlsSession(
           logDiagnostic('hls-start-failed', { status: res.status, body: body.slice(0, 200), url: url.slice(0, 80) })
           return null
         }
-        const data = (await res.json()) as { hash?: string }
-        if (!data.hash) { _lastHlsError = 'no hash in response'; return null }
+        // Server sends 200 immediately with keepalive whitespace, then ends with JSON.
+        const text = await res.text().catch(() => '')
+        let data: { hash?: string; error?: string }
+        try { data = JSON.parse(text.trim()) } catch { _lastHlsError = 'bad JSON from server'; return null }
+        if (!data.hash) {
+          _lastHlsError = data.error || 'no hash in response'
+          logDiagnostic('hls-start-failed', { error: _lastHlsError, url: url.slice(0, 80) })
+          return null
+        }
         return `${base}/hls-file/${data.hash}/playlist.m3u8`
       } finally {
         clearTimeout(timer)

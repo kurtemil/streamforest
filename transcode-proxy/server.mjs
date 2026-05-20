@@ -874,8 +874,10 @@ function handleHlsStart(reqUrl, res) {
 
   const dir = path.join(HLS_DIR, hash)
   fs.mkdirSync(dir, { recursive: true })
+  process.stderr.write(`[hls] dir_created exists=${fs.existsSync(dir)} path=${dir}\n`)
 
-  const args = ['-hide_banner', '-loglevel', FFMPEG_LOGLEVEL]
+  // Use 'info' loglevel so we can see why ffmpeg fails (warning misses some input errors)
+  const args = ['-hide_banner', '-loglevel', 'info']
   if (live) args.push('-fflags', '+genpts+discardcorrupt')
   if (!live && start > 0) args.push('-ss', String(mode === 'transcode' ? Math.max(0, start - 5) : start))
   if (mode === 'transcode' && H264_ENCODER === 'h264_vaapi') args.push('-vaapi_device', VAAPI_DEVICE)
@@ -905,6 +907,13 @@ function handleHlsStart(reqUrl, res) {
   const sess = { proc, dir, lastAccess: Date.now(), live }
   hlsSessions.set(hash, sess)
 
+  // Send 200 immediately and write keepalive whitespace every 5 s to prevent
+  // Cloudflare Tunnel from dropping the connection before the first HLS segment
+  // is ready (CF has a ~15 s first-byte timeout for proxied origins).
+  res.writeHead(200, { 'Content-Type': 'application/json' })
+  const keepalive = setInterval(() => { try { res.write(' ') } catch {} }, 5000)
+  res.on('close', () => clearInterval(keepalive))
+
   proc.on('exit', (code) => {
     process.stderr.write(`[hls] exit hash=${hash.slice(0, 8)} code=${code}\n`)
     if (!live) {
@@ -924,18 +933,21 @@ function handleHlsStart(reqUrl, res) {
   const poll = () => {
     try {
       if (fs.readFileSync(path.join(dir, 'playlist.m3u8'), 'utf8').includes('.ts')) {
-        res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ hash }))
+        clearInterval(keepalive)
+        res.end(JSON.stringify({ hash }))
         return
       }
     } catch {}
     waited += 300
     if (waited >= 20_000) {
       try { proc.kill() } catch {}
+      clearInterval(keepalive)
       if (hlsSessions.get(hash) === sess) {
         hlsSessions.delete(hash)
         fs.rmSync(dir, { recursive: true, force: true })
       }
-      res.writeHead(504).end('HLS timeout')
+      process.stderr.write(`[hls] poll-timeout hash=${hash.slice(0, 8)}\n`)
+      res.end(JSON.stringify({ error: 'HLS timeout — ffmpeg did not produce output in 20 s' }))
       return
     }
     setTimeout(poll, 300)
