@@ -160,8 +160,6 @@ export function VideoPlayer() {
   // iOS WebKit won't stream fMP4 from video.src without Content-Length/range support,
   // but fetch() + SourceBuffer works on iOS 17+ where MSE is fully supported.
   // Returns false if MSE is unavailable so the caller can fall back to video.src.
-  // When true is returned, play() will be called internally after the first data chunk —
-  // callers must NOT call video.play() themselves for the MSE path.
   const startMsePlayback = useCallback((video: HTMLVideoElement, url: string): boolean => {
     mseAbortRef.current?.abort()
     mseAbortRef.current = null
@@ -172,7 +170,10 @@ export function VideoPlayer() {
     const objUrl = URL.createObjectURL(ms)
     const abort = new AbortController()
     mseAbortRef.current = abort
-    let playTriggered = false
+    // ManagedMediaSource (iOS 17+) requires play() before sourceopen to enter streaming
+    // state. Regular MediaSource plays fine with late play() after first chunk — but
+    // calling it early is harmless; it just waits for data.
+    const isMMS = typeof window !== 'undefined' && 'ManagedMediaSource' in window
     ms.addEventListener('sourceopen', async () => {
       URL.revokeObjectURL(objUrl)
       let sb: SourceBuffer
@@ -194,6 +195,7 @@ export function VideoPlayer() {
           return
         }
         const reader = res.body.getReader()
+        let playTriggered = false
         while (true) {
           const { done, value } = await reader.read()
           if (done) { if (ms.readyState === 'open') ms.endOfStream(); break }
@@ -202,7 +204,7 @@ export function VideoPlayer() {
           if (ms.readyState !== 'open') break
           try {
             sb.appendBuffer(value)
-            if (!playTriggered) {
+            if (!isMMS && !playTriggered) {
               playTriggered = true
               video.play().catch((e) => logDiagnostic('mse-play-rejected', { err: String(e) }))
             }
@@ -220,6 +222,7 @@ export function VideoPlayer() {
       }
     }, { once: true })
     video.src = objUrl
+    if (isMMS) video.play().catch((e) => logDiagnostic('mse-play-init', { err: String(e) }))
     return true
   }, [])
 
@@ -552,7 +555,10 @@ export function VideoPlayer() {
         // iOS WebKit can't stream fMP4 via video.src without range-request support.
         // Use native HLS instead: proxy the provider's .m3u8 through our /live-hls
         // endpoint so mixed-content is avoided and segment URLs are rewritten.
-        const streamSrc = liveStreamUrl(current.url)
+        // Live TV is never probed, so source codec is unknown. Force transcode on iOS
+        // to guarantee H264+AAC output regardless of what the provider sends.
+        // VOD is probed first and pickProxyMode handles codec selection there.
+        const streamSrc = liveStreamUrl(current.url, IS_IOS ? 'transcode' : 'copy')
         if (streamSrc) {
           if (IS_IOS) {
             const hlsSrc = liveHlsProxyUrl(current.url)
