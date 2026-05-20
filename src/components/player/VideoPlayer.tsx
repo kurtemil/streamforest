@@ -536,13 +536,19 @@ export function VideoPlayer() {
     })
     if (IS_IOS) {
       const capturedCurrent = current
+      const savedOffset = playbackOffsetRef.current
       startHlsSession(current.url, {
         mode: proxyModeRef.current ?? 'copy',
         audioIndex: audioStreamIndexRef.current,
         startSeconds: clamped,
       }).then((hlsUrl) => {
         if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
-        if (!hlsUrl) { setError(`iOS: HLS seek failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
+        if (!hlsUrl) {
+          // Restore position so currentTime stays consistent with what's still playing
+          playbackOffsetRef.current = savedOffset
+          flashSubtitleNotice(`Seek failed: ${getLastHlsError() || 'try again'}`)
+          return
+        }
         videoRef.current.src = hlsUrl
         videoRef.current.play().catch(() => {})
       })
@@ -574,7 +580,7 @@ export function VideoPlayer() {
       const track = subtitleTracksRef.current.find(t => t.id === activeSubtitleRef.current)
       if (track) attachSubtitleTrack(track.id, track.name, track.lang, clamped)
     }
-  }, [current, attachSubtitleTrack])
+  }, [current, attachSubtitleTrack, flashSubtitleNotice])
 
   // Load source when current changes
   useEffect(() => {
@@ -1267,10 +1273,10 @@ export function VideoPlayer() {
               <p className="text-red-400 font-medium mb-2">Playback Error</p>
               <p className="text-neutral-400 text-sm select-text cursor-text">{error}</p>
               <button
-                onClick={(e) => { e.stopPropagation(); handleClose() }}
+                onClick={(e) => { e.stopPropagation(); setError(null) }}
                 className="mt-4 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
               >
-                Close
+                Dismiss
               </button>
             </div>
           </div>
