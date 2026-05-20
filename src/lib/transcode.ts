@@ -180,6 +180,36 @@ export function tmdbCachePut(meta: object): void {
   }).catch(() => {})
 }
 
+// Start a server-side HLS session for iOS native playback.
+// The server runs ffmpeg → HLS segments in /tmp; returns playlist URL once ready.
+export async function startHlsSession(
+  url: string,
+  opts: { live?: boolean; mode?: ProxyMode; audioIndex?: number | null; startSeconds?: number } = {},
+): Promise<string | null> {
+  const base = proxyBase()
+  if (!base) return null
+  try {
+    const params = new URLSearchParams({ url })
+    if (opts.live) params.set('live', '1')
+    if (opts.mode === 'transcode') params.set('mode', 'transcode')
+    if (opts.audioIndex != null) params.set('audio', String(opts.audioIndex))
+    if (opts.startSeconds && opts.startSeconds > 0) params.set('start', String(Math.floor(opts.startSeconds)))
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 25000)
+    try {
+      const res = await fetch(`${base}/hls-start?${params}`, { signal: ctrl.signal })
+      if (!res.ok) return null
+      const data = (await res.json()) as { hash?: string }
+      if (!data.hash) return null
+      return `${base}/hls-file/${data.hash}/playlist.m3u8`
+    } finally {
+      clearTimeout(timer)
+    }
+  } catch {
+    return null
+  }
+}
+
 // Fire-and-forget diagnostic log → /clientlog on the proxy.
 // Use this to capture device info and playback errors that are hard to debug remotely.
 export function logDiagnostic(message: string, data: Record<string, unknown> = {}): void {

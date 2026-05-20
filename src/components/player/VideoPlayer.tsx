@@ -11,6 +11,7 @@ import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import {
   isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, probeMedia, pickProxyMode,
   subtitleVttUrl, audioStreamLabel, subtitleStreamLabel, getKeyframeTime, logDiagnostic,
+  startHlsSession,
 } from '@/lib/transcode'
 import type { ProxyMode } from '@/lib/transcode'
 import { normalizeShowKey } from '@/lib/utils'
@@ -152,7 +153,7 @@ export function VideoPlayer() {
 
   // Tracks the iOS playback strategy for the current item so the error handler
   // can fall back from HLS → MSE when the HLS proxy fails (e.g. provider 404).
-  const iosStrategyRef = useRef<'hls' | 'mse' | null>(null)
+  const iosStrategyRef = useRef<'hls' | 'hls-gen' | 'mse' | null>(null)
   // fMP4 proxy URL stored when using HLS; used for MSE fallback on HLS error.
   const iosFallbackUrlRef = useRef<string | null>(null)
   // Short event codes appended as MSE pipeline runs — shown in the error message
@@ -532,8 +533,19 @@ export function VideoPlayer() {
       subtitleIndices: subtitleStreamIndicesRef.current,
       vstart: videoStartTimeRef.current || undefined,
     })
-    const mseSeek = IS_IOS && startMsePlayback(video, seekUrl)
-    if (!mseSeek) {
+    if (IS_IOS) {
+      const capturedCurrent = current
+      startHlsSession(current.url, {
+        mode: proxyModeRef.current ?? 'copy',
+        audioIndex: audioStreamIndexRef.current,
+        startSeconds: clamped,
+      }).then((hlsUrl) => {
+        if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
+        if (!hlsUrl) { setError('iOS: HLS seek failed'); setIsBuffering(false); return }
+        videoRef.current.src = hlsUrl
+        videoRef.current.play().catch(() => {})
+      })
+    } else {
       video.src = seekUrl
       video.play().catch(() => {})
     }
@@ -604,23 +616,21 @@ export function VideoPlayer() {
         // Live TV is never probed, so source codec is unknown. Force transcode on iOS
         // to guarantee H264+AAC output regardless of what the provider sends.
         // VOD is probed first and pickProxyMode handles codec selection there.
-        const streamSrc = liveStreamUrl(current.url, IS_IOS ? 'transcode' : 'copy')
+        if (IS_IOS) {
+          iosStrategyRef.current = 'hls-gen'
+          const capturedCurrent = current
+          startHlsSession(current.url, { live: true, mode: 'transcode' }).then((hlsUrl) => {
+            if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
+            if (!hlsUrl) { setError('iOS: HLS generation failed'); setIsBuffering(false); return }
+            videoRef.current.src = hlsUrl
+            videoRef.current.play().catch(() => {})
+          })
+          return
+        }
+        const streamSrc = liveStreamUrl(current.url, 'copy')
         if (streamSrc) {
-          if (IS_IOS) {
-            // Go straight to MSE — no HLS-first. The provider HLS endpoint often
-            // doesn't exist, and switching from HLS error → MSE inside an error
-            // handler causes stale error events and bad video element state on iOS.
-            iosStrategyRef.current = 'mse'
-            logDiagnostic('live-ios-mse', { streamSrc: streamSrc.slice(-60) })
-            const mseLive = startMsePlayback(video, streamSrc)
-            if (!mseLive) {
-              setError(`iOS: MSE unavailable ${getMseDiag()}`)
-              setIsBuffering(false)
-            }
-          } else {
-            video.src = streamSrc
-            video.play().catch(() => {})
-          }
+          video.src = streamSrc
+          video.play().catch(() => {})
         }
         return
       }
@@ -708,13 +718,20 @@ export function VideoPlayer() {
             subtitleIndices: subtitleStreamIndicesRef.current,
             vstart: info?.startTime,
           })
-          if (IS_IOS) iosStrategyRef.current = 'mse'
-          msePlaying = IS_IOS && startMsePlayback(video, vodUrl)
-          if (!msePlaying) {
-            if (IS_IOS) {
-              setError(`iOS: MSE unavailable ${getMseDiag()}`)
-              return
-            }
+          if (IS_IOS) {
+            iosStrategyRef.current = 'hls-gen'
+            const capturedCurrent = current
+            startHlsSession(current.url, {
+              mode,
+              audioIndex: audioStreamIndexRef.current,
+              startSeconds: startTime,
+            }).then((hlsUrl) => {
+              if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
+              if (!hlsUrl) { setError('iOS: HLS generation failed'); setIsBuffering(false); return }
+              videoRef.current.src = hlsUrl
+              videoRef.current.play().catch(() => {})
+            })
+          } else {
             video.src = vodUrl
           }
         } else {
@@ -1200,7 +1217,7 @@ export function VideoPlayer() {
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="bg-surface-50 rounded-xl p-6 max-w-sm text-center">
               <p className="text-red-400 font-medium mb-2">Playback Error</p>
-              <p className="text-neutral-400 text-sm">{error}</p>
+              <p className="text-neutral-400 text-sm select-text cursor-text">{error}</p>
               <button
                 onClick={(e) => { e.stopPropagation(); handleClose() }}
                 className="mt-4 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"

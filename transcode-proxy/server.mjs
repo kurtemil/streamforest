@@ -31,9 +31,26 @@ const TMDB_CACHE_TTL_MS = 90 * 24 * 60 * 60 * 1000  // 90 days
 const CLIENT_LOG_FILE = process.env.CLIENT_LOG_FILE || path.join(os.tmpdir(), 'streamforest-client.log')
 const CLIENT_LOG_MAX_BYTES = 1 * 1024 * 1024  // 1 MB, then rotate
 
+const HLS_DIR = path.join(os.tmpdir(), 'streamforest-hls')
+
 fs.mkdirSync(SUB_CACHE_DIR, { recursive: true })
 fs.mkdirSync(EPG_CACHE_DIR, { recursive: true })
 fs.mkdirSync(TMDB_CACHE_DIR, { recursive: true })
+fs.mkdirSync(HLS_DIR, { recursive: true })
+
+// iOS HLS generation sessions: hash → { proc, dir, lastAccess, live }
+const hlsSessions = new Map()
+setInterval(() => {
+  const now = Date.now()
+  for (const [hash, sess] of hlsSessions.entries()) {
+    if (now - sess.lastAccess > 2 * 60_000) {
+      try { sess.proc?.kill() } catch {}
+      setTimeout(() => fs.rmSync(sess.dir, { recursive: true, force: true }), 2000)
+      hlsSessions.delete(hash)
+      process.stderr.write(`[hls] cleanup ${hash.slice(0, 8)}\n`)
+    }
+  }
+}, 60_000).unref()
 
 // Active transcode registry.
 // key: sha1(url|seekBucket)
@@ -837,6 +854,101 @@ function handleTmdbGet(reqUrl, res) {
   res.writeHead(404).end('Not found')
 }
 
+function handleHlsStart(reqUrl, res) {
+  const target = parseTargetUrl(reqUrl, res)
+  if (!target) return
+  const mode = reqUrl.searchParams.get('mode') === 'transcode' ? 'transcode' : 'copy'
+  const live = reqUrl.searchParams.get('live') === '1'
+  const start = Number(reqUrl.searchParams.get('start') || 0)
+  const audioParam = reqUrl.searchParams.get('audio')
+  const audioIdx = audioParam !== null && /^\d+$/.test(audioParam) ? Number(audioParam) : null
+  const hash = createHash('sha1').update(`hls|${target}|${mode}|${live ? 'live' : start}`).digest('hex').slice(0, 16)
+
+  const existing = hlsSessions.get(hash)
+  if (existing) {
+    existing.lastAccess = Date.now()
+    res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ hash }))
+    return
+  }
+
+  const dir = path.join(HLS_DIR, hash)
+  fs.mkdirSync(dir, { recursive: true })
+
+  const args = ['-hide_banner', '-loglevel', FFMPEG_LOGLEVEL]
+  if (live) args.push('-fflags', '+genpts+discardcorrupt')
+  if (!live && start > 0) args.push('-ss', String(mode === 'transcode' ? Math.max(0, start - 5) : start))
+  if (mode === 'transcode' && H264_ENCODER === 'h264_vaapi') args.push('-vaapi_device', VAAPI_DEVICE)
+  args.push('-i', target, '-map', '0:v:0', '-map', audioIdx !== null ? `0:${audioIdx}` : '0:a:0?')
+  if (!live && start > 0 && mode === 'transcode') args.push('-ss', String(start))
+
+  if (mode === 'copy') {
+    args.push('-c:v', 'copy')
+  } else if (H264_ENCODER === 'h264_vaapi') {
+    args.push('-c:v', 'h264_vaapi', '-vf', `scale='min(iw,${VIDEO_MAX_WIDTH})':-2,format=nv12,hwupload`, '-qp', VAAPI_QP)
+  } else {
+    args.push('-c:v', H264_ENCODER, '-preset', H264_PRESET, '-vf', `scale='min(${VIDEO_MAX_WIDTH},iw)':-2`, '-b:v', VIDEO_BITRATE, '-maxrate', VIDEO_MAX_BITRATE, '-bufsize', '3M', '-pix_fmt', 'yuv420p')
+  }
+  args.push(
+    '-c:a', 'aac', '-b:a', AUDIO_BITRATE, '-ac', '2', '-bsf:a', 'aac_adtstoasc',
+    '-f', 'hls', '-hls_time', '4',
+    '-hls_list_size', live ? '6' : '0',
+    '-hls_flags', live ? 'delete_segments+append_list' : 'temp_file',
+    '-hls_segment_filename', path.join(dir, 'seg%05d.ts'),
+    path.join(dir, 'playlist.m3u8'),
+  )
+
+  process.stderr.write(`[hls] start hash=${hash.slice(0, 8)} live=${live} mode=${mode} start=${start}\n`)
+  const proc = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+  proc.stderr.on('data', (d) => process.stderr.write(`[hls:${hash.slice(0, 8)}] ${d}`))
+
+  const sess = { proc, dir, lastAccess: Date.now(), live }
+  hlsSessions.set(hash, sess)
+
+  proc.on('exit', (code) => {
+    process.stderr.write(`[hls] exit hash=${hash.slice(0, 8)} code=${code}\n`)
+    if (!live) {
+      setTimeout(() => { hlsSessions.delete(hash); fs.rmSync(dir, { recursive: true, force: true }) }, 10 * 60_000)
+    }
+  })
+
+  let waited = 0
+  const poll = () => {
+    try {
+      if (fs.readFileSync(path.join(dir, 'playlist.m3u8'), 'utf8').includes('.ts')) {
+        res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ hash }))
+        return
+      }
+    } catch {}
+    waited += 300
+    if (waited >= 20_000) {
+      try { proc.kill() } catch {}
+      hlsSessions.delete(hash)
+      fs.rmSync(dir, { recursive: true, force: true })
+      res.writeHead(504).end('HLS timeout')
+      return
+    }
+    setTimeout(poll, 300)
+  }
+  setTimeout(poll, 300)
+}
+
+function handleHlsFile(pathname, res) {
+  const rest = pathname.slice('/hls-file/'.length)
+  const slash = rest.indexOf('/')
+  if (slash < 0) { res.writeHead(400).end('Bad path'); return }
+  const hash = rest.slice(0, slash)
+  const filename = rest.slice(slash + 1)
+  if (!filename || filename.includes('..') || filename.includes('/')) { res.writeHead(400).end('Bad filename'); return }
+  const sess = hlsSessions.get(hash)
+  if (!sess) { res.writeHead(404).end('Session not found'); return }
+  sess.lastAccess = Date.now()
+  const ct = filename.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/MP2T'
+  fs.readFile(path.join(sess.dir, filename), (err, data) => {
+    if (err) { res.writeHead(404).end('Not found'); return }
+    res.writeHead(200, { 'Content-Type': ct, 'Cache-Control': 'no-cache' }).end(data)
+  })
+}
+
 function handleTmdbPost(req, res) {
   let body = ''
   req.on('data', (c) => { body += c.toString() })
@@ -917,6 +1029,16 @@ const server = http.createServer((req, res) => {
     } else {
       res.writeHead(405).end('Method not allowed')
     }
+    return
+  }
+
+  if (reqUrl.pathname === '/hls-start') {
+    handleHlsStart(reqUrl, res)
+    return
+  }
+
+  if (reqUrl.pathname.startsWith('/hls-file/')) {
+    handleHlsFile(reqUrl.pathname, res)
     return
   }
 
