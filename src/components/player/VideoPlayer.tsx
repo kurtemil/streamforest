@@ -27,34 +27,35 @@ const IS_IOS = typeof navigator !== 'undefined' && (
   /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 )
-// Bare 'video/mp4' is tried first — Safari accepts it and infers the codec from the
-// stream header, which handles any source codec (H264, HEVC, AV1) without mismatch.
-// Specific strings are fallbacks for browsers that reject the bare container type.
+// iOS 17 introduced MSE as ManagedMediaSource; iOS 26 dropped the MediaSource alias.
+// Prefer ManagedMediaSource (requires disableRemotePlayback on the video element).
+const MediaSourceCtor: (typeof MediaSource) | undefined = (() => {
+  if (typeof window === 'undefined') return undefined
+  if ('ManagedMediaSource' in window) return (window as unknown as { ManagedMediaSource: typeof MediaSource }).ManagedMediaSource
+  if (typeof MediaSource !== 'undefined') return MediaSource
+  return undefined
+})()
+// Bare 'video/mp4' lets the browser infer codec from the stream — handles H264/HEVC/AV1.
 const MSE_MIME_CANDIDATES = [
-  'video/mp4',                                   // bare — browser infers codec from moov
-  'video/mp4; codecs="avc1.640033,mp4a.40.2"',  // H264 HP L5.1
-  'video/mp4; codecs="avc1.64002a,mp4a.40.2"',  // H264 HP L4.2
-  'video/mp4; codecs="avc1.640028,mp4a.40.2"',  // H264 HP L4.0
-  'video/mp4; codecs="avc1.42E01E,mp4a.40.2"',  // H264 Baseline L3.0
-  'video/mp4; codecs="hvc1.1.6.L120.90,mp4a.40.2"', // HEVC Main L4.0
-  'video/mp4; codecs="hev1.1.6.L120.90,mp4a.40.2"', // HEVC (alternate box type)
+  'video/mp4',
+  'video/mp4; codecs="avc1.640033,mp4a.40.2"',
+  'video/mp4; codecs="avc1.42E01E,mp4a.40.2"',
+  'video/mp4; codecs="hvc1.1.6.L120.90,mp4a.40.2"',
+  'video/mp4; codecs="hev1.1.6.L120.90,mp4a.40.2"',
 ]
 function pickMseMime(): string | null {
-  if (typeof MediaSource === 'undefined') return null
-  return MSE_MIME_CANDIDATES.find(m => MediaSource.isTypeSupported(m)) ?? null
+  if (!MediaSourceCtor) return null
+  return MSE_MIME_CANDIDATES.find(m => MediaSourceCtor.isTypeSupported(m)) ?? null
 }
-// Returns a compact diagnostic string for the error UI so we can debug iOS remotely.
 function getMseDiag(): string {
   const ios = IS_IOS ? 'ios' : 'desktop'
-  if (typeof MediaSource === 'undefined') return `[${ios} MSE:undef]`
+  const api = !MediaSourceCtor ? 'undef' : ('ManagedMediaSource' in window ? 'MMS' : 'MS')
+  if (!MediaSourceCtor) return `[${ios} MSE:${api}]`
   const pairs = MSE_MIME_CANDIDATES.map((m) => {
-    const label = m === 'video/mp4' ? 'bare'
-      : m.includes('hvc1') ? 'hvc1'
-      : m.includes('hev1') ? 'hev1'
-      : m.replace('video/mp4; codecs="', '').replace(/"$/, '').split(',')[0]
-    return `${label}:${MediaSource.isTypeSupported(m) ? 'Y' : 'N'}`
+    const label = m === 'video/mp4' ? 'bare' : m.includes('hvc1') ? 'hvc1' : m.includes('hev1') ? 'hev1' : 'avc1'
+    return `${label}:${MediaSourceCtor.isTypeSupported(m) ? 'Y' : 'N'}`
   })
-  return `[${ios} ${pairs.join(' ')}]`
+  return `[${ios} ${api} ${pairs.join(' ')}]`
 }
 
 interface Track { id: number; name: string; lang: string }
@@ -165,9 +166,9 @@ export function VideoPlayer() {
     mseAbortRef.current?.abort()
     mseAbortRef.current = null
     const mime = pickMseMime()
-    logDiagnostic('mse-start', { mseAvail: typeof MediaSource !== 'undefined', mime, diag: getMseDiag(), url: url.slice(-40) })
-    if (!mime) return false
-    const ms = new MediaSource()
+    logDiagnostic('mse-start', { mseAvail: !!MediaSourceCtor, mime, diag: getMseDiag(), url: url.slice(-40) })
+    if (!mime || !MediaSourceCtor) return false
+    const ms = new MediaSourceCtor()
     const objUrl = URL.createObjectURL(ms)
     const abort = new AbortController()
     mseAbortRef.current = abort
@@ -1140,6 +1141,7 @@ export function VideoPlayer() {
           ref={videoRef}
           className="absolute inset-0 w-full h-full object-contain"
           playsInline
+          disableRemotePlayback
         />
 
         {!minimized && error && (
