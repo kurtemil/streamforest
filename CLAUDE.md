@@ -21,8 +21,6 @@ Personal IPTV web player. React SPA on Cloudflare Pages; home transcode server o
     server.mjs            THE server — only file that matters at runtime
     Dockerfile            node:20-bookworm-slim + intel-media-va-driver (ProDesk image)
     fly.toml              Fly.io config (alternative cloud deployment, not active)
-  streamforest-transcode/ Legacy Home Assistant add-on packaging (Alpine-based)
-    server.mjs            Must be kept in sync with transcode-proxy/server.mjs
 ```
 
 ---
@@ -87,8 +85,6 @@ The repo lives at `~/streamforest` on the ProDesk. Docker Compose lives at `~/se
 | `VAAPI_QP` | `23` | Fixed QP (no bitrate control on this driver) |
 | `ALLOWED_HOSTS` | `iptvworld.xyz` | Comma-separated allowlist |
 | `FFMPEG_PATH` | `ffmpeg` | |
-
-**Important:** `transcode-proxy/server.mjs` is the canonical copy (runs on the ProDesk). `streamforest-transcode/server.mjs` is the legacy HA add-on copy — keep both in sync whenever server.mjs changes.
 
 **Live TV specifics:**
 - Live channels are MPEG-TS over HTTP (Xtream Codes). Browsers can't play raw MPEG-TS.
