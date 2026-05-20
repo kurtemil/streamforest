@@ -154,8 +154,8 @@ export function VideoPlayer() {
   // Tracks the iOS playback strategy for the current item so the error handler
   // can fall back from HLS → MSE when the HLS proxy fails (e.g. provider 404).
   const iosStrategyRef = useRef<'hls' | 'hls-gen' | 'mse' | null>(null)
-  // fMP4 proxy URL stored when using HLS; used for MSE fallback on HLS error.
   const iosFallbackUrlRef = useRef<string | null>(null)
+  const iosHlsRetriedRef = useRef(false)
   // Short event codes appended as MSE pipeline runs — shown in the error message
   // so we can diagnose without needing server logs or USB cable.
   const mseDiagLogRef = useRef<string[]>([])
@@ -307,6 +307,7 @@ export function VideoPlayer() {
     subtitleStreamIndicesRef.current = []
     iosStrategyRef.current = null
     iosFallbackUrlRef.current = null
+    iosHlsRetriedRef.current = false
     mseDiagLogRef.current = []
   }, [current?.id])
 
@@ -926,6 +927,27 @@ export function VideoPlayer() {
         networkState: video.networkState,
         paused: video.paused,
       })
+      // HLS-gen code 4 with non-zero start: provider likely truncates stream at seek offset.
+      // Retry from start=0 so at least the beginning plays.
+      if (strategy === 'hls-gen' && code === 4 && !iosHlsRetriedRef.current && playbackOffsetRef.current > 0 && current) {
+        iosHlsRetriedRef.current = true
+        playbackOffsetRef.current = 0
+        setIsBuffering(true)
+        flashSubtitleNotice('Saved position unavailable — playing from start')
+        const capturedCurrent = current
+        startHlsSession(current.url, {
+          mode: proxyModeRef.current ?? 'copy',
+          audioIndex: audioStreamIndexRef.current,
+          startSeconds: 0,
+        }).then((hlsUrl) => {
+          if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
+          if (!hlsUrl) { setError(`iOS: HLS failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
+          setError(null)
+          videoRef.current.src = hlsUrl
+          videoRef.current.play().catch(() => {})
+        })
+        return
+      }
       // HLS path failed (provider 404, wrong URL, etc.) — retry with MSE fMP4
       if (strategy === 'hls' && iosFallbackUrlRef.current) {
         const fallbackUrl = iosFallbackUrlRef.current

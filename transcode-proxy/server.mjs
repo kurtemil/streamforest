@@ -45,8 +45,8 @@ setInterval(() => {
   for (const [hash, sess] of hlsSessions.entries()) {
     if (now - sess.lastAccess > 2 * 60_000) {
       try { sess.proc?.kill() } catch {}
-      setTimeout(() => fs.rmSync(sess.dir, { recursive: true, force: true }), 2000)
       hlsSessions.delete(hash)
+      fs.rmSync(sess.dir, { recursive: true, force: true })
       process.stderr.write(`[hls] cleanup ${hash.slice(0, 8)}\n`)
     }
   }
