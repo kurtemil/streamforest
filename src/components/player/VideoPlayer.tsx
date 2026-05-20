@@ -927,13 +927,13 @@ export function VideoPlayer() {
         networkState: video.networkState,
         paused: video.paused,
       })
-      // HLS-gen code 4 with non-zero start: provider likely truncates stream at seek offset.
+      // HLS-gen code 4 with non-zero start: provider stream died at seek position.
       // Retry from start=0 so at least the beginning plays.
       if (strategy === 'hls-gen' && code === 4 && !iosHlsRetriedRef.current && playbackOffsetRef.current > 0 && current) {
         iosHlsRetriedRef.current = true
         playbackOffsetRef.current = 0
-        setIsBuffering(true)
-        flashSubtitleNotice('Saved position unavailable — playing from start')
+        setIsBuffering(false)
+        setError('Stream failed at saved position — retrying from start…')
         const capturedCurrent = current
         startHlsSession(current.url, {
           mode: proxyModeRef.current ?? 'copy',
@@ -941,8 +941,9 @@ export function VideoPlayer() {
           startSeconds: 0,
         }).then((hlsUrl) => {
           if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
-          if (!hlsUrl) { setError(`iOS: HLS failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
+          if (!hlsUrl) { setError(`iOS: Stream failed at saved position. Try again later. (${getLastHlsError() || 'network error'})`); return }
           setError(null)
+          setIsBuffering(true)
           videoRef.current.src = hlsUrl
           videoRef.current.play().catch(() => {})
         })

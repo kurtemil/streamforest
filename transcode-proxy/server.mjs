@@ -908,7 +908,15 @@ function handleHlsStart(reqUrl, res) {
   proc.on('exit', (code) => {
     process.stderr.write(`[hls] exit hash=${hash.slice(0, 8)} code=${code}\n`)
     if (!live) {
-      setTimeout(() => { hlsSessions.delete(hash); fs.rmSync(dir, { recursive: true, force: true }) }, 10 * 60_000)
+      // Only clean up if this session is still current — the poll-loop timeout may have
+      // already deleted the Map entry and the dir, and a new session may have re-used
+      // the same hash+dir. Deleting unconditionally would nuke the new session's dir.
+      setTimeout(() => {
+        if (hlsSessions.get(hash) === sess) {
+          hlsSessions.delete(hash)
+          fs.rmSync(dir, { recursive: true, force: true })
+        }
+      }, 10 * 60_000)
     }
   })
 
@@ -923,8 +931,10 @@ function handleHlsStart(reqUrl, res) {
     waited += 300
     if (waited >= 20_000) {
       try { proc.kill() } catch {}
-      hlsSessions.delete(hash)
-      fs.rmSync(dir, { recursive: true, force: true })
+      if (hlsSessions.get(hash) === sess) {
+        hlsSessions.delete(hash)
+        fs.rmSync(dir, { recursive: true, force: true })
+      }
       res.writeHead(504).end('HLS timeout')
       return
     }
