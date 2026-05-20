@@ -185,6 +185,7 @@ export function getLastHlsError(): string { return _lastHlsError }
 
 // Start a server-side HLS session for iOS native playback.
 // The server runs ffmpeg → HLS segments in /tmp; returns playlist URL once ready.
+// Retries once on network-level errors (Cloudflare Tunnel blips, brief Wi-Fi drops).
 export async function startHlsSession(
   url: string,
   opts: { live?: boolean; mode?: ProxyMode; audioIndex?: number | null; startSeconds?: number } = {},
@@ -192,36 +193,43 @@ export async function startHlsSession(
   const base = proxyBase()
   if (!base) return null
   _lastHlsError = ''
-  try {
-    const params = new URLSearchParams({ url })
-    if (opts.live) params.set('live', '1')
-    if (opts.mode === 'transcode') params.set('mode', 'transcode')
-    if (opts.audioIndex != null) params.set('audio', String(opts.audioIndex))
-    if (opts.startSeconds && opts.startSeconds > 0) params.set('start', String(Math.floor(opts.startSeconds)))
-    const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), 25000)
+
+  const params = new URLSearchParams({ url })
+  if (opts.live) params.set('live', '1')
+  if (opts.mode === 'transcode') params.set('mode', 'transcode')
+  if (opts.audioIndex != null) params.set('audio', String(opts.audioIndex))
+  if (opts.startSeconds && opts.startSeconds > 0) params.set('start', String(Math.floor(opts.startSeconds)))
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise<void>(r => setTimeout(r, 1500))
     try {
-      const res = await fetch(`${base}/hls-start?${params}`, { signal: ctrl.signal })
-      if (!res.ok) {
-        const body = await res.text().catch(() => '')
-        _lastHlsError = `HTTP ${res.status}${body ? ': ' + body.slice(0, 150) : ''}`
-        logDiagnostic('hls-start-failed', { status: res.status, body: body.slice(0, 200), url: url.slice(0, 80) })
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 25000)
+      try {
+        const res = await fetch(`${base}/hls-start?${params}`, { signal: ctrl.signal })
+        if (!res.ok) {
+          const body = await res.text().catch(() => '')
+          _lastHlsError = `HTTP ${res.status}${body ? ': ' + body.slice(0, 150) : ''}`
+          logDiagnostic('hls-start-failed', { status: res.status, body: body.slice(0, 200), url: url.slice(0, 80) })
+          return null
+        }
+        const data = (await res.json()) as { hash?: string }
+        if (!data.hash) { _lastHlsError = 'no hash in response'; return null }
+        return `${base}/hls-file/${data.hash}/playlist.m3u8`
+      } finally {
+        clearTimeout(timer)
+      }
+    } catch (e) {
+      const isAbort = (e as Error).name === 'AbortError'
+      _lastHlsError = isAbort ? 'client timeout (25s)' : String(e)
+      if (isAbort || attempt === 1) {
+        logDiagnostic('hls-start-error', { err: _lastHlsError, url: url.slice(0, 80), attempt })
         return null
       }
-      const data = (await res.json()) as { hash?: string }
-      if (!data.hash) {
-        _lastHlsError = 'no hash in response'
-        return null
-      }
-      return `${base}/hls-file/${data.hash}/playlist.m3u8`
-    } finally {
-      clearTimeout(timer)
+      logDiagnostic('hls-start-retry', { err: String(e), url: url.slice(0, 80) })
     }
-  } catch (e) {
-    _lastHlsError = (e as Error).name === 'AbortError' ? 'client timeout (25s)' : String(e)
-    logDiagnostic('hls-start-error', { err: _lastHlsError, url: url.slice(0, 80) })
-    return null
   }
+  return null
 }
 
 // Fire-and-forget diagnostic log → /clientlog on the proxy.
@@ -245,6 +253,7 @@ export async function probeMedia(url: string, signal?: AbortSignal): Promise<Med
     if (!res.ok) {
       const detail = await res.text().catch(() => '')
       console.warn(`[probeMedia] proxy ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`)
+      logDiagnostic('probe-failed', { status: res.status, detail: detail.slice(0, 200), url: url.slice(0, 80) })
       return null
     }
     const data = (await res.json()) as Partial<MediaInfo>
@@ -259,6 +268,7 @@ export async function probeMedia(url: string, signal?: AbortSignal): Promise<Med
   } catch (err) {
     if ((err as { name?: string }).name === 'AbortError') return null
     console.warn('[probeMedia] failed:', err)
+    logDiagnostic('probe-error', { err: String(err), url: url.slice(0, 80) })
     return null
   }
 }
