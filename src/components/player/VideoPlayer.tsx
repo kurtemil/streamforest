@@ -156,6 +156,7 @@ export function VideoPlayer() {
   const iosStrategyRef = useRef<'hls' | 'hls-gen' | 'mse' | null>(null)
   const iosFallbackUrlRef = useRef<string | null>(null)
   const iosHlsRetriedRef = useRef(false)
+  const reconnectCountRef = useRef(0)
   // Short event codes appended as MSE pipeline runs — shown in the error message
   // so we can diagnose without needing server logs or USB cable.
   const mseDiagLogRef = useRef<string[]>([])
@@ -537,6 +538,7 @@ export function VideoPlayer() {
       return
     }
     playbackOffsetRef.current = clamped
+    reconnectCountRef.current = 0
     setCurrentTime(clamped)
     setBuffered(clamped)
     // Clear any next-episode countdown — we seeked away from the end
@@ -606,6 +608,7 @@ export function VideoPlayer() {
     setDuration(0)
     setCurrentTime(0)
     setBuffered(0)
+    reconnectCountRef.current = 0
     destroyHls()
     mseAbortRef.current?.abort()
     mseAbortRef.current = null
@@ -948,7 +951,7 @@ export function VideoPlayer() {
 
     const onWaiting  = () => setIsBuffering(true)
     const onCanPlay  = () => setIsBuffering(false)
-    const onPlaying  = () => setIsBuffering(false)
+    const onPlaying  = () => { setIsBuffering(false); reconnectCountRef.current = 0 }
     const onVideoError = () => {
       const err = video.error
       const code = err?.code ?? 0
@@ -995,6 +998,40 @@ export function VideoPlayer() {
           setIsBuffering(false)
         }
         return
+      }
+      // Network/decode error on a desktop proxy stream — auto-reconnect from real position
+      // instead of just showing an error. Covers both transcoded VOD and live TV (fMP4 via proxy).
+      if (!IS_IOS && (code === 2 || code === 3) && current && (isTranscodedRef.current || current.type === 'live')) {
+        const maxRetries = current.type === 'live' ? 20 : 3
+        if (reconnectCountRef.current < maxRetries) {
+          reconnectCountRef.current++
+          const realPos = isTranscodedRef.current ? playbackOffsetRef.current + video.currentTime : 0
+          const backoff = Math.min(1000 * reconnectCountRef.current, 5000)
+          const retryLabel = current.type === 'live' ? String(reconnectCountRef.current) : `${reconnectCountRef.current}/${maxRetries}`
+          setError(`Connection lost — reconnecting (${retryLabel})…`)
+          setIsBuffering(true)
+          const capturedCurrent = current
+          setTimeout(() => {
+            if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
+            setError(null)
+            if (isTranscodedRef.current) {
+              playbackOffsetRef.current = realPos
+              videoRef.current.src = transcodeUrl(capturedCurrent.url, {
+                startSeconds: realPos,
+                audioIndex: audioStreamIndexRef.current,
+                mode: proxyModeRef.current ?? undefined,
+                subtitleIndices: subtitleStreamIndicesRef.current,
+                vstart: videoStartTimeRef.current || undefined,
+              })
+            } else {
+              const liveUrl = liveStreamUrl(capturedCurrent.url, 'copy')
+              if (!liveUrl) { setError('Live stream reconnect failed'); return }
+              videoRef.current.src = liveUrl
+            }
+            videoRef.current.play().catch(() => {})
+          }, backoff)
+          return
+        }
       }
       const mseLog = mseDiagLogRef.current.length ? ` [${mseDiagLogRef.current.join('→')}]` : ''
       setError(`Playback error (code ${code}, strategy: ${strategy ?? 'direct'}) ${getMseDiag()}${mseLog}`)
@@ -1232,7 +1269,18 @@ export function VideoPlayer() {
   const togglePlay = () => {
     const v = videoRef.current
     if (!v) return
-    v.paused ? v.play() : v.pause()
+    if (v.paused) {
+      // Error state + proxy stream: naive v.play() re-fetches from byte 0, resetting position.
+      // Rebuild the URL from real position instead so playback resumes where it stopped.
+      if (v.error && (isTranscodedRef.current || current?.type === 'live') && current) {
+        seekTo(playbackOffsetRef.current + v.currentTime)
+      } else {
+        v.play()
+      }
+    } else if (!isBuffering) {
+      v.pause()
+    }
+    // if buffering (!paused but waiting): do nothing — video resumes automatically when buffer fills
   }
 
   const changeVolume = (val: number) => {
