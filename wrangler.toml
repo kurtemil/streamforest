@@ -2,7 +2,14 @@ name = "streamforest"
 compatibility_date = "2024-09-23"
 pages_build_output_dir = "dist"
 
+[triggers]
+crons = ["0 5 * * *"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "streamforest-profiles"
 database_id = "1b607c87-bab2-485b-94c8-5722f9f8f9a6"
+
+[[kv_namespaces]]
+binding = "M3U_CACHE"
+id = "5cc24082f8fc4da0baf49ebdcf23da86"
