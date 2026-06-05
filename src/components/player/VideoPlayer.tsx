@@ -93,6 +93,9 @@ export function VideoPlayer() {
   // Baseline seconds baked into the source URL (for transcode-proxy resume).
   // Real playback time = playbackOffsetRef.current + video.currentTime.
   const playbackOffsetRef = useRef(0)
+  // Last position confirmed by a timeupdate event — used by the error handler
+  // instead of video.currentTime which Chrome resets to 0 before firing the error.
+  const lastKnownRealPosRef = useRef(0)
   const isTranscodedRef = useRef(false)
   const transcodedDurationRef = useRef<number | null>(null)
   // For probe-derived MKV tracks: which audio stream index ffmpeg is currently
@@ -609,6 +612,7 @@ export function VideoPlayer() {
     setCurrentTime(0)
     setBuffered(0)
     reconnectCountRef.current = 0
+    lastKnownRealPosRef.current = 0
     destroyHls()
     mseAbortRef.current?.abort()
     mseAbortRef.current = null
@@ -874,7 +878,9 @@ export function VideoPlayer() {
 
     const onTimeUpdate = () => {
       const offset = playbackOffsetRef.current
-      setCurrentTime(offset + video.currentTime)
+      const realTime = offset + video.currentTime
+      lastKnownRealPosRef.current = realTime
+      setCurrentTime(realTime)
       if (video.buffered.length > 0) {
         setBuffered(offset + video.buffered.end(video.buffered.length - 1))
       }
@@ -1005,14 +1011,21 @@ export function VideoPlayer() {
         const maxRetries = current.type === 'live' ? 20 : 3
         if (reconnectCountRef.current < maxRetries) {
           reconnectCountRef.current++
-          const realPos = isTranscodedRef.current ? playbackOffsetRef.current + video.currentTime : 0
+          // Use lastKnownRealPosRef rather than video.currentTime: Chrome resets
+          // currentTime to 0 before firing the error event, which would make us
+          // reconnect from the beginning of the episode.
+          const realPos = isTranscodedRef.current ? lastKnownRealPosRef.current : 0
           const backoff = Math.min(1000 * reconnectCountRef.current, 5000)
           const retryLabel = current.type === 'live' ? String(reconnectCountRef.current) : `${reconnectCountRef.current}/${maxRetries}`
+          const expectedReconnectCount = reconnectCountRef.current
           setError(`Connection lost — reconnecting (${retryLabel})…`)
           setIsBuffering(true)
           const capturedCurrent = current
           setTimeout(() => {
             if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
+            // A manual seek (or new load) resets reconnectCountRef to 0 — bail out so
+            // we don't overwrite the position the user explicitly chose.
+            if (reconnectCountRef.current !== expectedReconnectCount) return
             setError(null)
             if (isTranscodedRef.current) {
               playbackOffsetRef.current = realPos
@@ -1023,6 +1036,27 @@ export function VideoPlayer() {
                 subtitleIndices: subtitleStreamIndicesRef.current,
                 vstart: videoStartTimeRef.current || undefined,
               })
+              // Copy mode: ffmpeg snaps to the nearest keyframe, so correct
+              // playbackOffset to that keyframe (same as seekTo does) to keep
+              // subtitle timestamps aligned with the resumed video position.
+              if (proxyModeRef.current === 'copy') {
+                const reconnectTarget = realPos
+                getKeyframeTime(capturedCurrent.url, Math.floor(realPos))
+                  .then(keyframe => {
+                    if (usePlayerStore.getState().current !== capturedCurrent) return
+                    playbackOffsetRef.current = keyframe
+                    if (activeSubtitleRef.current >= 0) {
+                      const track = subtitleTracksRef.current.find(t => t.id === activeSubtitleRef.current)
+                      if (track) attachSubtitleTrack(track.id, track.name, track.lang, reconnectTarget)
+                    }
+                  })
+                  .catch(() => {
+                    if (activeSubtitleRef.current >= 0) {
+                      const track = subtitleTracksRef.current.find(t => t.id === activeSubtitleRef.current)
+                      if (track) attachSubtitleTrack(track.id, track.name, track.lang, realPos)
+                    }
+                  })
+              }
             } else {
               const liveUrl = liveStreamUrl(capturedCurrent.url, 'copy')
               if (!liveUrl) { setError('Live stream reconnect failed'); return }
