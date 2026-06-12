@@ -2,8 +2,11 @@ name = "streamforest"
 compatibility_date = "2024-09-23"
 pages_build_output_dir = "dist"
 
-[triggers]
-crons = ["0 5 * * *"]
+# NOTE: Do NOT add a [triggers]/crons block here. Cloudflare Pages does not
+# support cron triggers in wrangler.toml — it fails config validation and breaks
+# EVERY deploy (regressed all deploys 2026-06-05 → 2026-06-12). The nightly M3U
+# prefetch (_worker.ts `scheduled`) needs a separate standalone Worker with its
+# own cron, or an external scheduler hitting a Pages endpoint.
 
 [[d1_databases]]
 binding = "DB"
