@@ -181,7 +181,7 @@ function EpisodeRow({
         onClick={() => openInVlc(ep)}
         title="Open in VLC"
         aria-label="Open in VLC"
-        className="absolute top-1/2 -translate-y-1/2 right-3 z-10 flex items-center gap-1 px-2 py-1 rounded-md bg-black/75 hover:bg-black/90 ring-1 ring-white/15 opacity-0 group-hover:opacity-100 transition-opacity"
+        className="absolute top-1/2 -translate-y-1/2 right-3 z-10 flex items-center gap-1 px-2 py-1 rounded-md bg-black/75 hover:bg-black/90 ring-1 ring-white/15 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
       >
         <span className="w-2 h-2 rounded-sm bg-[#ff8800]" />
         <span className="text-[10px] font-semibold text-white tracking-wide">VLC</span>
