@@ -10,6 +10,7 @@ import { db } from '@/services/db'
 import { SearchBar } from '@/components/ui/SearchBar'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { GroupSidebar } from '@/components/ui/GroupSidebar'
+import { openInVlc } from '@/lib/vlc'
 import type { Channel, EpgProgram } from '@/types'
 
 const RECENT_COUNT = 80
@@ -46,9 +47,19 @@ function ChannelRow({ channel, programs, onPlay }: ChannelRowProps) {
   const remaining = current ? current.end - now : null
 
   return (
+    <div className="group relative">
+      <button
+        onClick={() => openInVlc(channel)}
+        title="Open in VLC"
+        aria-label="Open in VLC"
+        className="absolute top-1/2 -translate-y-1/2 right-3 z-10 flex items-center gap-1 px-2 py-1 rounded-md bg-black/75 hover:bg-black/90 ring-1 ring-white/15 opacity-0 group-hover:opacity-100 transition-opacity"
+      >
+        <span className="w-2 h-2 rounded-sm bg-[#ff8800]" />
+        <span className="text-[10px] font-semibold text-white tracking-wide">VLC</span>
+      </button>
     <button
       onClick={onPlay}
-      className="group w-full flex items-stretch gap-0 rounded-xl ring-1 ring-white/5 hover:ring-accent-600/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all duration-150 overflow-hidden text-left"
+      className="w-full flex items-stretch gap-0 rounded-xl ring-1 ring-white/5 hover:ring-accent-600/40 bg-white/[0.02] hover:bg-white/[0.05] transition-all duration-150 overflow-hidden text-left"
     >
       {/* Left: channel identity */}
       <div className="w-44 shrink-0 flex flex-col items-center justify-center gap-1.5 px-4 py-3 border-r border-white/5">
@@ -110,6 +121,7 @@ function ChannelRow({ channel, programs, onPlay }: ChannelRowProps) {
         )}
       </div>
     </button>
+    </div>
   )
 }
 

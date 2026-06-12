@@ -14,6 +14,7 @@ import {
   startHlsSession, getLastHlsError,
 } from '@/lib/transcode'
 import type { ProxyMode } from '@/lib/transcode'
+import { openInVlc } from '@/lib/vlc'
 import { normalizeShowKey } from '@/lib/utils'
 import { parseVttBlock } from '@/lib/vtt'
 import { PlayerControls } from './PlayerControls'
@@ -1370,12 +1371,22 @@ export function VideoPlayer() {
             <div className="bg-surface-50 rounded-xl p-6 max-w-sm text-center">
               <p className="text-red-400 font-medium mb-2">Playback Error</p>
               <p className="text-neutral-400 text-sm select-text cursor-text">{error}</p>
-              <button
-                onClick={(e) => { e.stopPropagation(); setError(null) }}
-                className="mt-4 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
-              >
-                Dismiss
-              </button>
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); openInVlc(current) }}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
+                  title="Open in VLC"
+                >
+                  <span className="w-2 h-2 rounded-sm bg-[#ff8800]" />
+                  Open in VLC
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setError(null) }}
+                  className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
             </div>
           </div>
         )}

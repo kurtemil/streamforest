@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import type { Channel } from '@/types'
 import { formatTime } from '@/lib/time'
+import { openInVlc } from '@/lib/vlc'
 
 interface Track { id: number; name: string; lang: string }
 
@@ -109,6 +110,14 @@ export function PlayerControls({
           )}
         </div>
         <div className="flex items-center gap-1">
+          <button
+            onClick={(e) => { e.stopPropagation(); openInVlc(channel) }}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-colors"
+            title="Open in VLC"
+          >
+            <span className="w-2 h-2 rounded-sm bg-[#ff8800]" />
+            <span className="text-xs font-semibold tracking-wide">VLC</span>
+          </button>
           <button
             onClick={onMinimize}
             className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"

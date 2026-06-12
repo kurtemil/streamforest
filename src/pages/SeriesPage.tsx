@@ -35,6 +35,7 @@ import { useTmdbEnrich } from '@/hooks/useTmdbEnrich'
 import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
 import { backdropUrl, posterUrl } from '@/services/tmdb'
 import { normalizeShowKey } from '@/lib/utils'
+import { openInVlc } from '@/lib/vlc'
 
 const RECENT_SHOWS = 40
 
@@ -146,9 +147,10 @@ function EpisodeRow({
   const epLabel = ep.episode !== undefined ? `E${String(ep.episode).padStart(2, '0')}` : null
 
   return (
+    <div className="relative group">
     <button
       onClick={onClick}
-      className="flex items-center gap-4 w-full text-left py-3 px-2 rounded-lg hover:bg-white/5 transition-colors group"
+      className="flex items-center gap-4 w-full text-left py-3 px-2 pr-16 rounded-lg hover:bg-white/5 transition-colors"
     >
       <span className="w-8 shrink-0 text-center text-sm font-medium text-neutral-500 group-hover:text-neutral-300 transition-colors">
         {epLabel ?? <Play size={13} className="mx-auto" />}
@@ -174,12 +176,17 @@ function EpisodeRow({
           <Check size={11} className="text-white" />
         </div>
       )}
-      <Play
-        size={14}
-        fill="white"
-        className="shrink-0 text-white opacity-0 group-hover:opacity-60 transition-opacity"
-      />
     </button>
+      <button
+        onClick={() => openInVlc(ep)}
+        title="Open in VLC"
+        aria-label="Open in VLC"
+        className="absolute top-1/2 -translate-y-1/2 right-3 z-10 flex items-center gap-1 px-2 py-1 rounded-md bg-black/75 hover:bg-black/90 ring-1 ring-white/15 opacity-0 group-hover:opacity-100 transition-opacity"
+      >
+        <span className="w-2 h-2 rounded-sm bg-[#ff8800]" />
+        <span className="text-[10px] font-semibold text-white tracking-wide">VLC</span>
+      </button>
+    </div>
   )
 }
 
@@ -574,6 +581,16 @@ export function SeriesPage() {
               >
                 <Play size={16} fill="black" />
                 Play
+              </button>
+            )}
+            {episodes[0] && (
+              <button
+                onClick={() => openInVlc(episodes[0])}
+                title="Open in VLC"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-body transition-all active:scale-95 ring-1 bg-white/8 ring-white/15 text-neutral-300 hover:bg-white/12"
+              >
+                <span className="w-2.5 h-2.5 rounded-sm bg-[#ff8800]" />
+                VLC
               </button>
             )}
             <button

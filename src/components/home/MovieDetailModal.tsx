@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, Play, Bookmark, Star, Clock, Users } from 'lucide-react'
 import type { Channel, TmdbMeta } from '@/types'
 import { backdropUrl, posterUrl, profileUrl } from '@/services/tmdb'
+import { openInVlc } from '@/lib/vlc'
 
 interface Props {
   channel: Channel | null
@@ -137,6 +138,16 @@ export function MovieDetailModal({ channel, tmdbMeta, isWatchLater, onClose, onP
                   <Bookmark size={15} fill={isWatchLater ? 'currentColor' : 'none'} />
                   {isWatchLater ? 'Saved' : 'Watch Later'}
                 </button>
+                {channel && (
+                  <button
+                    onClick={() => openInVlc(channel)}
+                    title="Open in VLC"
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-body transition-all active:scale-95 ring-1 bg-white/8 ring-white/15 text-neutral-300 hover:bg-white/12"
+                  >
+                    <span className="w-2.5 h-2.5 rounded-sm bg-[#ff8800]" />
+                    VLC
+                  </button>
+                )}
               </div>
 
               {/* Overview */}
