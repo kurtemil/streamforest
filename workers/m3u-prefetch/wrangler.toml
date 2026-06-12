@@ -1,0 +1,25 @@
+# Standalone Cloudflare Worker for the nightly M3U prefetch.
+#
+# This is a WORKER, not a Pages project — Workers support cron triggers, Pages
+# does not (a [triggers] block in the Pages wrangler.toml breaks every deploy;
+# see ../../wrangler.toml). It binds the SAME D1 + KV as the Pages app so the
+# Pages /proxy route serves the cache this Worker fills.
+#
+# Deploy:  cd workers/m3u-prefetch && npx wrangler deploy
+name = "streamforest-m3u-prefetch"
+main = "index.ts"
+compatibility_date = "2024-09-23"
+
+[triggers]
+crons = ["0 5 * * *"]   # 05:00 UTC nightly (06:00 CET / 07:00 CEST)
+
+# Same database as the Pages app — reads the configured M3U URL from user_preferences.
+[[d1_databases]]
+binding = "DB"
+database_name = "streamforest-profiles"
+database_id = "1b607c87-bab2-485b-94c8-5722f9f8f9a6"
+
+# Same KV namespace the Pages /proxy route reads from.
+[[kv_namespaces]]
+binding = "M3U_CACHE"
+id = "5cc24082f8fc4da0baf49ebdcf23da86"
