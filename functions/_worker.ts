@@ -1,7 +1,18 @@
-// Cloudflare Pages Worker — handles all API routes + daily M3U prefetch cron.
-// When this file exists, Pages uses it for every request instead of the
-// file-based functions/ routing. The existing api/*.ts files are kept for
-// reference but are inactive while _worker.ts is present.
+// ⚠️ THIS FILE DOES NOT RUN. Verified against production on 2026-08-17.
+//
+// Pages advanced mode looks for a _worker.js in the *build output directory*.
+// A _worker.ts under functions/ is not that, so file-based routing stays in
+// charge and functions/proxy.ts and functions/api/*.ts are what actually serve
+// requests — the opposite of what this header used to claim.
+//
+// It was proved by adding a host allowlist here and watching /proxy keep
+// fetching an arbitrary URL in production. Two things had therefore never
+// worked: the KV cache read (the nightly prefetch was written every night and
+// read by nobody) and this allowlist. Both now live in functions/proxy.ts.
+//
+// Kept because it is the more coherent implementation and worth adopting
+// deliberately — by emitting it to dist/_worker.js at build time — rather than
+// by editing it and assuming. Until then, change the file-based handlers.
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

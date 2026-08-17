@@ -14,9 +14,10 @@ Personal IPTV web player. React SPA on Cloudflare Pages; home transcode server o
     services/db.ts        Dexie (IndexedDB) schema + helpers
     stores/               Zustand stores (player, playlist, profile, etc.)
     pages/                Route-level pages
-  functions/              Cloudflare Pages Functions
-    proxy.ts              /proxy — CORS bypass for 50 MB M3U download
+  functions/              Cloudflare Pages Functions — file-based routing.
+    proxy.ts              /proxy — host-allowlisted CORS bypass + KV cache read
     api/progress.ts       /api/progress — D1-backed cross-device watch state
+    _worker.ts            DOES NOT RUN — see the note at the top of that file
   transcode-proxy/        Node.js HTTP proxy that drives ffmpeg (runs on HP ProDesk)
     server.mjs            THE server — only file that matters at runtime
     Dockerfile            node:20-bookworm-slim + intel-media-va-driver (ProDesk image)
@@ -137,8 +138,15 @@ The repo lives at `~/streamforest` on the ProDesk. Docker Compose lives at `~/se
 | `FFMPEG_PATH` | `ffmpeg` | |
 
 **When "nothing plays", check the provider host first.** The IPTV provider
-migrates: `iptvworld.xyz` → `nsclient.xyz` → `45.12.1.27` so far. Two places go
-stale independently and each fails silently:
+migrates: `iptvworld.xyz` → `nsclient.xyz` so far, and also answers on the bare
+IP `45.12.1.27`.
+
+**Always configure the hostname, never the IP.** Cloudflare Workers refuse to
+fetch a raw address — the request never leaves, and the caller gets a Cloudflare
+403 with body `error code: 1003` that reads exactly like a provider rejection.
+The home server has no such restriction, so its allowlist can carry both.
+
+Three places go stale independently and each fails silently:
 
 1. `ALLOWED_HOSTS` on the server — a mismatch returns `403 Host not allowed`
    before ffmpeg is ever spawned. On 2026-08-17 this named a domain that no
@@ -146,7 +154,9 @@ stale independently and each fails silently:
    rejected outright.
 2. `m3u_url` in D1 (`user_preferences`, profile `_global`) — a dead host means
    the playlist can never refresh, so the app quietly serves whatever IndexedDB
-   and the KV cache still hold, with stream URLs pointing at the old host.
+   still holds, with stream URLs pointing at the old host.
+3. `PROXY_ALLOWED_HOSTS` (Pages variable, read by `functions/proxy.ts`) — a
+   mismatch returns 403 before the download starts.
 
 Symptom in both cases is "playback is broken", which reads as a player bug and
 is not one. Check with:
