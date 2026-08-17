@@ -133,7 +133,7 @@ The repo lives at `~/streamforest` on the ProDesk. Docker Compose lives at `~/se
 | `H264_ENCODER` | `h264_vaapi` | Kaby Lake QuickSync |
 | `VAAPI_DEVICE` | `/dev/dri/renderD128` | |
 | `VAAPI_QP` | `23` | Fixed QP (no bitrate control on this driver) |
-| `ALLOWED_HOSTS` | `45.12.1.27` | Comma-separated allowlist — **the provider moves** |
+| `ALLOWED_HOSTS` | `nsclient.xyz,45.12.1.27` | Comma-separated allowlist — **the provider moves** |
 | `CLIENT_LOG_TOKEN` | (secret) | Required for `GET /clientlog`; unset = reads refused |
 | `FFMPEG_PATH` | `ffmpeg` | |
 
@@ -158,7 +158,7 @@ Three places go stale independently and each fails silently:
 3. `PROXY_ALLOWED_HOSTS` (Pages variable, read by `functions/proxy.ts`) — a
    mismatch returns 403 before the download starts.
 
-Symptom in both cases is "playback is broken", which reads as a player bug and
+The symptom in every case is "playback is broken", which reads as a player bug and
 is not one. Check with:
 ```bash
 ssh <server> 'docker exec transcode-proxy sh -c "getent hosts <host>"'
