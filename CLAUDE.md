@@ -132,8 +132,28 @@ The repo lives at `~/streamforest` on the ProDesk. Docker Compose lives at `~/se
 | `H264_ENCODER` | `h264_vaapi` | Kaby Lake QuickSync |
 | `VAAPI_DEVICE` | `/dev/dri/renderD128` | |
 | `VAAPI_QP` | `23` | Fixed QP (no bitrate control on this driver) |
-| `ALLOWED_HOSTS` | `iptvworld.xyz` | Comma-separated allowlist |
+| `ALLOWED_HOSTS` | `45.12.1.27` | Comma-separated allowlist — **the provider moves** |
+| `CLIENT_LOG_TOKEN` | (secret) | Required for `GET /clientlog`; unset = reads refused |
 | `FFMPEG_PATH` | `ffmpeg` | |
+
+**When "nothing plays", check the provider host first.** The IPTV provider
+migrates: `iptvworld.xyz` → `nsclient.xyz` → `45.12.1.27` so far. Two places go
+stale independently and each fails silently:
+
+1. `ALLOWED_HOSTS` on the server — a mismatch returns `403 Host not allowed`
+   before ffmpeg is ever spawned. On 2026-08-17 this named a domain that no
+   longer resolved in DNS, so every VOD and live request through the proxy was
+   rejected outright.
+2. `m3u_url` in D1 (`user_preferences`, profile `_global`) — a dead host means
+   the playlist can never refresh, so the app quietly serves whatever IndexedDB
+   and the KV cache still hold, with stream URLs pointing at the old host.
+
+Symptom in both cases is "playback is broken", which reads as a player bug and
+is not one. Check with:
+```bash
+ssh <server> 'docker exec transcode-proxy sh -c "getent hosts <host>"'
+curl -s "https://streamforest.krutofv.se/api/preferences?profileId=_global"
+```
 
 **Live TV specifics:**
 - Live channels are MPEG-TS over HTTP (Xtream Codes). Browsers can't play raw MPEG-TS.

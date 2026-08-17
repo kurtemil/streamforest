@@ -36,7 +36,11 @@ const argOf = (name, fallback = null) => {
   return i !== -1 ? args[i + 1] : fallback
 }
 
-const BASE = (argOf('--base') || process.env.VITE_TRANSCODE_PROXY_URL || '').replace(/\/+$/, '')
+// CLIENT_LOG_BASE first: VITE_TRANSCODE_PROXY_URL points at localhost during
+// development, but the devices whose logs we want are talking to the tunnel.
+const BASE = (
+  argOf('--base') || process.env.CLIENT_LOG_BASE || process.env.VITE_TRANSCODE_PROXY_URL || ''
+).replace(/\/+$/, '')
 const TOKEN = process.env.CLIENT_LOG_TOKEN || argOf('--token', '')
 
 if (!BASE) {
