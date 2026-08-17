@@ -1,0 +1,83 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`parseM3ULines — series > matches the whole corpus of real naming formats 1`] = `
+[
+  {
+    "episode": 1,
+    "episodeTitle": "Mother’s Little Helpers",
+    "name": "Helstrom S01 Helstrom - S01E01 - Mother’s Little Helpers",
+    "season": 1,
+    "showName": "Helstrom",
+  },
+  {
+    "episode": 9,
+    "episodeTitle": null,
+    "name": "Helstrom S01 Helstrom - S01E09",
+    "season": 1,
+    "showName": "Helstrom",
+  },
+  {
+    "episode": 1,
+    "episodeTitle": null,
+    "name": "Love, Victor S03 Love, Victor - S03E01",
+    "season": 3,
+    "showName": "Love, Victor",
+  },
+  {
+    "episode": 1,
+    "episodeTitle": null,
+    "name": "The.Blacklist ar S01 The.Blacklist - S01E01",
+    "season": 1,
+    "showName": "The Blacklist ar",
+  },
+  {
+    "episode": 1,
+    "episodeTitle": null,
+    "name": "Leif & Billy S01 Leif Och Billy SO1E01 SE",
+    "season": 1,
+    "showName": "Leif & Billy",
+  },
+  {
+    "episode": 1,
+    "episodeTitle": null,
+    "name": "Mr. Robot S02 Mr. Robot - S02E01-E02",
+    "season": 2,
+    "showName": "Mr. Robot",
+  },
+  {
+    "episode": 1,
+    "episodeTitle": null,
+    "name": "Paw Patrol S09 PAW Patrol - S09E01-02",
+    "season": 9,
+    "showName": "Paw Patrol",
+  },
+  {
+    "episode": 7,
+    "episodeTitle": "The Live Semi-Finals - 2",
+    "name": "American Song Contest S01 American Song Contest - S01E07 - The Live Semi-Finals (2)",
+    "season": 1,
+    "showName": "American Song Contest",
+  },
+  {
+    "episode": 1,
+    "episodeTitle": "Gimme Shelter - I",
+    "name": "Law & Order: Organized Crime S03 Law & Order: Organized Crime - S03E01 - Gimme Shelter (I)",
+    "season": 3,
+    "showName": "Law & Order: Organized Crime",
+  },
+  {
+    "episode": 1,
+    "episodeTitle": null,
+    "name": "Wanderlust S01 Wanderlust S01 E01",
+    "season": 1,
+    "showName": "Wanderlust S01 Wanderlust",
+  },
+  {
+    "episode": 1,
+    "episodeTitle": null,
+    "name": "Morden i Sandhamn S01 Morden I Sandhamn S01",
+    "season": 1,
+    "showName": "Morden i Sandhamn S01 Morden I Sandhamn",
+  },
+]
+`;

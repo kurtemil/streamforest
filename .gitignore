@@ -10,3 +10,8 @@ dist/
 plan.txt
 iptv-url.txt
 new-plan.txt
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+.playwright/

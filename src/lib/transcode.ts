@@ -1,3 +1,5 @@
+import { trace, traceError } from './diagnostics'
+
 const MKV_EXT = /\.mkv(\?.*)?$/i
 
 // Audio codecs Chrome can't play in MP4/MKV natively — must be re-encoded.
@@ -200,6 +202,11 @@ export async function startHlsSession(
   if (opts.audioIndex != null) params.set('audio', String(opts.audioIndex))
   if (opts.startSeconds && opts.startSeconds > 0) params.set('start', String(Math.floor(opts.startSeconds)))
 
+  // Wall-clock here is the number that matters: it is the gap between the user's
+  // tap and anything appearing, and the reason play() lands outside the gesture.
+  const startedAt = Date.now()
+  trace('hls-start', { live: !!opts.live, mode: opts.mode, audio: opts.audioIndex, start: opts.startSeconds ?? 0 })
+
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0) await new Promise<void>(r => setTimeout(r, 1500))
     try {
@@ -210,18 +217,25 @@ export async function startHlsSession(
         if (!res.ok) {
           const body = await res.text().catch(() => '')
           _lastHlsError = `HTTP ${res.status}${body ? ': ' + body.slice(0, 150) : ''}`
-          logDiagnostic('hls-start-failed', { status: res.status, body: body.slice(0, 200), url: url.slice(0, 80) })
+          traceError('hls-failed', { ms: Date.now() - startedAt, status: res.status, body: body.slice(0, 200) })
           return null
         }
         // Server sends 200 immediately with keepalive whitespace, then ends with JSON.
         const text = await res.text().catch(() => '')
         let data: { hash?: string; error?: string }
-        try { data = JSON.parse(text.trim()) } catch { _lastHlsError = 'bad JSON from server'; return null }
-        if (!data.hash) {
-          _lastHlsError = data.error || 'no hash in response'
-          logDiagnostic('hls-start-failed', { error: _lastHlsError, url: url.slice(0, 80) })
+        try {
+          data = JSON.parse(text.trim())
+        } catch {
+          _lastHlsError = 'bad JSON from server'
+          traceError('hls-failed', { ms: Date.now() - startedAt, reason: 'bad-json' })
           return null
         }
+        if (!data.hash) {
+          _lastHlsError = data.error || 'no hash in response'
+          traceError('hls-failed', { ms: Date.now() - startedAt, error: _lastHlsError })
+          return null
+        }
+        trace('hls-ready', { ms: Date.now() - startedAt, hash: data.hash, attempt })
         return `${base}/hls-file/${data.hash}/playlist.m3u8`
       } finally {
         clearTimeout(timer)
@@ -230,40 +244,45 @@ export async function startHlsSession(
       const isAbort = (e as Error).name === 'AbortError'
       _lastHlsError = isAbort ? 'client timeout (25s)' : String(e)
       if (isAbort || attempt === 1) {
-        logDiagnostic('hls-start-error', { err: _lastHlsError, url: url.slice(0, 80), attempt })
+        traceError('hls-failed', { ms: Date.now() - startedAt, err: _lastHlsError, attempt })
         return null
       }
-      logDiagnostic('hls-start-retry', { err: String(e), url: url.slice(0, 80) })
+      trace('hls-retry', { ms: Date.now() - startedAt, err: String(e) })
     }
   }
   return null
 }
 
-// Fire-and-forget diagnostic log → /clientlog on the proxy.
-// Use this to capture device info and playback errors that are hard to debug remotely.
+// Kept as the name the player already calls; the batching, session id and
+// per-playback timing now come from lib/diagnostics.
 export function logDiagnostic(message: string, data: Record<string, unknown> = {}): void {
-  const base = proxyBase()
-  if (!base) return
-  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown'
-  fetch(`${base}/clientlog`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ts: Date.now(), ua, message, ...data }),
-  }).catch(() => {})
+  trace(message, data)
 }
 
 export async function probeMedia(url: string, signal?: AbortSignal): Promise<MediaInfo | null> {
   const base = proxyBase()
   if (!base) return null
+  // Every playback waits on this before a single frame is fetched, so its cost
+  // is part of the time-to-first-frame budget and has to be measured separately.
+  const startedAt = Date.now()
+  trace('probe-start', {})
   try {
     const res = await fetch(`${base}/probe?${new URLSearchParams({ url }).toString()}`, { signal })
     if (!res.ok) {
       const detail = await res.text().catch(() => '')
       console.warn(`[probeMedia] proxy ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`)
-      logDiagnostic('probe-failed', { status: res.status, detail: detail.slice(0, 200), url: url.slice(0, 80) })
+      traceError('probe-failed', { ms: Date.now() - startedAt, status: res.status, detail: detail.slice(0, 200) })
       return null
     }
     const data = (await res.json()) as Partial<MediaInfo>
+    trace('probe-done', {
+      ms: Date.now() - startedAt,
+      duration: data.duration ?? null,
+      video: data.videoCodec ?? null,
+      audio: data.audioCodec ?? null,
+      audioStreams: Array.isArray(data.audioStreams) ? data.audioStreams.length : 0,
+      subStreams: Array.isArray(data.subtitleStreams) ? data.subtitleStreams.length : 0,
+    })
     return {
       duration: typeof data.duration === 'number' && isFinite(data.duration) ? data.duration : null,
       startTime: typeof data.startTime === 'number' && isFinite(data.startTime) ? data.startTime : 0,
@@ -275,7 +294,7 @@ export async function probeMedia(url: string, signal?: AbortSignal): Promise<Med
   } catch (err) {
     if ((err as { name?: string }).name === 'AbortError') return null
     console.warn('[probeMedia] failed:', err)
-    logDiagnostic('probe-error', { err: String(err), url: url.slice(0, 80) })
+    traceError('probe-failed', { ms: Date.now() - startedAt, err: String(err) })
     return null
   }
 }

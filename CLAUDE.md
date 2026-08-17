@@ -34,6 +34,55 @@ npm run dev:pages    # wrangler pages dev — needed for /api/* (D1) routes
 npm test             # vitest unit tests
 ```
 
+---
+
+## Diagnostics and tests
+
+Nobody debugs this app on the phone it is watched on, so three tools stand in for
+that. Use the one that owns the question.
+
+| Question | Tool |
+|----------|------|
+| What did ffmpeg actually produce? | `npm run probe:hls` |
+| Does the interface work under touch? | `npm run test:e2e` |
+| What happened on a real device? | `npm run logs` |
+
+**`npm run probe:hls`** — `tools/hls-probe.mjs` generates a test clip with ffmpeg,
+serves it over a throwaway HTTP origin, runs a fresh transcode-proxy against it and
+inspects the resulting HLS session: playlist type, ENDLIST, segment container and
+codec tags, disk growth, and whether the session hash separates audio tracks. Fully
+self-contained — it costs the IPTV subscription nothing and answers the same way
+every run. Non-zero exit on a failed check, so it works as a regression gate.
+Pass `--url <stream>` to point it at a real provider stream instead.
+
+**`npm run test:e2e`** — Playwright against **WebKit**, which is the engine every
+iOS browser uses, Chrome for iPhone included. Projects: `iphone-webkit`,
+`ipad-webkit`, `desktop-webkit`. `e2e/fixtures.ts` seeds a profile and a small
+library into IndexedDB so card-level controls exist to test.
+
+The audits in `e2e/touch-audit.spec.ts` are marked `test.fail()`: they record
+defects that exist today, so the suite stays green while they fail and turns red
+the moment one is fixed — which is the prompt to drop the annotation and let the
+test guard the fix from then on.
+
+*The honest limit:* WebKit-on-desktop is not iOS WebKit. Layout, pointer events and
+CSS agree closely; media playback does not (no ManagedMediaSource, different
+autoplay policy, different HLS implementation). Playback questions belong to the
+client log.
+
+**`npm run logs`** — reads the diagnostics the player posts from real devices via
+`GET /clientlog` (token-protected; set `CLIENT_LOG_TOKEN` on both server and
+client). Groups events by playback attempt and reports time-to-first-frame, probe
+and hls-start timings, seek counts, and any `play()` rejections. `--since 24h`,
+`--summary`, `--raw` for piping into jq.
+
+Instrumentation lives in `src/lib/diagnostics.ts`. Events are batched and flushed
+on `pagehide` via `sendBeacon`. Two fields carry most of the weight:
+- `first-frame.seekable` — a window that does not start at 0 means WebKit took the
+  playlist as live rather than as a movie.
+- `play-rejected.name` — `NotAllowedError` means the autoplay policy refused,
+  which is a spent user gesture, not a broken stream.
+
 Required `.env.local` (copy from `.env.example`):
 ```
 VITE_TRANSCODE_PROXY_URL=http://localhost:8787

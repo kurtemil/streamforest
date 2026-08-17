@@ -48,7 +48,7 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-3 py-3 flex flex-col gap-0.5">
+      <nav aria-label="Sections" className="flex-1 px-3 py-3 flex flex-col gap-0.5">
         {NAV_MAIN.filter((item) => (ROLE_RANK[role] ?? 0) >= (ROLE_RANK[item.minRole] ?? 0)).map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}

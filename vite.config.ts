@@ -115,8 +115,12 @@ export default defineConfig({
     },
   },
   test: {
+    // Default to node; component tests opt into jsdom with a
+    // `// @vitest-environment jsdom` docblock, which keeps the pure-logic suite fast.
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
+    // Playwright specs live in e2e/ and are driven by playwright.config.ts.
+    exclude: ['**/node_modules/**', 'e2e/**'],
   },
   build: {
     chunkSizeWarningLimit: 600,

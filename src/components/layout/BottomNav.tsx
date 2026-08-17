@@ -18,7 +18,10 @@ export function BottomNav() {
   void role
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden bg-[#0d0d0d]/95 backdrop-blur-md border-t border-white/8 pb-safe">
+    <nav
+      aria-label="Primary"
+      className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden bg-[#0d0d0d]/95 backdrop-blur-md border-t border-white/8 pb-safe"
+    >
       {NAV_ITEMS.map(({ to, icon: Icon, label, end }) => (
         <NavLink
           key={to}

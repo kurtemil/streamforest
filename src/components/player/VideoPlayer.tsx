@@ -14,6 +14,10 @@ import {
   startHlsSession, getLastHlsError,
 } from '@/lib/transcode'
 import type { ProxyMode } from '@/lib/transcode'
+import {
+  trace, traceError, safePlay, mediaSnapshot,
+  tracePlaybackStart, tracePlaybackEnd,
+} from '@/lib/diagnostics'
 import { openInVlc } from '@/lib/vlc'
 import { normalizeShowKey } from '@/lib/utils'
 import { parseVttBlock } from '@/lib/vtt'
@@ -147,6 +151,10 @@ export function VideoPlayer() {
   const [subtitleDelay, setSubtitleDelay] = useState(0)
   const lastTapRef = useRef<{ time: number; side: 'left' | 'right' } | null>(null)
   const [seekFeedback, setSeekFeedback] = useState<{ side: 'left' | 'right'; key: number } | null>(null)
+  // Diagnostics: first frame is only interesting once per playback attempt, and a
+  // stall is only interesting as a duration — so both need a little state.
+  const sawFirstFrameRef = useRef(false)
+  const stallStartedRef = useRef<number | null>(null)
 
   const destroyHls = useCallback(() => {
     if (hlsRef.current) {
@@ -314,6 +322,18 @@ export function VideoPlayer() {
     iosFallbackUrlRef.current = null
     iosHlsRetriedRef.current = false
     mseDiagLogRef.current = []
+    sawFirstFrameRef.current = false
+    stallStartedRef.current = null
+    if (current) {
+      tracePlaybackStart({
+        type: current.type,
+        id: current.id,
+        isIos: IS_IOS,
+        // Everything traced from here until `close` carries this attempt's id, so
+        // a failed playback can be read end to end instead of guessed at.
+        show: current.type === 'series' ? current.showName ?? current.name : undefined,
+      })
+    }
   }, [current?.id])
 
   const resetControlsTimer = useCallback(() => {
@@ -386,6 +406,13 @@ export function VideoPlayer() {
 
   const handleClose = useCallback(() => {
     const video = videoRef.current
+    if (video) {
+      tracePlaybackEnd({
+        reason: 'user-close',
+        realPosition: Number((playbackOffsetRef.current + video.currentTime).toFixed(1)),
+        ...mediaSnapshot(video),
+      })
+    }
     if (current && current.type !== 'live' && video && video.currentTime > 0) {
       const profileId = useProfileStore.getState().activeProfileId
       if (profileId) {
@@ -520,7 +547,9 @@ export function VideoPlayer() {
     const video = videoRef.current
     if (!video || !current) return
     const clamped = Math.max(0, realTime)
+    const from = playbackOffsetRef.current + video.currentTime
     if (!isTranscodedRef.current) {
+      trace('seek', { method: 'native-direct', from: Number(from.toFixed(1)), to: Number(clamped.toFixed(1)) })
       video.currentTime = clamped
       return
     }
@@ -538,9 +567,18 @@ export function VideoPlayer() {
       }
     }
     if (localTime >= 0 && inBuffered) {
+      trace('seek', { method: 'native-buffered', from: Number(from.toFixed(1)), to: Number(clamped.toFixed(1)) })
       video.currentTime = localTime
       return
     }
+    // Falling through here means a full server round trip — a new ffmpeg process
+    // and a wait. Counting how often this happens is what sizes the A4 payoff.
+    trace('seek', {
+      method: 'session-restart',
+      from: Number(from.toFixed(1)),
+      to: Number(clamped.toFixed(1)),
+      ...mediaSnapshot(video),
+    })
     playbackOffsetRef.current = clamped
     reconnectCountRef.current = 0
     setCurrentTime(clamped)
@@ -572,11 +610,11 @@ export function VideoPlayer() {
           return
         }
         videoRef.current.src = hlsUrl
-        videoRef.current.play().catch(() => {})
+        safePlay(videoRef.current, 'seek-ios')
       })
     } else {
       video.src = seekUrl
-      video.play().catch(() => {})
+      safePlay(video, 'seek-desktop')
     }
     console.log('[seekTo] src rebuilt at', clamped, '— activeSubtitle:', activeSubtitleRef.current, 'tracks:', subtitleTracksRef.current.length)
     if (proxyModeRef.current === 'copy') {
@@ -654,14 +692,14 @@ export function VideoPlayer() {
             if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
             if (!hlsUrl) { setError(`iOS: HLS generation failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
             videoRef.current.src = hlsUrl
-            videoRef.current.play().catch(() => {})
+            safePlay(videoRef.current, 'live-ios')
           })
           return
         }
         const streamSrc = liveStreamUrl(current.url, 'copy')
         if (streamSrc) {
           video.src = streamSrc
-          video.play().catch(() => {})
+          safePlay(video, 'live-desktop')
         }
         return
       }
@@ -773,7 +811,7 @@ export function VideoPlayer() {
             }
             if (!hlsUrl) { setError(`iOS: HLS generation failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
             videoRef.current.src = hlsUrl
-            videoRef.current.play().catch(() => {})
+            safePlay(videoRef.current, 'vod-ios')
           } else {
             video.src = vodUrl
           }
@@ -805,7 +843,7 @@ export function VideoPlayer() {
             if (startTime > 0) {
               video.addEventListener('loadedmetadata', () => { video.currentTime = startTime }, { once: true })
             }
-            video.play().catch(() => {})
+            safePlay(video, 'hlsjs-fallback')
           })
           hls.on(HlsLib.Events.MANIFEST_PARSED, () => {
             if (hls.audioTracks.length > 0) {
@@ -841,7 +879,7 @@ export function VideoPlayer() {
         }
       }
 
-      if (!msePlaying) video.play().catch(() => {})
+      if (!msePlaying) safePlay(video, 'load-tail')
     }
 
     load()
@@ -956,20 +994,46 @@ export function VideoPlayer() {
     // Capture reference once here only for addEventListener/removeEventListener symmetry.
     const nativeAudioTracks = (video as VideoWithAudioTracks).audioTracks
 
-    const onWaiting  = () => setIsBuffering(true)
+    const onWaiting  = () => {
+      setIsBuffering(true)
+      if (stallStartedRef.current === null) {
+        stallStartedRef.current = Date.now()
+        trace('stall-start', mediaSnapshot(video))
+      }
+    }
     const onCanPlay  = () => setIsBuffering(false)
-    const onPlaying  = () => { setIsBuffering(false); reconnectCountRef.current = 0 }
+    const onPlaying  = () => {
+      setIsBuffering(false)
+      reconnectCountRef.current = 0
+      if (stallStartedRef.current !== null) {
+        trace('stall-end', { ms: Date.now() - stallStartedRef.current })
+        stallStartedRef.current = null
+      }
+      // The one measurement that settles A2. If WebKit is treating a growing VOD
+      // playlist as live, it starts at the live edge rather than zero and reports
+      // a seekable window that does not begin at zero — both visible right here.
+      if (!sawFirstFrameRef.current) {
+        sawFirstFrameRef.current = true
+        trace('first-frame', {
+          strategy: iosStrategyRef.current ?? 'direct',
+          offset: playbackOffsetRef.current,
+          ...mediaSnapshot(video),
+        })
+      }
+    }
     const onVideoError = () => {
       const err = video.error
       const code = err?.code ?? 0
       const msg = err?.message ?? ''
       const strategy = iosStrategyRef.current
-      logDiagnostic('video-error', {
+      traceError('video-error', {
         code, msg, strategy, isIos: IS_IOS,
-        src: video.src.slice(0, 60),
-        readyState: video.readyState,
-        networkState: video.networkState,
-        paused: video.paused,
+        // Time since the stream last made progress: an A1 session reaped after a
+        // long pause looks like a code-4 error with a large gap behind it, while
+        // a genuinely broken stream fails with no gap at all.
+        sinceLastProgress: stallStartedRef.current ? Date.now() - stallStartedRef.current : null,
+        reconnects: reconnectCountRef.current,
+        ...mediaSnapshot(video),
       })
       // HLS-gen code 4: provider stream failed (truncated file, stale session, etc.).
       // Retry from start=0 — server discards any dead session and spawns fresh ffmpeg.
@@ -989,7 +1053,7 @@ export function VideoPlayer() {
           setError(null)
           setIsBuffering(true)
           videoRef.current.src = hlsUrl
-          videoRef.current.play().catch(() => {})
+          safePlay(videoRef.current, 'ios-error-retry')
         })
         return
       }
@@ -1063,7 +1127,7 @@ export function VideoPlayer() {
               if (!liveUrl) { setError('Live stream reconnect failed'); return }
               videoRef.current.src = liveUrl
             }
-            videoRef.current.play().catch(() => {})
+            safePlay(videoRef.current, 'reconnect')
           }, backoff)
           return
         }
@@ -1117,7 +1181,7 @@ export function VideoPlayer() {
         case 'Space':
         case 'KeyK':
           e.preventDefault()
-          video.paused ? video.play() : video.pause()
+          video.paused ? safePlay(video, 'keyboard') : video.pause()
           break
         case 'ArrowLeft': {
           e.preventDefault()
@@ -1172,6 +1236,9 @@ export function VideoPlayer() {
   // Cleanup on unmount / close
   useEffect(() => {
     if (!current) {
+      // Covers the paths that bypass handleClose — browser back, profile switch,
+      // an unmount. tracePlaybackEnd is a no-op if handleClose already ran.
+      tracePlaybackEnd({ reason: 'teardown' })
       destroyHls()
       detachSubtitleTrack()
       if (subtitleNoticeTimerRef.current) {
@@ -1224,7 +1291,7 @@ export function VideoPlayer() {
           if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
           if (!hlsUrl) { setError(`iOS: Audio switch failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
           videoRef.current.src = hlsUrl
-          videoRef.current.play().catch(() => {})
+          safePlay(videoRef.current, 'audio-switch-ios')
           if (capturedSubInfo) attachSubtitleTrack(capturedSubInfo.id, capturedSubInfo.name, capturedSubInfo.lang)
         })
         return
@@ -1237,7 +1304,7 @@ export function VideoPlayer() {
         vstart: videoStartTimeRef.current || undefined,
       })
       video.src = audioUrl
-      video.play().catch(() => {})
+      safePlay(video, 'audio-switch-desktop')
       if (previousSubInfo) {
         attachSubtitleTrack(previousSubInfo.id, previousSubInfo.name, previousSubInfo.lang)
       }
@@ -1310,7 +1377,7 @@ export function VideoPlayer() {
       if (v.error && (isTranscodedRef.current || current?.type === 'live') && current) {
         seekTo(playbackOffsetRef.current + v.currentTime)
       } else {
-        v.play()
+        safePlay(v, 'tap')
       }
     } else if (!isBuffering) {
       v.pause()

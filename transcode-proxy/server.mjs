@@ -29,7 +29,10 @@ const EPG_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const TMDB_CACHE_DIR = process.env.TMDB_CACHE_DIR || path.join(os.tmpdir(), 'streamforest-tmdb')
 const TMDB_CACHE_TTL_MS = 90 * 24 * 60 * 60 * 1000  // 90 days
 const CLIENT_LOG_FILE = process.env.CLIENT_LOG_FILE || path.join(os.tmpdir(), 'streamforest-client.log')
-const CLIENT_LOG_MAX_BYTES = 1 * 1024 * 1024  // 1 MB, then rotate
+const CLIENT_LOG_MAX_BYTES = Number(process.env.CLIENT_LOG_MAX_BYTES) || 8 * 1024 * 1024  // 8 MB, then rotate
+// Shared secret for GET /clientlog. Unset = reads are refused outright; the log
+// carries device fingerprints and viewing activity, so it must never be public.
+const CLIENT_LOG_TOKEN = process.env.CLIENT_LOG_TOKEN || ''
 
 const HLS_DIR = path.join(os.tmpdir(), 'streamforest-hls')
 
@@ -1013,6 +1016,103 @@ function handleTmdbPost(req, res) {
   })
 }
 
+// ── Client diagnostics log ────────────────────────────────────────────────────
+// The client POSTs one JSON object per playback event. We can't attach a debugger
+// to a phone in the living room, so this file is the only window into what the
+// player actually did on a real device — hence the matching GET below.
+
+const CLIENT_LOG_PREV = CLIENT_LOG_FILE + '.1'
+
+// Rotate to a single .1 generation rather than truncating. Truncating threw away
+// the history right when a long debugging session needed it most.
+function rotateClientLogIfNeeded() {
+  try {
+    if (fs.statSync(CLIENT_LOG_FILE).size <= CLIENT_LOG_MAX_BYTES) return
+    fs.rmSync(CLIENT_LOG_PREV, { force: true })
+    fs.renameSync(CLIENT_LOG_FILE, CLIENT_LOG_PREV)
+    process.stderr.write('[clientlog] rotated\n')
+  } catch { /* ENOENT — nothing written yet */ }
+}
+
+function handleClientLogPost(req, res) {
+  let body = ''
+  let tooBig = false
+  req.on('data', (chunk) => {
+    body += chunk.toString()
+    // A single event is a few hundred bytes; anything past 64 KB is not ours.
+    if (body.length > 65536) { tooBig = true; req.destroy() }
+  })
+  req.on('end', () => {
+    if (tooBig) { res.writeHead(413).end('too large'); return }
+    try {
+      const parsed = JSON.parse(body)
+      // The client batches events, but a single object is still accepted so an
+      // older build (or a curl by hand) keeps working.
+      const events = Array.isArray(parsed) ? parsed : [parsed]
+      const srv = Date.now()
+      const ip = req.socket.remoteAddress
+      const lines = events
+        .filter((e) => e && typeof e === 'object')
+        .map((e) => JSON.stringify({ ...e, _ip: ip, _srv: srv }))
+      if (lines.length > 0) {
+        rotateClientLogIfNeeded()
+        fs.appendFile(CLIENT_LOG_FILE, lines.join('\n') + '\n', () => {})
+      }
+      // Errors go to the container log too so `docker logs` shows them without a fetch.
+      for (const e of events) {
+        if (e?.level === 'error' || /error|fail|reject/i.test(String(e?.ev ?? e?.message ?? ''))) {
+          console.log(`[clientlog] ${JSON.stringify(e)}`)
+        }
+      }
+    } catch { /* malformed body — drop it, never 500 on a diagnostic */ }
+    res.writeHead(200).end('ok')
+  })
+}
+
+// GET /clientlog?since=<epoch ms>&limit=<n>&sid=<session>  → NDJSON, newest last.
+// Reads the rotated generation first so `since` can reach back past a rotation.
+function handleClientLogGet(reqUrl, req, res) {
+  if (!CLIENT_LOG_TOKEN) {
+    res.writeHead(403, { 'Content-Type': 'text/plain' })
+      .end('Log reads disabled — set CLIENT_LOG_TOKEN on the server')
+    return
+  }
+  const auth = req.headers.authorization ?? ''
+  const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+  const supplied = bearer || reqUrl.searchParams.get('token') || ''
+  if (supplied !== CLIENT_LOG_TOKEN) {
+    res.writeHead(401, { 'Content-Type': 'text/plain' }).end('Unauthorized')
+    return
+  }
+
+  const since = Number(reqUrl.searchParams.get('since') || 0)
+  const limit = Math.min(Number(reqUrl.searchParams.get('limit')) || 2000, 20000)
+  const sid = reqUrl.searchParams.get('sid')
+  const ev = reqUrl.searchParams.get('ev')
+
+  let lines = []
+  for (const file of [CLIENT_LOG_PREV, CLIENT_LOG_FILE]) {
+    try { lines.push(...fs.readFileSync(file, 'utf8').split('\n')) } catch { /* ENOENT */ }
+  }
+
+  const out = []
+  for (const line of lines) {
+    if (!line.trim()) continue
+    let row
+    try { row = JSON.parse(line) } catch { continue }
+    if (since && Number(row.ts ?? row._srv ?? 0) < since) continue
+    if (sid && row.sid !== sid) continue
+    if (ev && row.ev !== ev) continue
+    out.push(line)
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'application/x-ndjson; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Total-Matched': String(out.length),
+  }).end(out.slice(-limit).join('\n') + (out.length ? '\n' : ''))
+}
+
 const server = http.createServer((req, res) => {
   const reqUrl = new URL(req.url ?? '/', `http://${req.headers.host}`)
   process.stderr.write(`[req] ${req.method} ${reqUrl.pathname}\n`)
@@ -1087,22 +1187,10 @@ const server = http.createServer((req, res) => {
     return
   }
 
-  if (reqUrl.pathname === '/clientlog' && req.method === 'POST') {
-    let body = ''
-    req.on('data', (chunk) => { body += chunk.toString() })
-    req.on('end', () => {
-      try {
-        const entry = JSON.stringify({ ...JSON.parse(body), _ip: req.socket.remoteAddress, _srv: Date.now() })
-        // Rotate log if it exceeds max size
-        try {
-          const stat = fs.statSync(CLIENT_LOG_FILE)
-          if (stat.size > CLIENT_LOG_MAX_BYTES) fs.writeFileSync(CLIENT_LOG_FILE, '')
-        } catch {}
-        fs.appendFile(CLIENT_LOG_FILE, entry + '\n', () => {})
-        console.log(`[clientlog] ${entry}`)
-      } catch {}
-      res.writeHead(200).end('ok')
-    })
+  if (reqUrl.pathname === '/clientlog') {
+    if (req.method === 'POST') { handleClientLogPost(req, res); return }
+    if (req.method === 'GET')  { handleClientLogGet(reqUrl, req, res); return }
+    res.writeHead(405).end('Method not allowed')
     return
   }
 

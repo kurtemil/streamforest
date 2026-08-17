@@ -60,6 +60,23 @@ function attr(line: string, key: string): string {
   return m ? m[1] : ''
 }
 
+// The display title is everything after the attribute list — that is, after the
+// first comma that is not inside a quoted attribute value.
+//
+// Taking the *last* comma instead looks equivalent until a title contains one:
+// "Love, Victor" and "CBS Kiro (Seattle,WA) HD US" both got truncated to their
+// final fragment, which split those shows away from their own episodes. 2 073 of
+// the 205 803 entries in the production playlist are affected.
+function displayName(metaLine: string): string {
+  let inQuotes = false
+  for (let i = 0; i < metaLine.length; i++) {
+    const ch = metaLine[i]
+    if (ch === '"') inQuotes = !inQuotes
+    else if (ch === ',' && !inQuotes) return metaLine.slice(i + 1).trim()
+  }
+  return ''
+}
+
 function detectType(groupTitle: string, url: string): ContentType {
   if (groupTitle.startsWith('VOD:')) return 'movie'
   if (groupTitle.startsWith('Series:')) return 'series'
@@ -128,8 +145,7 @@ export function parseM3ULines(lines: string[]): Channel[] {
       const metaLine = pendingMeta
       pendingMeta = null
 
-      const commaIdx = metaLine.lastIndexOf(',')
-      const name = commaIdx >= 0 ? metaLine.slice(commaIdx + 1).trim() : ''
+      const name = displayName(metaLine)
       const logo = attr(metaLine, 'tvg-logo')
       const groupTitle = attr(metaLine, 'group-title')
       const tvgId = attr(metaLine, 'tvg-id')
