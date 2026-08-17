@@ -1,5 +1,12 @@
+# X-Robots-Tag säger samma sak som <meta name="robots"> i index.html, fast som HTTP-huvud: det
+# gäller även svar som inte är HTML, och det syns för en crawler som aldrig läser sidans innehåll.
+#
+# Medvetet ingen robots.txt med `Disallow: /`. Den hade hindrat crawlern från att hämta sidan alls
+# — och därmed från att se noindex-beskedet. Adressen kan då fortfarande hamna i indexet via en
+# länk någon annanstans ifrån. Att släppa in crawlern och säga nej är det som faktiskt håller.
 /*
   Cache-Control: public, max-age=0, must-revalidate
+  X-Robots-Tag: noindex, nofollow
 
 /*.html
   Cache-Control: no-store
