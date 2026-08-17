@@ -793,85 +793,6 @@ function scheduleEpgRefresh() {
 
 scheduleEpgRefresh()
 
-// ── HLS live proxy (for iOS native HLS support) ───────────────────────────────
-// The IPTV provider's HLS endpoint (http://host/live/USER/PASS/ID.m3u8) can't be
-// loaded directly by a browser on an HTTPS page (mixed-content blocked). We
-// proxy the M3U8, rewriting segment URLs to go through /live-segment, so iOS
-// native HLS can play the stream without codec transcoding.
-
-async function handleLiveHls(reqUrl, res) {
-  const target = parseTargetUrl(reqUrl, res)
-  if (!target) return
-
-  try {
-    const upstream = await fetch(target, { headers: { 'User-Agent': 'StreamForest/1.0' } })
-    if (!upstream.ok) {
-      res.writeHead(upstream.status, { 'Content-Type': 'text/plain' }).end(`Upstream M3U8 ${upstream.status}`)
-      return
-    }
-
-    const m3u8 = await upstream.text()
-    const lastSlash = target.lastIndexOf('/')
-    const baseUrl = target.slice(0, lastSlash + 1)
-    const targetOrigin = (() => { try { const u = new URL(target); return `${u.protocol}//${u.host}` } catch { return '' } })()
-
-    const rewritten = m3u8.split('\n').map(line => {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith('#')) return line
-      // Resolve to absolute URL
-      let abs
-      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-        abs = trimmed
-      } else if (trimmed.startsWith('/')) {
-        abs = targetOrigin + trimmed
-      } else {
-        abs = baseUrl + trimmed
-      }
-      // Sub-playlist or segment
-      if (abs.includes('.m3u8')) {
-        return `/live-hls?url=${encodeURIComponent(abs)}`
-      }
-      return `/live-segment?url=${encodeURIComponent(abs)}`
-    }).join('\n')
-
-    res.writeHead(200, {
-      'Content-Type': 'application/vnd.apple.mpegurl',
-      'Cache-Control': 'no-cache',
-    }).end(rewritten)
-  } catch (err) {
-    if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain' }).end(`HLS proxy error: ${err.message}`)
-  }
-}
-
-async function handleLiveSegment(reqUrl, res) {
-  const target = parseTargetUrl(reqUrl, res)
-  if (!target) return
-
-  const segTimeout = setTimeout(() => {
-    if (!res.headersSent) res.writeHead(504).end('Segment timeout')
-  }, 15000)
-
-  try {
-    const upstream = await fetch(target, { headers: { 'User-Agent': 'StreamForest/1.0' } })
-    clearTimeout(segTimeout)
-    if (!upstream.ok) {
-      if (!res.headersSent) res.writeHead(upstream.status).end()
-      return
-    }
-    res.writeHead(200, { 'Content-Type': 'video/MP2T', 'Cache-Control': 'public, max-age=60' })
-    const reader = upstream.body.getReader()
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      res.write(Buffer.from(value))
-    }
-    res.end()
-  } catch (err) {
-    clearTimeout(segTimeout)
-    if (!res.headersSent) res.writeHead(502).end()
-  }
-}
-
 // ── TMDB metadata disk cache ───────────────────────────────────────────────────
 
 function tmdbCacheFile(id) {
@@ -1239,16 +1160,6 @@ const server = http.createServer((req, res) => {
 
   if (reqUrl.pathname === '/epg') {
     handleEpg(reqUrl, res)
-    return
-  }
-
-  if (reqUrl.pathname === '/live-hls') {
-    handleLiveHls(reqUrl, res)
-    return
-  }
-
-  if (reqUrl.pathname === '/live-segment') {
-    handleLiveSegment(reqUrl, res)
     return
   }
 

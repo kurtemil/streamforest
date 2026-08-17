@@ -1,7 +1,5 @@
 import { trace, traceError } from './diagnostics'
 
-const MKV_EXT = /\.mkv(\?.*)?$/i
-
 // Audio codecs Chrome can't play in MP4/MKV natively — must be re-encoded.
 const UNSUPPORTED_AUDIO_CODECS = new Set([
   'ac3', 'eac3', 'dts', 'truehd', 'mlp', 'dtshd',
@@ -47,10 +45,6 @@ export function isTranscodeProxyConfigured(): boolean {
   return proxyBase() !== null
 }
 
-export function mightNeedTranscode(url: string): boolean {
-  return MKV_EXT.test(url)
-}
-
 export type ProxyMode = 'copy' | 'transcode'
 
 export interface TranscodeOptions {
@@ -92,29 +86,6 @@ export function liveStreamUrl(url: string, mode: ProxyMode = 'copy'): string | n
   const params = new URLSearchParams({ url, live: '1' })
   if (mode === 'copy') params.set('mode', 'copy')
   return `${base}/transcode?${params.toString()}`
-}
-
-// Derives the HLS (.m3u8) URL from an Xtream Codes stream URL and wraps it
-// through the server-side HLS proxy. iOS WebKit can't play fMP4 streams set
-// as video.src, but plays native HLS perfectly.
-export function liveHlsProxyUrl(streamUrl: string): string | null {
-  const base = proxyBase()
-  if (!base) return null
-  try {
-    const u = new URL(streamUrl)
-    // Xtream Codes: /live/USER/PASS/id.ts → /live/USER/PASS/id.m3u8
-    // Non-.ts URLs: strip any extension (or none) and append .m3u8
-    let p = u.pathname
-    if (p.endsWith('.ts')) {
-      p = p.slice(0, -3) + '.m3u8'
-    } else if (!p.endsWith('.m3u8')) {
-      p = p.replace(/\.[^./]*$/, '') + '.m3u8'
-    }
-    const hlsUrl = `${u.origin}${p}${u.search}`
-    return `${base}/live-hls?${new URLSearchParams({ url: hlsUrl }).toString()}`
-  } catch {
-    return null
-  }
 }
 
 // Pick proxy mode from probe info: copy when the upstream codecs are
@@ -190,7 +161,12 @@ export function getLastHlsError(): string { return _lastHlsError }
 // Retries once on network-level errors (Cloudflare Tunnel blips, brief Wi-Fi drops).
 export async function startHlsSession(
   url: string,
-  opts: { live?: boolean; mode?: ProxyMode; audioIndex?: number | null; startSeconds?: number } = {},
+  opts: {
+    live?: boolean; mode?: ProxyMode; audioIndex?: number | null
+    startSeconds?: number
+    /** Source video codec from the probe — lets the server tag HEVC as hvc1. */
+    videoCodec?: string | null
+  } = {},
 ): Promise<string | null> {
   const base = proxyBase()
   if (!base) return null
@@ -201,6 +177,7 @@ export async function startHlsSession(
   if (opts.mode === 'transcode') params.set('mode', 'transcode')
   if (opts.audioIndex != null) params.set('audio', String(opts.audioIndex))
   if (opts.startSeconds && opts.startSeconds > 0) params.set('start', String(Math.floor(opts.startSeconds)))
+  if (opts.videoCodec) params.set('vcodec', opts.videoCodec)
 
   // Wall-clock here is the number that matters: it is the gap between the user's
   // tap and anything appearing, and the reason play() lands outside the gesture.
@@ -297,11 +274,6 @@ export async function probeMedia(url: string, signal?: AbortSignal): Promise<Med
     traceError('probe-failed', { ms: Date.now() - startedAt, err: String(err) })
     return null
   }
-}
-
-export function needsTranscode(info: MediaInfo | null): boolean {
-  if (!info?.audioCodec) return false
-  return UNSUPPORTED_AUDIO_CODECS.has(info.audioCodec.toLowerCase())
 }
 
 export function audioStreamLabel(s: AudioStream): string {

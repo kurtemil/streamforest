@@ -27,43 +27,13 @@ import { PlayerControls } from './PlayerControls'
 const SAVE_INTERVAL_MS = 5000
 const VIDEO_EXT = /\.(mkv|mp4|avi|mov|wmv|flv|webm)$/i
 
-// iOS WebKit can't stream fMP4 via video.src without Content-Length / range
-// request support. We use the MediaSource API instead: fetch() streams the
-// proxy response and SourceBuffer.appendBuffer() feeds it chunk by chunk.
+// Playback on iOS goes through server-generated HLS: WebKit plays native HLS
+// perfectly, while an fMP4 stream set as video.src needs range-request support
+// the proxy cannot offer over a live ffmpeg pipe.
 const IS_IOS = typeof navigator !== 'undefined' && (
   /iPhone|iPad|iPod/.test(navigator.userAgent) ||
   (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 )
-// iOS 17 introduced MSE as ManagedMediaSource; iOS 26 dropped the MediaSource alias.
-// Prefer ManagedMediaSource (requires disableRemotePlayback on the video element).
-const MediaSourceCtor: (typeof MediaSource) | undefined = (() => {
-  if (typeof window === 'undefined') return undefined
-  if ('ManagedMediaSource' in window) return (window as unknown as { ManagedMediaSource: typeof MediaSource }).ManagedMediaSource
-  if (typeof MediaSource !== 'undefined') return MediaSource
-  return undefined
-})()
-// Bare 'video/mp4' lets the browser infer codec from the stream — handles H264/HEVC/AV1.
-const MSE_MIME_CANDIDATES = [
-  'video/mp4',
-  'video/mp4; codecs="avc1.640033,mp4a.40.2"',
-  'video/mp4; codecs="avc1.42E01E,mp4a.40.2"',
-  'video/mp4; codecs="hvc1.1.6.L120.90,mp4a.40.2"',
-  'video/mp4; codecs="hev1.1.6.L120.90,mp4a.40.2"',
-]
-function pickMseMime(): string | null {
-  if (!MediaSourceCtor) return null
-  return MSE_MIME_CANDIDATES.find(m => MediaSourceCtor.isTypeSupported(m)) ?? null
-}
-function getMseDiag(): string {
-  const ios = IS_IOS ? 'ios' : 'desktop'
-  const api = !MediaSourceCtor ? 'undef' : ('ManagedMediaSource' in window ? 'MMS' : 'MS')
-  if (!MediaSourceCtor) return `[${ios} MSE:${api}]`
-  const pairs = MSE_MIME_CANDIDATES.map((m) => {
-    const label = m === 'video/mp4' ? 'bare' : m.includes('hvc1') ? 'hvc1' : m.includes('hev1') ? 'hev1' : 'avc1'
-    return `${label}:${MediaSourceCtor.isTypeSupported(m) ? 'Y' : 'N'}`
-  })
-  return `[${ios} ${api} ${pairs.join(' ')}]`
-}
 
 interface Track { id: number; name: string; lang: string }
 
@@ -93,7 +63,6 @@ export function VideoPlayer() {
   const preferredAudioLang = rawPlaybackPrefs?.preferredAudioLang ?? ''
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
-  const mseAbortRef = useRef<AbortController | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Baseline seconds baked into the source URL (for transcode-proxy resume).
@@ -152,10 +121,23 @@ export function VideoPlayer() {
   const [subtitleDelay, setSubtitleDelay] = useState(0)
   const lastTapRef = useRef<{ time: number; side: 'left' | 'right' } | null>(null)
   const [seekFeedback, setSeekFeedback] = useState<{ side: 'left' | 'right'; key: number } | null>(null)
+  // Set when the autoplay policy refused a play() that arrived after an await.
+  // The stream is fine; it just needs a gesture, so we offer one.
+  const [needsGesture, setNeedsGesture] = useState(false)
+  // Playlist URL of the current server-side HLS session, kept so the player can
+  // keep the session warm while paused (see the heartbeat effect).
+  const hlsPlaylistUrlRef = useRef<string | null>(null)
   // Diagnostics: first frame is only interesting once per playback attempt, and a
   // stall is only interesting as a duration — so both need a little state.
   const sawFirstFrameRef = useRef(false)
   const stallStartedRef = useRef<number | null>(null)
+
+  const attemptPlay = useCallback((video: HTMLVideoElement, phase: string) => {
+    safePlay(video, phase).then((outcome) => {
+      setNeedsGesture(outcome === 'blocked')
+      if (outcome === 'blocked') setIsBuffering(false)
+    })
+  }, [])
 
   const destroyHls = useCallback(() => {
     if (hlsRef.current) {
@@ -167,124 +149,8 @@ export function VideoPlayer() {
   // Tracks the iOS playback strategy for the current item so the error handler
   // can fall back from HLS → MSE when the HLS proxy fails (e.g. provider 404).
   const iosStrategyRef = useRef<'hls' | 'hls-gen' | 'mse' | null>(null)
-  const iosFallbackUrlRef = useRef<string | null>(null)
   const iosHlsRetriedRef = useRef(false)
   const reconnectCountRef = useRef(0)
-  // Short event codes appended as MSE pipeline runs — shown in the error message
-  // so we can diagnose without needing server logs or USB cable.
-  const mseDiagLogRef = useRef<string[]>([])
-
-  // Pipe a proxy fMP4 stream via MSE instead of setting video.src directly.
-  // iOS WebKit won't stream fMP4 from video.src without Content-Length/range support,
-  // but fetch() + SourceBuffer works on iOS 17+ where MSE is fully supported.
-  // Returns false if MSE is unavailable so the caller can fall back to video.src.
-  const startMsePlayback = useCallback((video: HTMLVideoElement, url: string): boolean => {
-    mseAbortRef.current?.abort()
-    mseAbortRef.current = null
-    const mime = pickMseMime()
-    const dl = mseDiagLogRef.current
-    dl.length = 0
-    logDiagnostic('mse-start', { mseAvail: !!MediaSourceCtor, mime, diag: getMseDiag(), url: url.slice(-40) })
-    if (!mime || !MediaSourceCtor) { dl.push('NO_MSE'); return false }
-    const isMMS = typeof window !== 'undefined' && 'ManagedMediaSource' in window
-    let ms: MediaSource
-    try {
-      ms = new MediaSourceCtor()
-      dl.push('CR')
-    } catch (e) {
-      logDiagnostic('mse-ctor-failed', { err: String(e) })
-      dl.push('CR_ERR')
-      return false
-    }
-    logDiagnostic('mse-created', { isMMS, msState: ms.readyState })
-    const abort = new AbortController()
-    mseAbortRef.current = abort
-
-    ms.addEventListener('sourceopen', async () => {
-      dl.push('SO')
-      logDiagnostic('mse-sourceopen', { msState: ms.readyState })
-      let sb: SourceBuffer
-      try {
-        sb = ms.addSourceBuffer(mime)
-        dl.push('SB')
-        logDiagnostic('mse-sb-ok', { mime })
-      } catch (e) {
-        dl.push('SB_ERR')
-        logDiagnostic('mse-sb-failed', { mime, err: String(e) })
-        if (ms.readyState === 'open') ms.endOfStream('network')
-        return
-      }
-      const drain = () => sb.updating
-        ? new Promise<void>(r => sb.addEventListener('updateend', () => r(), { once: true }))
-        : Promise.resolve()
-      try {
-        dl.push('FS')
-        logDiagnostic('mse-fetch-start', { url: url.slice(-60) })
-        const res = await fetch(url, { signal: abort.signal })
-        dl.push(`F${res.status}`)
-        logDiagnostic('mse-fetch-response', { status: res.status, ok: res.ok, hasBody: !!res.body })
-        if (!res.ok || !res.body) {
-          if (ms.readyState === 'open') ms.endOfStream('network')
-          return
-        }
-        const reader = res.body.getReader()
-        let chunkCount = 0
-        let playTriggered = false
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) { if (ms.readyState === 'open') ms.endOfStream(); break }
-          if (ms.readyState !== 'open') { dl.push('MX'); logDiagnostic('mse-ms-closed-mid-stream', { chunkCount }); break }
-          await drain()
-          if (ms.readyState !== 'open') break
-          try {
-            sb.appendBuffer(value)
-            chunkCount++
-            if (chunkCount === 1) { dl.push('FC'); logDiagnostic('mse-first-chunk', { size: value.byteLength, msState: ms.readyState }) }
-            if (!isMMS && !playTriggered) {
-              playTriggered = true
-              dl.push('PL')
-              video.play()
-                .then(() => { dl.push('PO'); logDiagnostic('mse-play-ok', {}) })
-                .catch((e) => { dl.push('PR'); logDiagnostic('mse-play-rejected', { err: String(e) }) })
-            }
-          } catch (e) {
-            dl.push('AB_ERR')
-            logDiagnostic('mse-append-failed', { mime, err: String(e), chunkCount })
-            if (ms.readyState === 'open') ms.endOfStream('decode')
-            break
-          }
-        }
-      } catch (e) {
-        if ((e as Error).name !== 'AbortError') {
-          dl.push('SE')
-          logDiagnostic('mse-stream-error', { err: String(e) })
-          if (ms.readyState === 'open') ms.endOfStream('network')
-        }
-      }
-    }, { once: true })
-
-    ms.addEventListener('sourceended', () => { dl.push('END'); logDiagnostic('mse-sourceended', {}) })
-    ms.addEventListener('sourceclose', () => { dl.push('CLOSE'); logDiagnostic('mse-sourceclose', {}) })
-
-    // ManagedMediaSource: assign srcObject directly so iOS manages the streaming
-    // lifecycle without needing a blob URL. Then call play() immediately — per
-    // Apple's docs, play() triggers sourceopen on MMS (not the src assignment).
-    // Regular MediaSource: use createObjectURL; play() happens after first chunk.
-    if (isMMS) {
-      dl.push('SRC_OBJ')
-      ;(video as HTMLVideoElement & { srcObject: MediaSource | null }).srcObject = ms
-      dl.push('PL')
-      video.play()
-        .then(() => { dl.push('PO'); logDiagnostic('mse-play-ok', {}) })
-        .catch((e) => { dl.push('PR'); logDiagnostic('mse-play-rejected', { err: String(e) }) })
-    } else {
-      const objUrl = URL.createObjectURL(ms)
-      ms.addEventListener('sourceopen', () => URL.revokeObjectURL(objUrl), { once: true })
-      dl.push('SRC_URL')
-      video.src = objUrl
-    }
-    return true
-  }, [])
 
   const nextEpisode = useMemo(() => {
     if (!current || current.type !== 'series') return null
@@ -320,11 +186,11 @@ export function VideoPlayer() {
     autoAudioSelectedRef.current = false
     subtitleStreamIndicesRef.current = []
     iosStrategyRef.current = null
-    iosFallbackUrlRef.current = null
     iosHlsRetriedRef.current = false
-    mseDiagLogRef.current = []
     sawFirstFrameRef.current = false
     stallStartedRef.current = null
+    setNeedsGesture(false)
+    hlsPlaylistUrlRef.current = null
     if (current) {
       tracePlaybackStart({
         type: current.type,
@@ -559,16 +425,23 @@ export function VideoPlayer() {
     // the source URL at the new start so ffmpeg restarts from there.
     const offset = playbackOffsetRef.current
     const localTime = clamped - offset
-    const buf = video.buffered
-    let inBuffered = false
-    for (let i = 0; i < buf.length; i++) {
-      if (localTime >= buf.start(i) && localTime <= buf.end(i)) {
-        inBuffered = true
-        break
+    const covers = (ranges: TimeRanges) => {
+      for (let i = 0; i < ranges.length; i++) {
+        if (localTime >= ranges.start(i) && localTime <= ranges.end(i)) return true
       }
+      return false
     }
-    if (localTime >= 0 && inBuffered) {
-      trace('seek', { method: 'native-buffered', from: Number(from.toFixed(1)), to: Number(clamped.toFixed(1)) })
+    // `seekable` is the payoff from declaring the playlist EVENT: WebKit reports
+    // the whole written playlist as seekable, not just what is buffered, so most
+    // seeks are now a property assignment instead of a new ffmpeg process and a
+    // wait of up to twenty seconds. `buffered` still covers the desktop path,
+    // where the source is one long fMP4 response.
+    if (localTime >= 0 && (covers(video.buffered) || covers(video.seekable))) {
+      trace('seek', {
+        method: covers(video.buffered) ? 'native-buffered' : 'native-seekable',
+        from: Number(from.toFixed(1)),
+        to: Number(clamped.toFixed(1)),
+      })
       video.currentTime = localTime
       return
     }
@@ -610,12 +483,13 @@ export function VideoPlayer() {
           flashSubtitleNotice(`Seek failed: ${getLastHlsError() || 'try again'}`)
           return
         }
+        hlsPlaylistUrlRef.current = hlsUrl
         videoRef.current.src = hlsUrl
-        safePlay(videoRef.current, 'seek-ios')
+        attemptPlay(videoRef.current, 'seek-ios')
       })
     } else {
       video.src = seekUrl
-      safePlay(video, 'seek-desktop')
+      attemptPlay(video, 'seek-desktop')
     }
     console.log('[seekTo] src rebuilt at', clamped, '— activeSubtitle:', activeSubtitleRef.current, 'tracks:', subtitleTracksRef.current.length)
     if (proxyModeRef.current === 'copy') {
@@ -654,8 +528,6 @@ export function VideoPlayer() {
     reconnectCountRef.current = 0
     lastKnownRealPosRef.current = 0
     destroyHls()
-    mseAbortRef.current?.abort()
-    mseAbortRef.current = null
 
     setAudioTracks([])
     setActiveAudioTrack(-1)
@@ -667,7 +539,6 @@ export function VideoPlayer() {
     detachSubtitleTrack()
 
     const load = async () => {
-      let msePlaying = false
       // Live channels (Xtream Codes MPEG-TS over HTTP). Browsers can't play
       // raw MPEG-TS, and on HTTPS pages the HTTP source is mixed-content
       // blocked anyway. Route through the transcode-proxy in copy mode (cheap
@@ -692,15 +563,16 @@ export function VideoPlayer() {
           startHlsSession(current.url, { live: true, mode: 'transcode' }).then((hlsUrl) => {
             if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
             if (!hlsUrl) { setError(`iOS: HLS generation failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
+            hlsPlaylistUrlRef.current = hlsUrl
             videoRef.current.src = hlsUrl
-            safePlay(videoRef.current, 'live-ios')
+            attemptPlay(videoRef.current, 'live-ios')
           })
           return
         }
         const streamSrc = liveStreamUrl(current.url, 'copy')
         if (streamSrc) {
           video.src = streamSrc
-          safePlay(video, 'live-desktop')
+          attemptPlay(video, 'live-desktop')
         }
         return
       }
@@ -795,6 +667,7 @@ export function VideoPlayer() {
               mode,
               audioIndex: audioStreamIndexRef.current,
               startSeconds: startTime,
+              videoCodec: info?.videoCodec ?? null,
             })
             if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
             // Provider stream may be truncated short of the saved position — retry from 0.
@@ -811,8 +684,9 @@ export function VideoPlayer() {
               if (hlsUrl) setError(null)
             }
             if (!hlsUrl) { setError(`iOS: HLS generation failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
+            hlsPlaylistUrlRef.current = hlsUrl
             videoRef.current.src = hlsUrl
-            safePlay(videoRef.current, 'vod-ios')
+            attemptPlay(videoRef.current, 'vod-ios')
           } else {
             video.src = vodUrl
           }
@@ -844,7 +718,7 @@ export function VideoPlayer() {
             if (startTime > 0) {
               video.addEventListener('loadedmetadata', () => { video.currentTime = startTime }, { once: true })
             }
-            safePlay(video, 'hlsjs-fallback')
+            attemptPlay(video, 'hlsjs-fallback')
           })
           hls.on(HlsLib.Events.MANIFEST_PARSED, () => {
             if (hls.audioTracks.length > 0) {
@@ -880,7 +754,7 @@ export function VideoPlayer() {
         }
       }
 
-      if (!msePlaying) safePlay(video, 'load-tail')
+      attemptPlay(video, 'load-tail')
     }
 
     load()
@@ -1058,22 +932,10 @@ export function VideoPlayer() {
           if (!hlsUrl) { setError(`iOS: Stream failed. Try again later. (${getLastHlsError() || 'network error'})`); return }
           setError(null)
           setIsBuffering(true)
+          hlsPlaylistUrlRef.current = hlsUrl
           videoRef.current.src = hlsUrl
-          safePlay(videoRef.current, 'ios-error-retry')
+          attemptPlay(videoRef.current, 'ios-error-retry')
         })
-        return
-      }
-      // HLS path failed (provider 404, wrong URL, etc.) — retry with MSE fMP4
-      if (strategy === 'hls' && iosFallbackUrlRef.current) {
-        const fallbackUrl = iosFallbackUrlRef.current
-        iosStrategyRef.current = 'mse'
-        iosFallbackUrlRef.current = null
-        logDiagnostic('live-hls-failed-trying-mse', { code })
-        const mseLive = startMsePlayback(video, fallbackUrl)
-        if (!mseLive) {
-          setError(`Live TV: HLS unavailable, MSE not supported (code ${code}) ${getMseDiag()}`)
-          setIsBuffering(false)
-        }
         return
       }
       // Network/decode error on a desktop proxy stream — auto-reconnect from real position
@@ -1133,13 +995,20 @@ export function VideoPlayer() {
               if (!liveUrl) { setError('Live stream reconnect failed'); return }
               videoRef.current.src = liveUrl
             }
-            safePlay(videoRef.current, 'reconnect')
+            attemptPlay(videoRef.current, 'reconnect')
           }, backoff)
           return
         }
       }
-      const mseLog = mseDiagLogRef.current.length ? ` [${mseDiagLogRef.current.join('→')}]` : ''
-      setError(`Playback error (code ${code}, strategy: ${strategy ?? 'direct'}) ${getMseDiag()}${mseLog}`)
+      // The diagnostic detail went to the client log above. What belongs on screen
+      // is what happened and what to do about it — the previous message put a
+      // codec-support matrix in front of whoever was trying to watch something.
+      setError(
+        code === 2 ? 'Lost connection to the stream.'
+        : code === 3 ? "This title can't be decoded on this device."
+        : code === 4 ? "The provider didn't return a playable stream."
+        : 'Playback stopped unexpectedly.',
+      )
       setIsBuffering(false)
     }
 
@@ -1177,6 +1046,25 @@ export function VideoPlayer() {
     }
   }, [current])
 
+  // Keep the server-side HLS session alive while the player is open.
+  //
+  // The server reaps sessions that go untouched, and it can only see requests.
+  // A paused player fetches nothing, so without this a long pause looked exactly
+  // like a closed app: the session was destroyed and every segment 404'd on
+  // resume. One HEAD every 30 s is enough to say "still watching".
+  useEffect(() => {
+    if (!current) return
+    const ping = setInterval(() => {
+      const url = hlsPlaylistUrlRef.current
+      if (!url) return
+      fetch(url, { method: 'HEAD', cache: 'no-store' }).catch(() => {
+        // A failed ping is not actionable on its own — the error handler owns
+        // recovery. Losing the session is what we are preventing, not detecting.
+      })
+    }, 30_000)
+    return () => clearInterval(ping)
+  }, [current])
+
   // Keyboard shortcuts
   useEffect(() => {
     if (!current) return
@@ -1187,7 +1075,7 @@ export function VideoPlayer() {
         case 'Space':
         case 'KeyK':
           e.preventDefault()
-          video.paused ? safePlay(video, 'keyboard') : video.pause()
+          video.paused ? attemptPlay(video, 'keyboard') : video.pause()
           break
         case 'ArrowLeft': {
           e.preventDefault()
@@ -1296,8 +1184,9 @@ export function VideoPlayer() {
         }).then((hlsUrl) => {
           if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
           if (!hlsUrl) { setError(`iOS: Audio switch failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
+          hlsPlaylistUrlRef.current = hlsUrl
           videoRef.current.src = hlsUrl
-          safePlay(videoRef.current, 'audio-switch-ios')
+          attemptPlay(videoRef.current, 'audio-switch-ios')
           if (capturedSubInfo) attachSubtitleTrack(capturedSubInfo.id, capturedSubInfo.name, capturedSubInfo.lang)
         })
         return
@@ -1310,7 +1199,7 @@ export function VideoPlayer() {
         vstart: videoStartTimeRef.current || undefined,
       })
       video.src = audioUrl
-      safePlay(video, 'audio-switch-desktop')
+      attemptPlay(video, 'audio-switch-desktop')
       if (previousSubInfo) {
         attachSubtitleTrack(previousSubInfo.id, previousSubInfo.name, previousSubInfo.lang)
       }
@@ -1383,7 +1272,7 @@ export function VideoPlayer() {
       if (v.error && (isTranscodedRef.current || current?.type === 'live') && current) {
         seekTo(playbackOffsetRef.current + v.currentTime)
       } else {
-        safePlay(v, 'tap')
+        attemptPlay(v, 'tap')
       }
     } else if (!isBuffering) {
       v.pause()
@@ -1436,7 +1325,10 @@ export function VideoPlayer() {
           ref={videoRef}
           className="absolute inset-0 w-full h-full object-contain"
           playsInline
-          disableRemotePlayback
+          /* No disableRemotePlayback: that attribute was required by the
+             ManagedMediaSource experiment, and while it sat here AirPlay was off
+             for the whole app — on the one device family most likely to have an
+             Apple TV in the room. */
         />
 
         {!minimized && error && (
@@ -1464,7 +1356,29 @@ export function VideoPlayer() {
           </div>
         )}
 
-        {!minimized && !error && isBuffering && (
+        {/* The autoplay policy refused a play() that arrived after the wait for
+            the server session. Nothing is broken — the gesture had simply expired
+            — so offer a new one instead of a spinner that never resolves. */}
+        {!minimized && needsGesture && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-20">
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                const v = videoRef.current
+                if (v) attemptPlay(v, 'gesture-recovery')
+              }}
+              aria-label="Play"
+              className="flex flex-col items-center gap-3 group"
+            >
+              <span className="w-20 h-20 rounded-full bg-white/15 backdrop-blur-sm ring-1 ring-white/30 flex items-center justify-center transition-transform group-active:scale-95">
+                <Play size={34} fill="white" className="text-white ml-1" />
+              </span>
+              <span className="text-white/80 text-sm font-medium">Tap to play</span>
+            </button>
+          </div>
+        )}
+
+        {!minimized && !error && !needsGesture && isBuffering && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none">
             <div className="w-12 h-12 rounded-full border-2 border-white/15 border-t-white animate-spin" />
             <p className="text-white/60 text-sm font-medium tracking-wide">Buffering…</p>

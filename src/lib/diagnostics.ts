@@ -276,22 +276,27 @@ export function mediaSnapshot(video: HTMLVideoElement): Record<string, unknown> 
  * user is left staring at a spinner; without this we cannot tell that case apart
  * from a stream that never arrived.
  */
-export function safePlay(video: HTMLVideoElement, phase: string): Promise<void> {
+export type PlayOutcome = 'ok' | 'blocked' | 'failed'
+
+export function safePlay(video: HTMLVideoElement, phase: string): Promise<PlayOutcome> {
   trace('play-call', { phase, paused: video.paused, readyState: video.readyState })
   const result = video.play()
   // Older WebKit returns undefined rather than a promise.
   if (!result || typeof result.then !== 'function') {
     trace('play-sync', { phase })
-    return Promise.resolve()
+    return Promise.resolve('ok')
   }
   return result
-    .then(() => { trace('play-ok', { phase }) })
-    .catch((err: unknown) => {
+    .then((): PlayOutcome => { trace('play-ok', { phase }); return 'ok' })
+    .catch((err: unknown): PlayOutcome => {
       const name = (err as { name?: string })?.name ?? 'unknown'
       const message = (err as { message?: string })?.message ?? String(err)
-      // NotAllowedError is the autoplay policy, not a broken stream — the
-      // distinction is the whole reason this wrapper exists.
+      // NotAllowedError is the autoplay policy refusing a play() that arrived
+      // outside a user gesture — a spent tap, not a broken stream. Telling the
+      // two apart is the whole reason this wrapper exists: one deserves a tap
+      // target, the other an error.
       traceError('play-rejected', { phase, name, message: message.slice(0, 200) })
+      return name === 'NotAllowedError' ? 'blocked' : 'failed'
     })
 }
 

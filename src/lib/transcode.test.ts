@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   pickProxyMode,
-  needsTranscode,
   audioStreamLabel,
   subtitleStreamLabel,
 } from './transcode'
@@ -60,24 +59,6 @@ describe('pickProxyMode', () => {
 
   it('returns copy when audioCodec is null (no audio stream)', () => {
     expect(pickProxyMode({ ...baseInfo, audioCodec: null })).toBe('copy')
-  })
-})
-
-describe('needsTranscode', () => {
-  it('returns false for null info', () => {
-    expect(needsTranscode(null)).toBe(false)
-  })
-
-  it('returns false for aac', () => {
-    expect(needsTranscode(baseInfo)).toBe(false)
-  })
-
-  it('returns true for ac3', () => {
-    expect(needsTranscode({ ...baseInfo, audioCodec: 'ac3' })).toBe(true)
-  })
-
-  it('returns false when audioCodec is null', () => {
-    expect(needsTranscode({ ...baseInfo, audioCodec: null })).toBe(false)
   })
 })
 
