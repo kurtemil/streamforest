@@ -18,6 +18,7 @@ import {
   trace, traceError, safePlay, mediaSnapshot,
   tracePlaybackStart, tracePlaybackEnd,
 } from '@/lib/diagnostics'
+import { resolveSaveDuration } from '@/lib/progress'
 import { openInVlc } from '@/lib/vlc'
 import { normalizeShowKey } from '@/lib/utils'
 import { parseVttBlock } from '@/lib/vtt'
@@ -417,7 +418,7 @@ export function VideoPlayer() {
       const profileId = useProfileStore.getState().activeProfileId
       if (profileId) {
         const realTime = playbackOffsetRef.current + video.currentTime
-        const dur = transcodedDurationRef.current ?? (Number.isFinite(video.duration) ? video.duration : 0)
+        const dur = resolveSaveDuration(transcodedDurationRef.current, video.duration)
         saveProgress(profileId, current.id, realTime, dur)
           .then((entry) => pushProgress(entry))
       }
@@ -901,7 +902,12 @@ export function VideoPlayer() {
         const profileId = useProfileStore.getState().activeProfileId
         if (!profileId) return
         const realTime = playbackOffsetRef.current + video.currentTime
-        saveProgress(profileId, current.id, realTime, video.duration || 0)
+        // The film's length, not the stream's. For any source the proxy started
+        // at an offset, video.duration is only what remains — and saving that
+        // against a whole-film position made completed=true five seconds into a
+        // resumed film, which dropped it straight out of Continue Watching.
+        const dur = resolveSaveDuration(transcodedDurationRef.current, video.duration)
+        saveProgress(profileId, current.id, realTime, dur)
           .then((entry) => pushProgress(entry))
       }
     }, SAVE_INTERVAL_MS)

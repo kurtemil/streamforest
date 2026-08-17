@@ -169,7 +169,15 @@ function inspectPlaylist(text) {
     type !== null,
     type ? `→ ${type}` : '→ absent: WebKit treats this as a LIVE stream',
   )
-  check('EXT-X-ENDLIST present', hasEndlist, hasEndlist ? '' : '→ playlist still growing')
+  // A missing ENDLIST is only a problem alongside a missing type. With EVENT the
+  // playlist is declared append-only and seekable from zero while it is still
+  // being written; ENDLIST arrives when ffmpeg finishes. Reporting that as a
+  // failure would train us to ignore the one check that matters.
+  check(
+    'EXT-X-ENDLIST present',
+    hasEndlist ? true : type ? null : false,
+    hasEndlist ? '' : type ? '→ not yet — still writing, which EVENT allows' : '→ playlist still growing',
+  )
   check('playlist has segments', segments > 0, `→ ${segments}`)
 
   if (type === null && !hasEndlist) {

@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { Channel, WatchProgress, Favorite, PlaylistMeta, WatchLater, TmdbMeta, EpgProgram } from '@/types'
+import { isCompleted } from '@/lib/progress'
 
 interface EpgChannelName { id: string; channelId: string }
 
@@ -131,7 +132,7 @@ export async function saveProgress(
   position: number,
   duration: number,
 ): Promise<WatchProgress> {
-  const completed = duration > 0 && position / duration > 0.9
+  const completed = isCompleted(position, duration)
   const entry: WatchProgress = {
     id: `${profileId}:${channelId}`,
     profileId,

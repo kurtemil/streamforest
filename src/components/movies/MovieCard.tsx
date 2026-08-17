@@ -1,6 +1,7 @@
 import { Play, Check, Bookmark, Star, X } from 'lucide-react'
 import { Poster } from '@/ui'
 import { ProgressRing } from '@/components/ui/ProgressRing'
+import { progressPercent } from '@/lib/progress'
 import type { Channel, WatchProgress, TmdbMeta } from '@/types'
 
 interface Props {
@@ -15,9 +16,7 @@ interface Props {
 }
 
 export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLabel, onClick, onWatchLater, onRemove }: Props) {
-  const pct = progress && progress.duration > 0
-    ? Math.round((progress.position / progress.duration) * 100)
-    : 0
+  const pct = progress ? Math.round(progressPercent(progress.position, progress.duration)) : 0
 
   const displayTitle = tmdbMeta?.title ?? channel.movieTitle ?? channel.showName ?? channel.name
   const displayYear  = tmdbMeta?.year  ?? channel.year

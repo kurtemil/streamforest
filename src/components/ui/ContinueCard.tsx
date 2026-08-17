@@ -2,6 +2,7 @@ import { Play, X } from 'lucide-react'
 import { Poster } from '@/ui'
 import { ProgressRing } from '@/components/ui/ProgressRing'
 import { formatTime } from '@/lib/time'
+import { progressPercent } from '@/lib/progress'
 import type { Channel, WatchProgress, TmdbMeta } from '@/types'
 
 export function ContinueCard({
@@ -17,7 +18,7 @@ export function ContinueCard({
   onClick: () => void
   onRemove: () => void
 }) {
-  const pct = progress.duration > 0 ? (progress.position / progress.duration) * 100 : 0
+  const pct = progressPercent(progress.position, progress.duration)
   const subtitle =
     channel.type === 'series'
       ? `S${String(channel.season).padStart(2, '0')}E${String(channel.episode).padStart(2, '0')}`

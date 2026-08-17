@@ -907,6 +907,16 @@ function handleHlsStart(reqUrl, res) {
     '-f', 'hls', '-hls_time', '4',
     '-hls_list_size', live ? '6' : '0',
     '-hls_flags', live ? 'delete_segments+append_list' : 'temp_file',
+  )
+  // A growing playlist with no type and no ENDLIST *is* a live playlist by the
+  // HLS spec, and WebKit reads it that way: it starts at the live edge instead of
+  // at zero and refuses to seek before the sliding window. In copy mode ffmpeg
+  // races far ahead of real time, so that edge is deep inside the film.
+  //
+  // EVENT means append-only, seekable from the start, and never truncated at the
+  // front — which is exactly what a VOD playlist still being written is.
+  if (!live) args.push('-hls_playlist_type', 'event')
+  args.push(
     '-hls_segment_filename', path.join(dir, 'seg%05d.ts'),
     path.join(dir, 'playlist.m3u8'),
   )
