@@ -85,10 +85,15 @@ function startOrigin(filePath) {
 function makeTestVideo(dest) {
   // 90 s is long enough that ffmpeg writes a couple of dozen 4 s segments, which
   // is what makes the playlist-type question observable.
+  // Two audio tracks on purpose: the session-key check (A5) is only meaningful
+  // if both indices it asks for actually exist in the source.
   const r = spawnSync(FFMPEG, [
     '-hide_banner', '-loglevel', 'error', '-y',
     '-f', 'lavfi', '-i', 'testsrc2=size=1280x720:rate=25:duration=90',
     '-f', 'lavfi', '-i', 'sine=frequency=440:duration=90',
+    '-f', 'lavfi', '-i', 'sine=frequency=660:duration=90',
+    '-map', '0:v', '-map', '1:a', '-map', '2:a',
+    '-metadata:s:a:0', 'language=eng', '-metadata:s:a:1', 'language=swe',
     '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', '-g', '50',
     '-c:a', 'aac', '-b:a', '128k',
     '-movflags', '+faststart',
@@ -200,11 +205,17 @@ function inspectSegment(dir) {
     check('segment written', false, '→ none found')
     return
   }
+  // An fMP4 media segment carries no moov box, so on its own it says nothing
+  // about codecs — that lives in the init segment the playlist's EXT-X-MAP names.
+  // Probe whichever of the two actually describes the streams.
+  const initPath = path.join(dir, 'init.mp4')
+  const describes = segment.endsWith('.m4s') && fs.existsSync(initPath) ? initPath : path.join(dir, segment)
+
   const r = spawnSync(FFPROBE, [
     '-v', 'error',
     '-show_entries', 'format=format_name:stream=codec_type,codec_name,codec_tag_string',
     '-of', 'json',
-    path.join(dir, segment),
+    describes,
   ], { encoding: 'utf8' })
 
   let parsed
@@ -229,6 +240,12 @@ function inspectSegment(dir) {
     !isTs,
     isTs ? '→ MPEG-TS; fMP4 is what -hls_segment_type fmp4 gives' : '',
   )
+  if (!isTs) {
+    // fMP4 is useless to a player without the initialisation segment, and the
+    // playlist references it by name — so its presence is part of the contract.
+    const hasInit = fs.existsSync(path.join(dir, 'init.mp4'))
+    check('fMP4 init segment written', hasInit, hasInit ? '→ init.mp4' : '→ missing: segments are unplayable')
+  }
   if (isHevc && video.codec_tag_string !== 'hvc1') {
     check('HEVC carries the hvc1 tag iOS requires', false, `→ tag is "${video.codec_tag_string || 'none'}"`)
   }

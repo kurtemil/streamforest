@@ -43,15 +43,58 @@ fs.mkdirSync(HLS_DIR, { recursive: true })
 
 // iOS HLS generation sessions: hash → { proc, dir, lastAccess, live }
 const hlsSessions = new Map()
+
+// How long a session may go untouched before it is reaped. This used to be two
+// minutes, which is shorter than a trip to the kitchen: a paused player stops
+// fetching segments, the session was destroyed under it, and pressing play
+// returned 404 on every segment. The client now pings the playlist every 30 s
+// while the player is open, so idleness here means genuinely gone.
+const HLS_IDLE_MS = Number(process.env.HLS_IDLE_MS) || 20 * 60_000
+// Ceiling for all sessions combined. A VOD session writes the whole film to
+// disk, so a few of them fill a small SSD; the oldest are evicted first.
+const HLS_DISK_BUDGET_BYTES = Number(process.env.HLS_DISK_BUDGET_BYTES) || 20 * 1024 * 1024 * 1024
+
+function killSession(hash, sess, reason) {
+  try { sess.proc?.kill() } catch { /* already gone */ }
+  hlsSessions.delete(hash)
+  try { fs.rmSync(sess.dir, { recursive: true, force: true }) } catch { /* already gone */ }
+  process.stderr.write(`[hls] evicted ${hash.slice(0, 8)} (${reason})\n`)
+}
+
+function sessionBytes(dir) {
+  let total = 0
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      try { total += fs.statSync(path.join(dir, f)).size } catch { /* raced */ }
+    }
+  } catch { /* gone */ }
+  return total
+}
+
+// Evict least-recently-used sessions until the total fits the budget. Called on
+// session start, which is the only moment the total can grow by a whole film.
+function enforceDiskBudget(protectHash) {
+  const sizes = new Map()
+  let total = 0
+  for (const [hash, sess] of hlsSessions) {
+    const bytes = sessionBytes(sess.dir)
+    sizes.set(hash, bytes)
+    total += bytes
+  }
+  if (total <= HLS_DISK_BUDGET_BYTES) return
+  const byAge = [...hlsSessions.entries()].sort((a, b) => a[1].lastAccess - b[1].lastAccess)
+  for (const [hash, sess] of byAge) {
+    if (total <= HLS_DISK_BUDGET_BYTES) break
+    if (hash === protectHash) continue
+    total -= sizes.get(hash) ?? 0
+    killSession(hash, sess, 'disk budget')
+  }
+}
+
 setInterval(() => {
   const now = Date.now()
   for (const [hash, sess] of hlsSessions.entries()) {
-    if (now - sess.lastAccess > 2 * 60_000) {
-      try { sess.proc?.kill() } catch {}
-      hlsSessions.delete(hash)
-      fs.rmSync(sess.dir, { recursive: true, force: true })
-      process.stderr.write(`[hls] cleanup ${hash.slice(0, 8)}\n`)
-    }
+    if (now - sess.lastAccess > HLS_IDLE_MS) killSession(hash, sess, 'idle')
   }
 }, 60_000).unref()
 
@@ -866,7 +909,15 @@ function handleHlsStart(reqUrl, res) {
   const start = Number(reqUrl.searchParams.get('start') || 0)
   const audioParam = reqUrl.searchParams.get('audio')
   const audioIdx = audioParam !== null && /^\d+$/.test(audioParam) ? Number(audioParam) : null
-  const hash = createHash('sha1').update(`hls|${target}|${mode}|${live ? 'live' : start}`).digest('hex').slice(0, 16)
+  // Source video codec, from the client's probe. Only used to decide the fMP4
+  // codec tag — the server does not probe again just to learn this.
+  const vcodec = (reqUrl.searchParams.get('vcodec') || '').toLowerCase()
+  // The audio index belongs in the key. Without it, asking for the same title at
+  // the same offset with a different track handed back the existing session, and
+  // an audio switch silently kept the old track.
+  const hash = createHash('sha1')
+    .update(`hls|${target}|${mode}|${live ? 'live' : start}|a${audioIdx ?? 'def'}`)
+    .digest('hex').slice(0, 16)
 
   const existing = hlsSessions.get(hash)
   if (existing) {
@@ -902,12 +953,27 @@ function handleHlsStart(reqUrl, res) {
   } else {
     args.push('-c:v', H264_ENCODER, '-preset', H264_PRESET, '-vf', `scale='min(${VIDEO_MAX_WIDTH},iw)':-2`, '-b:v', VIDEO_BITRATE, '-maxrate', VIDEO_MAX_BITRATE, '-bufsize', '3M', '-pix_fmt', 'yuv420p')
   }
+  // HEVC in MPEG-TS is patchy in WebKit, and iOS accepts the codec only under the
+  // 'hvc1' tag — never 'hev1'. Copy mode passes the source video through
+  // untouched, so the tag has to be set here; the client supplies the codec from
+  // the probe it already ran. Transcoded output is H.264 and needs no tag.
+  const wantsFmp4 = !live
+  if (wantsFmp4 && mode === 'copy' && (vcodec === 'hevc' || vcodec === 'h265')) {
+    args.push('-tag:v', 'hvc1')
+  }
   args.push(
     '-c:a', 'aac', '-b:a', AUDIO_BITRATE, '-ac', '2', '-bsf:a', 'aac_adtstoasc',
     '-f', 'hls', '-hls_time', '4',
     '-hls_list_size', live ? '6' : '0',
     '-hls_flags', live ? 'delete_segments+append_list' : 'temp_file',
   )
+  // Fragmented MP4 rather than MPEG-TS for VOD: it is what Apple has recommended
+  // for HLS since 2016, carries less overhead, and is the only container in which
+  // iOS reliably plays HEVC. Live stays on TS — the segments are disposable and
+  // the format is what the provider already speaks.
+  if (wantsFmp4) {
+    args.push('-hls_segment_type', 'fmp4', '-hls_fmp4_init_filename', 'init.mp4')
+  }
   // A growing playlist with no type and no ENDLIST *is* a live playlist by the
   // HLS spec, and WebKit reads it that way: it starts at the live edge instead of
   // at zero and refuses to seek before the sliding window. In copy mode ffmpeg
@@ -917,16 +983,21 @@ function handleHlsStart(reqUrl, res) {
   // front — which is exactly what a VOD playlist still being written is.
   if (!live) args.push('-hls_playlist_type', 'event')
   args.push(
-    '-hls_segment_filename', path.join(dir, 'seg%05d.ts'),
+    '-hls_segment_filename', path.join(dir, wantsFmp4 ? 'seg%05d.m4s' : 'seg%05d.ts'),
     path.join(dir, 'playlist.m3u8'),
   )
 
   process.stderr.write(`[hls] start hash=${hash.slice(0, 8)} live=${live} mode=${mode} start=${start}\n`)
-  const proc = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+  // Run inside the session directory. hls_fmp4_init_filename is resolved against
+  // the working directory, not against the segment path — with the server's own
+  // cwd it wrote init.mp4 next to the source tree, leaving every fMP4 segment in
+  // the session unplayable because the playlist's EXT-X-MAP pointed at nothing.
+  const proc = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], cwd: dir })
   proc.stderr.on('data', (d) => process.stderr.write(`[hls:${hash.slice(0, 8)}] ${d}`))
 
   const sess = { proc, dir, lastAccess: Date.now(), live }
   hlsSessions.set(hash, sess)
+  enforceDiskBudget(hash)
 
   // Send 200 immediately and write keepalive whitespace every 5 s to prevent
   // Cloudflare Tunnel from dropping the connection before the first HLS segment
@@ -967,7 +1038,10 @@ function handleHlsStart(reqUrl, res) {
   let waited = 0
   const poll = () => {
     try {
-      if (fs.readFileSync(path.join(dir, 'playlist.m3u8'), 'utf8').includes('.ts')) {
+      // Wait for the first segment to be listed. Test for #EXTINF rather than a
+      // file extension: VOD segments are .m4s and live are .ts, and an extension
+      // check silently stopped matching the day fMP4 was introduced.
+      if (fs.readFileSync(path.join(dir, 'playlist.m3u8'), 'utf8').includes('#EXTINF')) {
         clearInterval(keepalive)
         res.end(JSON.stringify({ hash }))
         return
@@ -1000,7 +1074,9 @@ function handleHlsFile(pathname, res) {
   const sess = hlsSessions.get(hash)
   if (!sess) { res.writeHead(404).end('Session not found'); return }
   sess.lastAccess = Date.now()
-  const ct = filename.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/MP2T'
+  const ct = filename.endsWith('.m3u8') ? 'application/vnd.apple.mpegurl'
+    : filename.endsWith('.m4s') || filename.endsWith('.mp4') ? 'video/mp4'
+    : 'video/MP2T'
   fs.readFile(path.join(sess.dir, filename), (err, data) => {
     if (err) { res.writeHead(404).end('Not found'); return }
     res.writeHead(200, { 'Content-Type': ct, 'Cache-Control': 'no-cache' }).end(data)
