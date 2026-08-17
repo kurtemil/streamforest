@@ -6,13 +6,15 @@ import { BottomNav } from './BottomNav'
 import { CommandPalette } from '@/components/search/CommandPalette'
 import { InstallPrompt } from '@/components/ui/InstallPrompt'
 import { useSearchStore } from '@/stores/searchStore'
-import { getProfile, useProfileStore } from '@/stores/profileStore'
+import { getProfile, PROFILES, useProfileStore } from '@/stores/profileStore'
 
 export function Layout({ children }: { children: ReactNode }) {
   const { toggle } = useSearchStore()
   const mainRef = useRef<HTMLElement>(null)
   const { pathname } = useLocation()
   const activeProfileId = useProfileStore((s) => s.activeProfileId)
+  const openPicker = useProfileStore((s) => s.openPicker)
+  const activeProfile = PROFILES.find((p) => p.id === activeProfileId)
   const role = getProfile(activeProfileId)?.role ?? 'kid'
   const canSeeSettings = role === 'parent' || role === 'admin'
 
@@ -47,6 +49,23 @@ export function Layout({ children }: { children: ReactNode }) {
       >
         {children}
       </main>
+      {/* Profile switching existed only in the sidebar, which is hidden below md.
+          Signed in as one of the kids on a phone, there was no way back without
+          clearing localStorage. The avatar floats over the content rather than
+          taking a sixth slot in a tab bar that is already tight at 375px. */}
+      <button
+        onClick={openPicker}
+        aria-label={activeProfile ? `Profile: ${activeProfile.name} — switch` : 'Choose profile'}
+        className="fixed top-[calc(0.75rem+env(safe-area-inset-top,0px))] right-3 z-40 flex md:hidden items-center justify-center w-11 h-11"
+      >
+        <span
+          className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-sm font-bold ring-1 ring-white/20 shadow-lg"
+          style={{ backgroundColor: activeProfile?.color ?? '#404040' }}
+        >
+          {activeProfile?.name[0] ?? '?'}
+        </span>
+      </button>
+
       <BottomNav />
       {canSeeSettings && (
         <NavLink

@@ -4,7 +4,8 @@ import { Play, Pause, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { usePlayerStore } from '@/stores/playerStore'
 import { usePlaylistStore } from '@/stores/playlistStore'
-import { saveProgress, getProgress, clearProgress } from '@/services/db'
+import { saveProgress, getProgress, clearProgress, getTmdbMeta } from '@/services/db'
+import { posterUrl } from '@/services/tmdb'
 import { pushProgress, deleteRemoteProgress } from '@/services/sync'
 import { useProfileStore } from '@/stores/profileStore'
 import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
@@ -239,8 +240,17 @@ export function VideoPlayer() {
   }, [])
 
   const handlePiP = useCallback(async () => {
-    const video = videoRef.current
+    const video = videoRef.current as (HTMLVideoElement & {
+      webkitSetPresentationMode?: (mode: 'picture-in-picture' | 'inline') => void
+      webkitPresentationMode?: string
+    }) | null
     if (!video) return
+    // WebKit predates the standard API and still only speaks presentation modes.
+    if (typeof video.webkitSetPresentationMode === 'function') {
+      const inPiP = video.webkitPresentationMode === 'picture-in-picture'
+      video.webkitSetPresentationMode(inPiP ? 'inline' : 'picture-in-picture')
+      return
+    }
     if (document.pictureInPictureElement) {
       await document.exitPictureInPicture().catch(() => {})
     } else {
@@ -1082,6 +1092,67 @@ export function VideoPlayer() {
     }
   }, [current])
 
+  // Lock screen, control centre, headphone buttons and the car.
+  //
+  // Without this the OS has no idea what is playing: no title, no artwork, and
+  // no way to pause or skip without unlocking the phone and finding the tab.
+  // The metadata comes from the same TMDB cache the library already fills, so
+  // this costs a lookup, not a fetch.
+  useEffect(() => {
+    if (!current || typeof navigator === 'undefined' || !('mediaSession' in navigator)) return
+    const ms = navigator.mediaSession
+    let cancelled = false
+
+    const title = current.type === 'series'
+      ? `S${String(current.season).padStart(2, '0')}E${String(current.episode).padStart(2, '0')}${current.episodeTitle ? ` · ${current.episodeTitle}` : ''}`
+      : current.movieTitle ?? current.name
+    const album = current.type === 'series' ? (current.showName ?? current.name) : 'StreamForest'
+
+    const tmdbKey = current.type === 'series' && current.showName
+      ? normalizeShowKey(current.showName)
+      : current.id
+
+    getTmdbMeta(tmdbKey).then((meta) => {
+      if (cancelled) return
+      const poster = meta && !meta.notFound ? posterUrl(meta.posterPath ?? null, 500) : null
+      ms.metadata = new MediaMetadata({
+        title,
+        artist: album,
+        album: 'StreamForest',
+        artwork: poster ? [{ src: poster, sizes: '500x750', type: 'image/jpeg' }] : [],
+      })
+    }).catch(() => { /* artwork is a nicety; the title still lands */ })
+
+    const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
+      ['play', () => { const v = videoRef.current; if (v) attemptPlay(v, 'mediasession') }],
+      ['pause', () => videoRef.current?.pause()],
+      ['seekbackward', () => seekTo(lastKnownRealPosRef.current - 10)],
+      ['seekforward', () => seekTo(lastKnownRealPosRef.current + 10)],
+      ['seekto', (details) => {
+        if (typeof details.seekTime === 'number') seekTo(playbackOffsetRef.current + details.seekTime)
+      }],
+      ['nexttrack', () => { const n = nextEpisodeRef.current; if (n) usePlayerStore.getState().play(n) }],
+    ]
+    for (const [action, handler] of handlers) {
+      // Not every action exists in every browser; an unsupported one throws.
+      try { ms.setActionHandler(action, handler) } catch { /* unsupported action */ }
+    }
+
+    return () => {
+      cancelled = true
+      for (const [action] of handlers) {
+        try { ms.setActionHandler(action, null) } catch { /* unsupported action */ }
+      }
+      ms.metadata = null
+    }
+  }, [current, seekTo, attemptPlay])
+
+  // Mirror transport state, so the lock screen shows the right button.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return
+    navigator.mediaSession.playbackState = current ? (isPlaying ? 'playing' : 'paused') : 'none'
+  }, [isPlaying, current])
+
   // Keep the server-side HLS session alive while the player is open.
   //
   // The server reaps sessions that go untouched, and it can only see requests.
@@ -1330,16 +1401,45 @@ export function VideoPlayer() {
   }
 
   const toggleFullscreen = () => {
-    const container = videoRef.current?.parentElement
-    if (!container) return
+    const video = videoRef.current
+    const container = video?.parentElement
+    if (!video || !container) return
+
+    // iPhone implements no Fullscreen API on ordinary elements — only
+    // webkitEnterFullscreen on the video itself. The button was therefore dead on
+    // the device where fullscreen matters most.
+    const iosVideo = video as HTMLVideoElement & {
+      webkitEnterFullscreen?: () => void
+      webkitSupportsFullscreen?: boolean
+    }
+    if (typeof container.requestFullscreen !== 'function') {
+      if (iosVideo.webkitSupportsFullscreen && iosVideo.webkitEnterFullscreen) {
+        trace('fullscreen', { api: 'webkitEnterFullscreen' })
+        iosVideo.webkitEnterFullscreen()
+      } else {
+        trace('fullscreen', { api: 'unavailable' })
+      }
+      return
+    }
     if (!document.fullscreenElement) {
-      container.requestFullscreen()
+      trace('fullscreen', { api: 'requestFullscreen' })
+      container.requestFullscreen().catch(() => {
+        if (iosVideo.webkitEnterFullscreen) iosVideo.webkitEnterFullscreen()
+      })
     } else {
       document.exitFullscreen()
     }
   }
 
-  const pipAvailable = typeof document !== 'undefined' && 'pictureInPictureEnabled' in document && (document as Document & { pictureInPictureEnabled: boolean }).pictureInPictureEnabled
+  // WebKit exposes picture-in-picture through presentation modes rather than the
+  // standard property, so the button was hidden on exactly the devices that
+  // support it best.
+  const pipAvailable = typeof document !== 'undefined' && (
+    ('pictureInPictureEnabled' in document && (document as Document & { pictureInPictureEnabled: boolean }).pictureInPictureEnabled) ||
+    typeof (HTMLVideoElement.prototype as HTMLVideoElement & {
+      webkitSetPresentationMode?: unknown
+    }).webkitSetPresentationMode === 'function'
+  )
 
   const miniTitle = current.type === 'series'
     ? `S${String(current.season).padStart(2, '0')}E${String(current.episode).padStart(2, '0')} · ${current.showName ?? current.name}`

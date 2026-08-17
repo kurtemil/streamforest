@@ -80,7 +80,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg'],
+      includeAssets: ['icon.svg', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'],
       manifest: {
         name: 'StreamForest',
         short_name: 'StreamForest',
@@ -92,11 +92,35 @@ export default defineConfig({
         start_url: '/',
         scope: '/',
         icons: [
-          { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' },
+          { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          // Separate art: Android crops to its own shape, so the mark sits inside
+          // the inner 80% and the background runs to the edges.
+          { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
+        shortcuts: [
+          { name: 'Continue Watching', short_name: 'Continue', url: '/' },
+          { name: 'Live TV', short_name: 'Live', url: '/live' },
+          { name: 'Movies', short_name: 'Movies', url: '/movies' },
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,svg,woff2}'],
+        globPatterns: ['**/*.{js,css,html,ico,svg,png,woff2}'],
+        runtimeCaching: [
+          {
+            // TMDB artwork is immutable per path and is most of what the app
+            // fetches. Without this the whole grid was re-downloaded on every
+            // visit, and offline showed a wall of empty placeholders despite all
+            // the metadata sitting in IndexedDB.
+            urlPattern: /^https:\/\/image\.tmdb\.org\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'tmdb-images',
+              expiration: { maxEntries: 400, maxAgeSeconds: 30 * 24 * 60 * 60 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/proxy/, /^\/transcode/],
       },
