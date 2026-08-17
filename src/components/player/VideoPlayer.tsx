@@ -59,6 +59,15 @@ export function VideoPlayer() {
   const { channels } = usePlaylistStore()
   const activeProfileId = useProfileStore((s) => s.activeProfileId)
   const rawPlaybackPrefs = usePlaybackPrefsStore((s) => s.byProfile[activeProfileId ?? ''])
+  // One memory per show, not per episode — the choice that matters is "this
+  // series, English subtitles, shifted 1.5 s", and it holds all season.
+  const titleKey = current
+    ? (current.type === 'series' ? normalizeShowKey(current.showName ?? current.name) : current.id)
+    : ''
+  const titlePrefs = usePlaybackPrefsStore(
+    (s) => s.byTitle[`${activeProfileId ?? ''}:${titleKey}`],
+  ) ?? {}
+  const setTitlePrefs = usePlaybackPrefsStore((s) => s.setTitlePrefs)
   const autoplayNextEpisode = rawPlaybackPrefs?.autoplayNextEpisode ?? true
   const preferredSubtitleLang = rawPlaybackPrefs?.preferredSubtitleLang ?? ''
   const preferredAudioLang = rawPlaybackPrefs?.preferredAudioLang ?? ''
@@ -223,8 +232,12 @@ export function VideoPlayer() {
   }, [currentTime, parsedSubtitles, subtitleDelay])
 
   const handleSubtitleDelayChange = useCallback((delta: number) => {
-    setSubtitleDelay(prev => parseFloat(Math.max(-10, Math.min(10, prev + delta)).toFixed(1)))
-  }, [])
+    setSubtitleDelay(prev => {
+      const next = parseFloat(Math.max(-10, Math.min(10, prev + delta)).toFixed(1))
+      setTitlePrefs(activeProfileId, titleKey, { subtitleDelay: next })
+      return next
+    })
+  }, [setTitlePrefs, activeProfileId, titleKey])
 
   useEffect(() => {
     if (!seekFeedback) return
@@ -1092,6 +1105,47 @@ export function VideoPlayer() {
     }
   }, [current])
 
+  // Native subtitle track, iOS only.
+  //
+  // The DOM overlay below is the better renderer — absolute timestamps, an
+  // adjustable delay, nothing to re-fetch on a seek — but it lives in the page,
+  // and iOS fullscreen hands the video to the system, which draws only the
+  // element's own text tracks. So the overlay simply disappeared at the moment
+  // people actually want subtitles. Now that fullscreen works on iPhone at all
+  // (B2), the same cues are mirrored into a real TextTrack.
+  //
+  // Cue times are absolute file positions; the element's clock starts at whatever
+  // offset the stream was opened at, so each cue is rebased — and the delay is
+  // folded in here rather than re-fetched.
+  useEffect(() => {
+    const video = videoRef.current
+    if (!IS_IOS || !video || parsedSubtitles.length === 0) return
+
+    const track = video.addTextTrack('subtitles', 'StreamForest', 'und')
+    track.mode = 'showing'
+    const offset = playbackOffsetRef.current
+    let added = 0
+    for (const cue of parsedSubtitles) {
+      const start = cue.start - offset - subtitleDelay
+      const end = cue.end - offset - subtitleDelay
+      if (end <= 0) continue
+      try {
+        track.addCue(new VTTCue(Math.max(0, start), end, cue.text.replace(/<[^>]+>/g, '').trim()))
+        added++
+      } catch { /* a malformed cue must not take the rest of the track with it */ }
+    }
+    trace('subtitle-native-track', { cues: added, offset, delay: subtitleDelay })
+
+    return () => {
+      track.mode = 'disabled'
+      // There is no removeTextTrack; disabling and dropping the cues is the
+      // documented way to retire one.
+      while (track.cues && track.cues.length > 0) {
+        try { track.removeCue(track.cues[0]) } catch { break }
+      }
+    }
+  }, [parsedSubtitles, subtitleDelay, current?.id])
+
   // Lock screen, control centre, headphone buttons and the car.
   //
   // Without this the OS has no idea what is playing: no title, no artwork, and
@@ -1281,6 +1335,8 @@ export function VideoPlayer() {
       setCurrentTime(realTime)
       setBuffered(realTime)
       setActiveAudioTrack(id)
+      const chosenLang = audioTracks.find(t => t.id === id)?.lang
+      if (chosenLang) setTitlePrefs(activeProfileId, titleKey, { audioLang: chosenLang })
       if (IS_IOS) {
         const capturedCurrent = current
         const capturedSubInfo = previousSubInfo
@@ -1319,7 +1375,7 @@ export function VideoPlayer() {
       }
       setActiveAudioTrack(id)
     }
-  }, [current, subtitleTracks, detachSubtitleTrack, attachSubtitleTrack])
+  }, [current, subtitleTracks, audioTracks, detachSubtitleTrack, attachSubtitleTrack, setTitlePrefs, activeProfileId, titleKey])
 
   const selectSubtitle = useCallback((id: number) => {
     const hls = hlsRef.current
@@ -1342,6 +1398,7 @@ export function VideoPlayer() {
       if (!info) return
       activeSubtitleRef.current = id
       setActiveSubtitle(id)
+      if (info.lang) setTitlePrefs(activeProfileId, titleKey, { subtitleLang: info.lang })
       attachSubtitleTrack(id, info.name, info.lang)
       return
     }
@@ -1353,20 +1410,33 @@ export function VideoPlayer() {
     }
   }, [current, subtitleTracks, attachSubtitleTrack, detachSubtitleTrack])
 
-  // Auto-select preferred subtitle language when tracks first become available
+  // Pick the subtitle track: what was chosen for this title last time first, the
+  // profile's language preference second.
   useEffect(() => {
-    if (!preferredSubtitleLang || !subtitleTracks.length || activeSubtitleRef.current !== -1) return
-    const match = subtitleTracks.find(t => t.lang?.toLowerCase().startsWith(preferredSubtitleLang.toLowerCase()))
+    if (!subtitleTracks.length || activeSubtitleRef.current !== -1) return
+    const remembered = titlePrefs.subtitleLang
+    const wanted = remembered || preferredSubtitleLang
+    if (!wanted) return
+    const match = subtitleTracks.find(t => t.lang?.toLowerCase().startsWith(wanted.toLowerCase()))
     if (match) selectSubtitle(match.id)
-  }, [subtitleTracks, preferredSubtitleLang, selectSubtitle])
+  }, [subtitleTracks, preferredSubtitleLang, titlePrefs.subtitleLang, selectSubtitle])
 
-  // Auto-select preferred audio language once when tracks first become available for a new item
+  // Same for audio, once per item.
   useEffect(() => {
-    if (!preferredAudioLang || !audioTracks.length || autoAudioSelectedRef.current) return
+    if (!audioTracks.length || autoAudioSelectedRef.current) return
+    const wanted = titlePrefs.audioLang || preferredAudioLang
+    if (!wanted) return
     autoAudioSelectedRef.current = true
-    const match = audioTracks.find(t => t.lang?.toLowerCase().startsWith(preferredAudioLang.toLowerCase()))
+    const match = audioTracks.find(t => t.lang?.toLowerCase().startsWith(wanted.toLowerCase()))
     if (match && match.id !== activeAudioTrack) selectAudioTrack(match.id)
-  }, [audioTracks, preferredAudioLang, activeAudioTrack, selectAudioTrack])
+  }, [audioTracks, preferredAudioLang, titlePrefs.audioLang, activeAudioTrack, selectAudioTrack])
+
+  // Restore the saved subtitle offset for this title. A file that is out of sync
+  // is normally out of sync by the same amount for a whole season, so having to
+  // dial it in again every episode was the single most repetitive thing here.
+  useEffect(() => {
+    if (typeof titlePrefs.subtitleDelay === 'number') setSubtitleDelay(titlePrefs.subtitleDelay)
+  }, [titleKey, titlePrefs.subtitleDelay])
 
   if (!current) return null
 
