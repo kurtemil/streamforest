@@ -231,29 +231,6 @@ export function VideoPlayer() {
     return () => clearTimeout(t)
   }, [seekFeedback])
 
-  const handleTouchEnd = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
-    if (minimized) return
-    const touch = e.changedTouches[0]
-    if (!touch) return
-    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
-    const side: 'left' | 'right' = touch.clientX < rect.left + rect.width / 2 ? 'left' : 'right'
-    const now = Date.now()
-    const last = lastTapRef.current
-    if (last?.side === side && now - last.time < 300) {
-      e.preventDefault()
-      lastTapRef.current = null
-      const v = videoRef.current
-      if (v) {
-        const dur = Number.isFinite(v.duration) ? v.duration : Infinity
-        v.currentTime = side === 'left'
-          ? Math.max(0, v.currentTime - 10)
-          : Math.min(v.currentTime + 10, dur)
-      }
-      setSeekFeedback({ side, key: now })
-    } else {
-      lastTapRef.current = { time: now, side }
-    }
-  }, [minimized])
 
   const handleSpeedChange = useCallback((s: number) => {
     playbackSpeedRef.current = s
@@ -516,6 +493,65 @@ export function VideoPlayer() {
       if (track) attachSubtitleTrack(track.id, track.name, track.lang, clamped)
     }
   }, [current, attachSubtitleTrack, flashSubtitleNotice])
+
+  // Touch gestures on the video surface.
+  //
+  // A single tap toggles the controls — the behaviour every video app on a phone
+  // has, and the only way to reach them here at all: the auto-hide timer was
+  // driven exclusively by mousemove, so on a touch device the overlay was pinned
+  // over the film for its whole runtime. Play/pause lives on the button in the
+  // middle of that overlay, where a thumb can find it deliberately.
+  //
+  // A double tap on either half seeks. It waits out the double-tap window before
+  // acting on the single tap, so one gesture never fires both.
+  const singleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const DOUBLE_TAP_MS = 280
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    if (minimized) return
+    const touch = e.changedTouches[0]
+    if (!touch) return
+    // Stop the synthetic click that would otherwise follow and toggle playback.
+    e.preventDefault()
+
+    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
+    const side: 'left' | 'right' = touch.clientX < rect.left + rect.width / 2 ? 'left' : 'right'
+    const now = Date.now()
+    const last = lastTapRef.current
+
+    if (last?.side === side && now - last.time < DOUBLE_TAP_MS) {
+      if (singleTapTimerRef.current) clearTimeout(singleTapTimerRef.current)
+      singleTapTimerRef.current = null
+      lastTapRef.current = null
+      const v = videoRef.current
+      if (v && current?.type !== 'live') {
+        // Through seekTo, not video.currentTime: only seekTo knows about the
+        // offset baked into a transcoded source and how to rebuild the session
+        // when the target lies outside what the server has generated.
+        const real = playbackOffsetRef.current + v.currentTime
+        const maxDur = transcodedDurationRef.current ?? v.duration
+        const target = side === 'left' ? real - 10 : real + 10
+        seekTo(Number.isFinite(maxDur) ? Math.min(maxDur, Math.max(0, target)) : Math.max(0, target))
+        setSeekFeedback({ side, key: now })
+      }
+      return
+    }
+
+    lastTapRef.current = { time: now, side }
+    if (singleTapTimerRef.current) clearTimeout(singleTapTimerRef.current)
+    singleTapTimerRef.current = setTimeout(() => {
+      singleTapTimerRef.current = null
+      setShowControls((visible) => {
+        if (visible) {
+          if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current)
+          controlsTimerRef.current = null
+          return false
+        }
+        resetControlsTimer()
+        return true
+      })
+    }, DOUBLE_TAP_MS)
+  }, [minimized, current, seekTo, resetControlsTimer])
 
   // Load source when current changes
   useEffect(() => {

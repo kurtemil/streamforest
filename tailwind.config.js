@@ -107,8 +107,19 @@ export default {
   plugins: [
     function ({ addUtilities }) {
       addUtilities({
+        // The viewport is declared `viewport-fit=cover` with a translucent status
+        // bar, so the app draws under the notch and the home indicator and owes
+        // itself these insets. Landscape matters here as much as portrait — it is
+        // the orientation people actually watch films in.
         '.pb-safe': { paddingBottom: 'env(safe-area-inset-bottom, 0px)' },
         '.pt-safe': { paddingTop: 'env(safe-area-inset-top, 0px)' },
+        '.pl-safe': { paddingLeft: 'env(safe-area-inset-left, 0px)' },
+        '.pr-safe': { paddingRight: 'env(safe-area-inset-right, 0px)' },
+        '.px-safe': {
+          paddingLeft: 'env(safe-area-inset-left, 0px)',
+          paddingRight: 'env(safe-area-inset-right, 0px)',
+        },
+        '.mb-safe': { marginBottom: 'env(safe-area-inset-bottom, 0px)' },
       })
     },
   ],

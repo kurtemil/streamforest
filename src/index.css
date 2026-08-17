@@ -19,6 +19,9 @@
 
   html, body, #root {
     height: 100%;
+    /* Safari's toolbar changes the viewport height as you scroll; dvh follows it
+       so the layout stops jumping in a browser tab. */
+    min-height: 100dvh;
     background-color: theme('colors.surface.100');
     color: theme('colors.neutral.200');
     font-family: theme('fontFamily.sans');
@@ -26,6 +29,31 @@
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
     font-feature-settings: 'cv11', 'ss01', 'ss03';
+  }
+
+  /* Handheld behaviour. Each of these fixes something visible on a phone, and
+     every one of them was missing — the app was built with a mouse. */
+  html, body {
+    /* No grey flash on every tap. */
+    -webkit-tap-highlight-color: transparent;
+    /* No "save image" sheet when a thumb rests on a poster. */
+    -webkit-touch-callout: none;
+    /* No rubber-band bounce, and no pull-to-refresh landing mid-row. */
+    overscroll-behavior: none;
+  }
+
+  button, a, [role="button"] {
+    /* Drops the 300 ms wait for a possible double-tap — which is exactly what the
+       player's double-tap-to-seek gesture needs in order to feel immediate. */
+    touch-action: manipulation;
+  }
+
+  /* iOS zooms the whole page in when a focused field is under 16px. Every input
+     in this app was 14px, so tapping the search box moved the layout under the
+     user's thumb. The visual size stays where the design put it — only the
+     computed font-size has to clear the threshold. */
+  input, select, textarea {
+    font-size: 16px;
   }
 
   ::selection {

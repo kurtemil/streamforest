@@ -161,7 +161,7 @@ export function ProfilePicker({ forced }: { forced?: boolean }) {
   }, [pendingId, setProfile])
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/95 flex flex-col items-center justify-center gap-10">
+    <div className="fixed inset-0 z-[60] bg-black/95 flex flex-col items-center justify-center gap-10 pt-safe pb-safe px-safe">
       <div className="flex flex-col items-center gap-2">
         <div className="w-10 h-10 rounded-xl bg-accent-600 flex items-center justify-center mb-2">
           <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5">

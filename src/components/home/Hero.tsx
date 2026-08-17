@@ -130,14 +130,14 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
           <div className="flex items-center gap-3 pt-1">
             <button
               onClick={() => onPlay(channel)}
-              className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-100 rounded-lg text-black font-semibold text-body transition-all active:scale-95 shadow-cinema"
+              className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-neutral-100 rounded-lg text-black font-semibold text-body transition-all active:scale-95 shadow-cinema"
             >
               <Play size={16} fill="black" />
               Play
             </button>
             <button
               onClick={() => onMoreInfo(channel)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-white/15 hover:bg-white/22 backdrop-blur-md rounded-lg text-white font-medium text-body transition-all active:scale-95 ring-1 ring-white/20"
+              className="flex items-center gap-2 px-5 py-3 bg-white/15 hover:bg-white/22 backdrop-blur-md rounded-lg text-white font-medium text-body transition-all active:scale-95 ring-1 ring-white/20"
             >
               <Info size={16} />
               More Info
@@ -163,27 +163,35 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
           <button
             onClick={() => { setIdx((idx - 1 + items.length) % items.length); startTimer() }}
             aria-label="Previous"
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/50 hover:bg-black/75 backdrop-blur-sm flex items-center justify-center ring-1 ring-white/20 transition-all opacity-0 hover:opacity-100 group-hover:opacity-100 focus:opacity-100"
+            className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 hover:bg-black/75 backdrop-blur-sm flex items-center justify-center ring-1 ring-white/20 transition-all opacity-0 hover:opacity-100 group-hover:opacity-100 focus:opacity-100"
           >
             <ChevronLeft size={20} className="text-white" />
           </button>
           <button
             onClick={() => { setIdx((idx + 1) % items.length); startTimer() }}
             aria-label="Next"
-            className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/50 hover:bg-black/75 backdrop-blur-sm flex items-center justify-center ring-1 ring-white/20 transition-all opacity-0 hover:opacity-100 group-hover:opacity-100 focus:opacity-100"
+            className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 hover:bg-black/75 backdrop-blur-sm flex items-center justify-center ring-1 ring-white/20 transition-all opacity-0 hover:opacity-100 group-hover:opacity-100 focus:opacity-100"
           >
             <ChevronRight size={20} className="text-white" />
           </button>
+          {/* The dot stays 6px — that is the design. The button around it is a
+              44px square of transparent padding, because that is what a thumb
+              actually aims at. Negative margins keep the row's spacing unchanged. */}
           <div className="absolute bottom-4 right-8 flex items-center gap-1.5">
             {items.map((_, i) => (
               <button
                 key={i}
                 onClick={() => { setIdx(i); startTimer() }}
-                className={`rounded-full transition-all duration-300 ${
-                  i === idx ? 'w-5 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/30 hover:bg-white/60'
-                }`}
+                className="grid place-items-center w-11 h-11 -mx-[1.1rem] -my-[1.1rem] group/dot"
                 aria-label={`Go to slide ${i + 1}`}
-              />
+                aria-current={i === idx ? 'true' : undefined}
+              >
+                <span
+                  className={`rounded-full transition-all duration-300 ${
+                    i === idx ? 'w-5 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/30 group-hover/dot:bg-white/60'
+                  }`}
+                />
+              </button>
             ))}
           </div>
         </>

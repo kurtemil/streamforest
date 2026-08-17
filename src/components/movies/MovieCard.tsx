@@ -36,7 +36,7 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
 
         {/* Hover overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute inset-0 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
           <div className="w-11 h-11 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center ring-2 ring-white/30">
             <Play size={18} fill="white" className="text-white ml-0.5" />
           </div>
@@ -47,7 +47,7 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
           <button
             onClick={(e) => { e.stopPropagation(); onRemove(e) }}
             aria-label="Remove"
-            className="absolute top-2 left-2 w-7 h-7 rounded-full bg-black/70 hover:bg-red-600/90 backdrop-blur-sm flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all ring-1 ring-white/20 z-10"
+            className="absolute top-2 left-2 w-7 h-7 rounded-full relative after:absolute after:content-[''] after:-inset-2 bg-black/70 hover:bg-red-600/90 backdrop-blur-sm flex items-center justify-center text-white opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all ring-1 ring-white/20 z-10"
           >
             <X size={13} />
           </button>
@@ -58,10 +58,10 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
           <button
             onClick={onWatchLater}
             title={isWatchLater ? 'Remove from Watch Later' : 'Add to Watch Later'}
-            className={`absolute top-2 left-2 w-7 h-7 rounded-full backdrop-blur-sm flex items-center justify-center ring-1 transition-all z-10 ${
+            className={`absolute top-2 left-2 w-7 h-7 rounded-full relative after:absolute after:content-[''] after:-inset-2 backdrop-blur-sm flex items-center justify-center ring-1 transition-all z-10 ${
               isWatchLater
                 ? 'bg-accent-600/90 ring-accent-500/60 opacity-100'
-                : 'bg-black/70 ring-white/20 opacity-0 group-hover:opacity-100 hover:bg-accent-600/80'
+                : 'bg-black/70 ring-white/20 opacity-100 md:opacity-0 md:group-hover:opacity-100 hover:bg-accent-600/80'
             }`}
           >
             <Bookmark size={13} fill={isWatchLater ? 'white' : 'none'} className="text-white" />

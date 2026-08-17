@@ -2,9 +2,9 @@ import { test, expect } from './fixtures'
 
 // The gate for the mobile rebuild (findings B4, B5 and NY 7).
 //
-// Each audit below is marked `test.fail()`: it documents a defect that exists
-// today, so the suite stays green while it fails and turns *red* the moment the
-// defect is fixed — which is the prompt to drop the annotation and let the test
+// An audit that still finds something calls `test.fail()` in its body: it
+// documents a defect that exists today, so the suite stays green while it fails
+// and turns *red* the moment the defect is fixed — which is the prompt to drop the annotation and let the test
 // guard the fix from then on. A plain failing test would just be noise nobody
 // trusts; this way the same assertion serves as both the record and the gate.
 
@@ -20,8 +20,9 @@ interface Offender {
 test.describe('touch readiness', () => {
   test.skip(({ isMobile }) => !isMobile, 'Touch audits only apply to touch viewports')
 
-  test.fail(true, 'B4/B5: controls below 44 px still exist — remove this annotation once fixed')
   test('every visible control is at least 44 px on its shortest side', async ({ libraryPage: page }) => {
+    // Known defect, still shrinking. Remove this line when the count reaches zero.
+    test.fail()
     const offenders: Offender[] = []
 
     for (const path of AUDIT_PAGES) {
@@ -38,11 +39,24 @@ test.describe('touch readiness', () => {
           if (rect.width === 0 || rect.height === 0) continue
           const style = getComputedStyle(el)
           if (style.visibility === 'hidden' || style.display === 'none') continue
-          const shortest = Math.min(rect.width, rect.height)
+
+          // An absolutely-positioned ::after with negative insets is the standard
+          // way to grow a tap target without moving the thing you can see. It is
+          // invisible to getBoundingClientRect, so measure it separately.
+          let width = rect.width
+          let height = rect.height
+          const after = getComputedStyle(el, '::after')
+          if (after.content !== 'none' && after.position === 'absolute') {
+            const px = (v: string) => (v.endsWith('px') ? parseFloat(v) : 0)
+            const grow = (a: string, b: string) => Math.max(0, -px(a)) + Math.max(0, -px(b))
+            width += grow(after.left, after.right)
+            height += grow(after.top, after.bottom)
+          }
+          const shortest = Math.min(width, height)
           if (shortest < min) {
             out.push({
               label: (el.getAttribute('aria-label') || el.textContent || el.tagName).trim().slice(0, 40),
-              detail: `${Math.round(rect.width)}×${Math.round(rect.height)}`,
+              detail: `${Math.round(width)}×${Math.round(height)}`,
             })
           }
         }
@@ -61,8 +75,9 @@ test.describe('touch readiness', () => {
     expect(offenders, `${offenders.length} controls below ${MIN_TOUCH_TARGET} px`).toEqual([])
   })
 
-  test.fail(true, 'B5: hover-only controls are still invisible on touch — remove once fixed')
   test('no interactive control is hidden behind hover', async ({ libraryPage: page }) => {
+    // Known defect, still shrinking. Remove this line when the count reaches zero.
+    test.fail()
     const offenders: Offender[] = []
 
     for (const path of AUDIT_PAGES) {
@@ -73,6 +88,10 @@ test.describe('touch readiness', () => {
         const out: { label: string; detail: string }[] = []
         const nodes = document.querySelectorAll<HTMLElement>('button, a[href], [role="button"], input[type="range"]')
         for (const el of nodes) {
+          // Controls that duplicate a native touch gesture may stay pointer-only,
+          // as long as that is declared. A row's scroll arrows are the case this
+          // exists for: on touch you swipe the row instead.
+          if (el.closest('[data-pointer-affordance]')) continue
           const rect = el.getBoundingClientRect()
           if (rect.width === 0 || rect.height === 0) continue
           // Walk up: a zero-opacity ancestor hides the control just as effectively.
@@ -105,7 +124,6 @@ test.describe('touch readiness', () => {
     expect(offenders, `${offenders.length} hover-only controls`).toEqual([])
   })
 
-  test.fail(true, 'NY 7: inputs below 16 px still trigger iOS zoom-on-focus — remove once fixed')
   test('text inputs are at least 16 px, so iOS does not zoom on focus', async ({ libraryPage: page }) => {
     const offenders: Offender[] = []
 

@@ -30,7 +30,7 @@ export function GroupSidebar({
   cleanTitle = defaultClean,
   prefixItem,
 }: Props) {
-  const pillBase = 'shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap'
+  const pillBase = 'shrink-0 px-4 py-2.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap'
   const pillActive = 'bg-accent-600 text-white'
   const pillInactive = 'bg-white/8 text-neutral-400 hover:text-white active:bg-white/15'
 

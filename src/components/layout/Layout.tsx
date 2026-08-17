@@ -34,7 +34,17 @@ export function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-full overflow-hidden">
       <Sidebar />
-      <main ref={mainRef} className="flex-1 overflow-y-auto min-w-0 pb-16 md:pb-0">
+      {/* pt-safe here rather than in six hand-rolled page headers: every page's
+          content lives inside this element, so one inset covers them all and no
+          future page can forget it.
+
+          The bottom pad has to clear the tab bar *and* the home indicator. Plain
+          pb-16 cleared only the bar, so the last row of every list sat behind the
+          gesture area. */}
+      <main
+        ref={mainRef}
+        className="flex-1 overflow-y-auto min-w-0 pt-safe px-safe pb-[calc(4rem+env(safe-area-inset-bottom,0px))] md:pb-0"
+      >
         {children}
       </main>
       <BottomNav />
@@ -42,7 +52,7 @@ export function Layout({ children }: { children: ReactNode }) {
         <NavLink
           to="/settings"
           className={({ isActive }) =>
-            `fixed bottom-20 right-3 z-50 flex md:hidden items-center justify-center w-9 h-9 rounded-full ring-1 ring-white/10 shadow-lg transition-colors ${
+            `fixed bottom-20 right-3 z-50 flex md:hidden items-center justify-center w-11 h-11 rounded-full ring-1 ring-white/10 shadow-lg transition-colors ${
               isActive ? 'bg-accent-600 text-white ring-accent-500' : 'bg-surface-200 text-neutral-400'
             }`
           }

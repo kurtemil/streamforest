@@ -109,7 +109,7 @@ function GroupFilterPanel({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Filter groups…"
-              className="flex-1 bg-white/5 border border-white/8 rounded-lg px-3 py-1.5 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-accent-600/60 transition-colors"
+              className="flex-1 bg-white/5 border border-white/8 rounded-lg px-3 py-1.5 text-base md:text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-accent-600/60 transition-colors"
             />
             <button
               onClick={() => setAll(type, groups.map((g) => g.title), true)}
@@ -204,7 +204,7 @@ function EpgSection({ m3uUrl }: { m3uUrl: string }) {
             value={displayUrl}
             onChange={(e) => setEpgUrl(e.target.value)}
             placeholder={derivedUrl || 'http://provider.com/xmltv.php?username=…&password=…'}
-            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 font-mono focus:outline-none focus:border-accent-500/60 focus:bg-white/8 transition-colors"
+            className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-base md:text-sm text-white placeholder-neutral-600 font-mono focus:outline-none focus:border-accent-500/60 focus:bg-white/8 transition-colors"
           />
           {!derivedUrl && !epgUrl && (
             <p className="text-xs text-neutral-600 mt-1">Enter your provider's XMLTV URL above.</p>
@@ -231,7 +231,7 @@ function EpgSection({ m3uUrl }: { m3uUrl: string }) {
           <button
             onClick={() => refreshEpg(m3uUrl)}
             disabled={loading || !resolvedUrl}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors shrink-0"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors shrink-0"
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             {label}
@@ -349,13 +349,13 @@ export function SettingsPage() {
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
                 placeholder="http://provider.com/get.php?username=…&password=…&type=m3u_plus"
-                className="w-full bg-white/5 border border-white/8 rounded-lg px-3 py-2.5 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-accent-600/60 transition-colors font-mono"
+                className="w-full bg-white/5 border border-white/8 rounded-lg px-3 py-2.5 text-base md:text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-accent-600/60 transition-colors font-mono"
               />
               <p className="text-xs text-neutral-600 mt-1.5">Keep this URL private — it contains your credentials.</p>
             </div>
             <button
               onClick={handleSave}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors w-fit"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors w-fit"
             >
               {saved ? <Check size={15} /> : null}
               {saved ? 'Saved' : 'Save URL'}
@@ -414,7 +414,7 @@ export function SettingsPage() {
             <button
               onClick={refresh}
               disabled={fetching || !m3uUrl}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-accent-600 hover:bg-accent-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
             >
               <RefreshCw size={14} className={fetching ? 'animate-spin' : ''} />
               {buttonLabel}
@@ -423,7 +423,7 @@ export function SettingsPage() {
               <button
                 onClick={handleClear}
                 disabled={clearing}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-red-500/20 hover:text-red-400 text-neutral-400 text-sm font-medium transition-colors"
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-white/5 hover:bg-red-500/20 hover:text-red-400 text-neutral-400 text-sm font-medium transition-colors"
               >
                 <Trash2 size={14} />
                 Clear cache
@@ -450,7 +450,7 @@ export function SettingsPage() {
           <button
             onClick={handleClearTmdb}
             disabled={clearingTmdb}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-400 text-sm font-medium transition-colors shrink-0 disabled:opacity-40"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-400 text-sm font-medium transition-colors shrink-0 disabled:opacity-40"
           >
             <RefreshCw size={14} className={clearingTmdb ? 'animate-spin' : ''} />
             {tmdbCleared !== null ? `Cleared ${tmdbCleared}` : 'Retry failed'}
@@ -511,7 +511,7 @@ export function SettingsPage() {
               <select
                 value={playbackPrefs.preferredAudioLang}
                 onChange={(e) => setPlaybackPrefs(selectedPlaybackProfile, { preferredAudioLang: e.target.value })}
-                className="w-full bg-[#1e1e1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-accent-500/60 transition-colors"
+                className="w-full bg-[#1e1e1e] border border-white/10 rounded-lg px-3 py-2 text-base md:text-sm text-white focus:outline-none focus:border-accent-500/60 transition-colors"
               >
                 <option value="" className="bg-[#1e1e1e]">Off — manual selection</option>
                 <option value="sv" className="bg-[#1e1e1e]">Swedish (sv)</option>
@@ -531,7 +531,7 @@ export function SettingsPage() {
               <select
                 value={playbackPrefs.preferredSubtitleLang}
                 onChange={(e) => setPlaybackPrefs(selectedPlaybackProfile, { preferredSubtitleLang: e.target.value })}
-                className="w-full bg-[#1e1e1e] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-accent-500/60 transition-colors"
+                className="w-full bg-[#1e1e1e] border border-white/10 rounded-lg px-3 py-2 text-base md:text-sm text-white focus:outline-none focus:border-accent-500/60 transition-colors"
               >
                 <option value="" className="bg-[#1e1e1e]">Off — manual selection</option>
                 <option value="sv" className="bg-[#1e1e1e]">Swedish (sv)</option>

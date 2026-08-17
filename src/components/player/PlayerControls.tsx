@@ -58,6 +58,7 @@ export function PlayerControls({
   const [showSpeedMenu, setShowSpeedMenu] = useState(false)
   const [hoverTime, setHoverTime] = useState<number | null>(null)
   const [hoverPct, setHoverPct] = useState(0)
+  const [dragging, setDragging] = useState(false)
 
   useEffect(() => {
     if (!visible) { setShowTrackMenu(false); setShowSpeedMenu(false) }
@@ -67,24 +68,41 @@ export function PlayerControls({
   const bufferedPct = duration > 0 ? (buffered / duration) * 100 : 0
   const isLive = channel.type === 'live'
 
-  const getScrubRatio = (e: React.MouseEvent) => {
+  // Pointer events rather than mouse events: one code path covers mouse, pen and
+  // finger. The old handlers were onClick/onMouseMove, so on a touch device the
+  // scrubber could be tapped but never dragged.
+  const getScrubRatio = (clientX: number) => {
     if (!scrubberRef.current || duration === 0) return null
     const rect = scrubberRef.current.getBoundingClientRect()
-    return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+    return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
   }
 
-  const handleScrubberClick = (e: React.MouseEvent) => {
+  const handlePointerDown = (e: React.PointerEvent) => {
     e.stopPropagation()
-    const ratio = getScrubRatio(e)
-    if (ratio !== null) onSeek(ratio * duration)
+    const ratio = getScrubRatio(e.clientX)
+    if (ratio === null) return
+    // Capture, so a finger that slides off the 4px track keeps scrubbing.
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setDragging(true)
+    setHoverTime(ratio * duration)
+    setHoverPct(ratio * 100)
+    onSeek(ratio * duration)
   }
 
-  const handleScrubberMouseMove = (e: React.MouseEvent) => {
-    const ratio = getScrubRatio(e)
+  const handlePointerMove = (e: React.PointerEvent) => {
+    const ratio = getScrubRatio(e.clientX)
     if (ratio === null) return
     setHoverTime(ratio * duration)
     setHoverPct(ratio * 100)
-    if (e.buttons === 1) onSeek(ratio * duration)
+    if (dragging) onSeek(ratio * duration)
+  }
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
+    setDragging(false)
+    if (e.pointerType !== 'mouse') setHoverTime(null)
   }
 
   const title = channel.type === 'series'
@@ -99,7 +117,7 @@ export function PlayerControls({
     >
       {/* Top bar */}
       <div
-        className="flex items-start justify-between p-4 pt-5"
+        className="flex items-start justify-between p-4 pt-5 pt-safe px-safe"
         style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.8) 0%, transparent 100%)' }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -136,7 +154,7 @@ export function PlayerControls({
 
       {/* Bottom controls */}
       <div
-        className="flex flex-col gap-3 px-4 pb-5 pt-8"
+        className="flex flex-col gap-3 px-4 pb-5 pt-8 pb-safe px-safe"
         style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%)' }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -148,10 +166,18 @@ export function PlayerControls({
             </span>
             <div
               ref={scrubberRef}
-              className="relative flex-1 h-5 group/scrub cursor-pointer"
-              onClick={handleScrubberClick}
-              onMouseMove={handleScrubberMouseMove}
-              onMouseLeave={() => setHoverTime(null)}
+              className="relative flex-1 h-11 flex items-center group/scrub cursor-pointer touch-none"
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
+              onMouseLeave={() => { if (!dragging) setHoverTime(null) }}
+              role="slider"
+              aria-label="Seek"
+              aria-valuemin={0}
+              aria-valuemax={Math.round(duration)}
+              aria-valuenow={Math.round(currentTime)}
+              tabIndex={0}
             >
               {/* Hover time tooltip */}
               {hoverTime !== null && duration > 0 && (
@@ -176,7 +202,7 @@ export function PlayerControls({
               />
               {/* Thumb */}
               <div
-                className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-white shadow-md opacity-0 group-hover/scrub:opacity-100 transition-opacity"
+                className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 rounded-full bg-white shadow-md transition-all ${dragging ? 'w-5 h-5' : 'w-3.5 h-3.5'}`}
                 style={{ left: `${pct}%` }}
               />
             </div>
@@ -226,7 +252,8 @@ export function PlayerControls({
                 min="0" max="1" step="0.02"
                 value={muted ? 0 : volume}
                 onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
-                className="w-20 h-1 accent-accent-500 cursor-pointer opacity-0 group-hover/vol:opacity-100 transition-opacity"
+                aria-label="Volume"
+                className="w-20 h-1 accent-accent-500 cursor-pointer hidden md:block md:opacity-0 md:group-hover/vol:opacity-100 transition-opacity"
               />
             </div>
 

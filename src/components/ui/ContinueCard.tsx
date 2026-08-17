@@ -39,7 +39,7 @@ export function ContinueCard({
             blurhash={tmdbMeta?.blurhashPoster}
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
-          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="absolute inset-0 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
             <div className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center ring-2 ring-white/30">
               <Play size={16} fill="white" className="text-white ml-0.5" />
             </div>
@@ -70,7 +70,7 @@ export function ContinueCard({
           onRemove()
         }}
         aria-label="Remove from Continue Watching"
-        className="absolute top-2 left-2 w-7 h-7 rounded-full bg-black/70 hover:bg-danger-600/90 backdrop-blur-sm flex items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-all ring-1 ring-white/20"
+        className="absolute top-2 left-2 w-7 h-7 rounded-full relative after:absolute after:content-[''] after:-inset-2 bg-black/70 hover:bg-danger-600/90 backdrop-blur-sm flex items-center justify-center text-white opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all ring-1 ring-white/20"
       >
         <X size={14} />
       </button>
