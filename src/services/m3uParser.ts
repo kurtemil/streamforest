@@ -55,8 +55,17 @@ const SERIES_PATTERNS: SeriesPattern[] = [
 const YEAR_RE = /\[(\d{4})\]/g
 const EP_ONLY_RE = /^EP(\d+)(?:\s+-\s+(.+))?$/i
 
-function attr(line: string, key: string): string {
-  const m = line.match(new RegExp(`${key}="([^"]*)"`, 'i'))
+// Compiled once. This used to build a fresh RegExp on every call, which is four
+// per entry — 800 000 constructions for a 200 000-line playlist, all producing
+// one of three patterns.
+const ATTR_RE: Record<string, RegExp> = {
+  'tvg-logo': /tvg-logo="([^"]*)"/i,
+  'group-title': /group-title="([^"]*)"/i,
+  'tvg-id': /tvg-id="([^"]*)"/i,
+}
+
+function attr(line: string, key: keyof typeof ATTR_RE): string {
+  const m = line.match(ATTR_RE[key])
   return m ? m[1] : ''
 }
 

@@ -34,10 +34,11 @@ interface ChannelRowProps {
   channel: Channel
   programs: EpgProgram[]
   onPlay: () => void
+  /** Passed in so the whole page advances on one timer instead of one per row. */
+  now: number
 }
 
-function ChannelRow({ channel, programs, onPlay }: ChannelRowProps) {
-  const now = Date.now()
+function ChannelRow({ channel, programs, onPlay, now }: ChannelRowProps) {
   const current = programs.find(p => p.start <= now && p.end > now) ?? null
   const next    = programs.find(p => p.start > now) ?? null
 
@@ -179,7 +180,25 @@ function EpgStatusBar({ m3uUrl }: { m3uUrl: string }) {
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 
+// A guide that shows the wrong time is worse than no guide, and this one stopped
+// at whatever second it first rendered.
+function useMinuteTick(): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    // Land near the top of each minute rather than drifting from mount time.
+    const toNextMinute = 60_000 - (Date.now() % 60_000)
+    let interval: ReturnType<typeof setInterval> | undefined
+    const align = setTimeout(() => {
+      setNow(Date.now())
+      interval = setInterval(() => setNow(Date.now()), 60_000)
+    }, toNextMinute)
+    return () => { clearTimeout(align); if (interval) clearInterval(interval) }
+  }, [])
+  return now
+}
+
 export function LiveTVPage() {
+  const now = useMinuteTick()
   const { channels, m3uUrl } = usePlaylistStore()
   const { play } = usePlayerStore()
   const { programs, loadFromDB, resolveByName } = useEpgStore()
@@ -308,6 +327,7 @@ export function LiveTVPage() {
                     key={ch.id}
                     channel={ch}
                     programs={epgId ? (programs.get(epgId) ?? []) : []}
+                    now={now}
                     onPlay={() => play(ch)}
                   />
                 )
@@ -326,6 +346,7 @@ export function LiveTVPage() {
                 key={ch.id}
                 channel={ch}
                 programs={epgId ? (programs.get(epgId) ?? []) : []}
+                now={now}
                 onPlay={() => play(ch)}
               />
             )

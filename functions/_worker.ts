@@ -26,6 +26,9 @@ interface Env {
   DB: D1Database
   M3U_CACHE: KVNamespace
   ASSETS: Fetcher
+  /** Comma-separated hosts /proxy may fetch. Set as a Pages variable when the
+   *  provider moves; the code carries the current one as a fallback. */
+  PROXY_ALLOWED_HOSTS?: string
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -53,6 +56,21 @@ async function urlHash(url: string): Promise<string> {
 // The browser Fetch API transparently decompresses Content-Encoding: gzip,
 // so nothing in fetcher.ts needs to change.
 
+// Hosts /proxy will fetch. The transcode server has carried a list like this
+// since it was written; this handler had none, which made a public URL on the
+// open internet fetch anything for anyone and return it with CORS wide open —
+// an open relay running on someone else's Cloudflare quota.
+//
+// The provider migrates (iptvworld.xyz → nsclient.xyz → a bare IP), so this is
+// read from a binding when one exists and falls back to the current host.
+const DEFAULT_PROXY_HOSTS = ['45.12.1.27', 'nsclient.xyz']
+
+function proxyHostAllowed(env: Env, url: URL): boolean {
+  const configured = (env.PROXY_ALLOWED_HOSTS ?? '').split(',').map(h => h.trim()).filter(Boolean)
+  const allowed = configured.length > 0 ? configured : DEFAULT_PROXY_HOSTS
+  return allowed.some(h => url.hostname === h || url.hostname.endsWith('.' + h))
+}
+
 async function handleProxy(req: Request, env: Env): Promise<Response> {
   if (req.method === 'OPTIONS') return corsOpts()
 
@@ -63,6 +81,9 @@ async function handleProxy(req: Request, env: Env): Promise<Response> {
   try { targetUrl = new URL(target) } catch { return new Response('Invalid url', { status: 400 }) }
   if (targetUrl.protocol !== 'http:' && targetUrl.protocol !== 'https:') {
     return new Response('Only http/https allowed', { status: 400 })
+  }
+  if (!proxyHostAllowed(env, targetUrl)) {
+    return new Response(`Host not allowed: ${targetUrl.hostname}`, { status: 403, headers: CORS })
   }
 
   // Serve from KV cache when available — instant, no upstream hit needed

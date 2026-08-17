@@ -26,6 +26,9 @@ import { parseVttBlock } from '@/lib/vtt'
 import { PlayerControls } from './PlayerControls'
 
 const SAVE_INTERVAL_MS = 5000
+// Local saves are cheap; a D1 write is a network round trip on someone else's
+// quota, and the value only matters when another device opens the same title.
+const REMOTE_PUSH_INTERVAL_MS = 30_000
 const VIDEO_EXT = /\.(mkv|mp4|avi|mov|wmv|flv|webm)$/i
 
 // Playback on iOS goes through server-generated HLS: WebKit plays native HLS
@@ -139,6 +142,7 @@ export function VideoPlayer() {
   const hlsPlaylistUrlRef = useRef<string | null>(null)
   // Diagnostics: first frame is only interesting once per playback attempt, and a
   // stall is only interesting as a duration — so both need a little state.
+  const lastRemotePushRef = useRef(0)
   const sawFirstFrameRef = useRef(false)
   const stallStartedRef = useRef<number | null>(null)
 
@@ -840,8 +844,18 @@ export function VideoPlayer() {
         // against a whole-film position made completed=true five seconds into a
         // resumed film, which dropped it straight out of Continue Watching.
         const dur = resolveSaveDuration(transcodedDurationRef.current, video.duration)
-        saveProgress(profileId, current.id, realTime, dur)
-          .then((entry) => pushProgress(entry))
+        saveProgress(profileId, current.id, realTime, dur).then((entry) => {
+          // Local every 5 s, remote every 30. The old code pushed to D1 on every
+          // tick: 720 writes an hour per device, for a number nobody reads until
+          // the next time the title is opened. Close, pause and backgrounding all
+          // force a push, so the cross-device position is never more than one
+          // deliberate action out of date.
+          const now = Date.now()
+          if (now - lastRemotePushRef.current >= REMOTE_PUSH_INTERVAL_MS) {
+            lastRemotePushRef.current = now
+            pushProgress(entry)
+          }
+        })
       }
     }, SAVE_INTERVAL_MS)
     return () => {
@@ -1206,6 +1220,29 @@ export function VideoPlayer() {
     if (typeof navigator === 'undefined' || !('mediaSession' in navigator)) return
     navigator.mediaSession.playbackState = current ? (isPlaying ? 'playing' : 'paused') : 'none'
   }, [isPlaying, current])
+
+  // Save when the app goes away. Swiping it up, locking the phone or switching
+  // tabs never reached the 5-second timer's next tick, so the last few seconds —
+  // and on iOS often much more — were simply lost.
+  useEffect(() => {
+    if (!current || current.type === 'live') return
+    const flush = () => {
+      const video = videoRef.current
+      const profileId = useProfileStore.getState().activeProfileId
+      if (!video || !profileId || video.currentTime <= 0) return
+      const realTime = playbackOffsetRef.current + video.currentTime
+      const dur = resolveSaveDuration(transcodedDurationRef.current, video.duration)
+      lastRemotePushRef.current = Date.now()
+      saveProgress(profileId, current.id, realTime, dur).then((entry) => pushProgress(entry))
+    }
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flush() }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', flush)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', flush)
+    }
+  }, [current])
 
   // Keep the server-side HLS session alive while the player is open.
   //

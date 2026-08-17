@@ -46,12 +46,16 @@ export function HomePage() {
     return all.sort((a, b) => b.lastWatched - a.lastWatched).slice(0, 40)
   }, [activeProfileId])
 
+  // Index the profile's whole progress table, rather than asking about the first
+  // 500 channels. The old query built one key per channel and capped the list, so
+  // in a library of tens of thousands nothing past position 500 could ever show a
+  // progress bar. There are at most a few hundred progress rows, which is the
+  // smaller side of the join by orders of magnitude.
   const progressMap = useLiveQuery(async () => {
     if (!activeProfileId) return {}
-    const profileIds = channels.slice(0, 500).map((c) => `${activeProfileId}:${c.id}`)
-    const rows = await db.watchProgress.where('id').anyOf(profileIds).toArray()
+    const rows = await db.watchProgress.where('profileId').equals(activeProfileId).toArray()
     return Object.fromEntries(rows.map((r) => [r.channelId, r]))
-  }, [channels, activeProfileId])
+  }, [activeProfileId])
 
   const continueWatching = useMemo(() => {
     if (!recentProgress || !channels.length) return []

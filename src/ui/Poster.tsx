@@ -86,6 +86,14 @@ export function Poster({ src, alt, type, className = '', tmdbPosterPath, tmdbSiz
         alt={alt}
         className={`absolute inset-0 w-full h-full object-cover${blurhash ? ` transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}` : ''}`}
         decoding="async"
+        // A grid with infinite scroll can hold hundreds of these, and every one
+        // of them was fetched the moment it rendered — the whole page's artwork,
+        // over mobile data, for rows nobody had scrolled to yet.
+        loading="lazy"
+        // 2:3 posters. Declaring the ratio stops the row reflowing as each one
+        // arrives, without pinning either dimension.
+        width={342}
+        height={513}
         onLoad={blurhash ? () => setLoaded(true) : undefined}
         onError={() => {
           if (currentSrc === tmdbSrc && src && src !== tmdbSrc) {

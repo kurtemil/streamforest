@@ -115,15 +115,15 @@ export function MoviesPage() {
       }))
   }, [movies, isRowMode])
 
+  // The profile's whole progress table, indexed once. Querying by the visible
+  // channel ids meant building a key per card and capping the list, so a filtered
+  // grid deep in the library showed no progress at all — and the query re-ran on
+  // every keystroke, because `filtered` changes with the search box.
   const progressMap = useLiveQuery(async () => {
     if (!activeProfileId) return {}
-    const ids = isRowMode
-      ? movies.slice(0, 200).map((m) => m.id)
-      : filtered.map((m) => m.id)
-    const profileIds = ids.map((id) => `${activeProfileId}:${id}`)
-    const rows = await db.watchProgress.where('id').anyOf(profileIds).toArray()
+    const rows = await db.watchProgress.where('profileId').equals(activeProfileId).toArray()
     return Object.fromEntries(rows.map((r) => [r.channelId, r]))
-  }, [isRowMode, movies, filtered, activeProfileId])
+  }, [activeProfileId])
 
   // Enrich first N movies in row mode (covers all rows + gives TMDB genre data)
   const enrichTargets = useMemo(() => {
