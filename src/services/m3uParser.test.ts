@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseM3ULines } from './m3uParser'
+import { parseM3ULines, createM3UParser } from './m3uParser'
 import type { Channel } from '@/types'
 
 // Every name below is a real entry from the production playlist. The URLs are
@@ -196,5 +196,44 @@ describe('parseM3ULines — classification', () => {
     ])[0]
     expect(withId.tvgId).toBe('svt1.se')
     expect(parseOne('SVT1', 'Sweden', `${HOST}/1`).tvgId).toBeUndefined()
+  })
+})
+
+// ── Incremental parsing ───────────────────────────────────────────────────────
+
+describe('createM3UParser', () => {
+  const lines = [
+    ...entry('Arrival [2016]', 'VOD: Sci-Fi', `${HOST}/movie/1.mkv`),
+    ...entry('Helstrom S01 Helstrom - S01E01 - Mother’s Little Helpers', 'Series: Drama', `${HOST}/series/2.mkv`),
+    ...entry('-= Sweden =-', 'Sweden', `${HOST}/3`),
+    ...entry('SVT1 HD', 'Sweden', `${HOST}/4`),
+    ...entry('Dune [2021]', 'VOD: Sci-Fi', `${HOST}/movie/5.mkv`),
+  ]
+
+  it('matches the one-shot parser regardless of where the stream is split', () => {
+    const expected = parseM3ULines(lines)
+    // Every split point, including ones that cut between an #EXTINF and its URL —
+    // which is exactly what a network chunk boundary does.
+    for (let split = 0; split <= lines.length; split++) {
+      const parser = createM3UParser()
+      const streamed = [
+        ...parser.push(lines.slice(0, split)),
+        ...parser.push(lines.slice(split)),
+      ]
+      expect(streamed, `split at ${split}`).toEqual(expected)
+    }
+  })
+
+  it('numbers sortIndex continuously across batches', () => {
+    const parser = createM3UParser()
+    const first = parser.push(lines.slice(0, 4))
+    const rest = parser.push(lines.slice(4))
+    expect([...first, ...rest].map((c) => c.sortIndex)).toEqual([0, 1, 2, 3])
+  })
+
+  it('emits nothing for a batch that ends mid-entry', () => {
+    const parser = createM3UParser()
+    expect(parser.push([lines[0]])).toEqual([])
+    expect(parser.push([lines[1]])).toHaveLength(1)
   })
 })

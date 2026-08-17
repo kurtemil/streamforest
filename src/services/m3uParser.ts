@@ -135,60 +135,83 @@ function makeId(url: string, type: ContentType): string {
   return `${prefix}_${numericId}`
 }
 
-export function parseM3ULines(lines: string[]): Channel[] {
-  const channels: Channel[] = []
+/**
+ * Incremental parser.
+ *
+ * A playlist is 60 MB and arrives as a stream, so nothing should have to hold
+ * all of it: `push` takes whatever lines have arrived and returns the entries
+ * completed by them, carrying the half-finished one over to the next call.
+ * `parseM3ULines` below is the same thing in one shot, for tests and callers
+ * with the whole file already in hand.
+ */
+export function createM3UParser() {
   let pendingMeta: string | null = null
   let sortIndex = 0
 
-  for (const raw of lines) {
-    const line = raw.trim()
-    if (!line) continue
+  return {
+    push(lines: string[]): Channel[] {
+      const out: Channel[] = []
+      for (const raw of lines) {
+        const line = raw.trim()
+        if (!line) continue
 
-    if (line.startsWith('#EXTINF:')) {
-      pendingMeta = line
-      continue
-    }
-
-    if (pendingMeta && !line.startsWith('#')) {
-      const url = line
-      const metaLine = pendingMeta
-      pendingMeta = null
-
-      const name = displayName(metaLine)
-      const logo = attr(metaLine, 'tvg-logo')
-      const groupTitle = attr(metaLine, 'group-title')
-      const tvgId = attr(metaLine, 'tvg-id')
-
-      if (name.startsWith('-=') && name.endsWith('=-')) continue
-
-      const type = detectType(groupTitle, url)
-      const id = makeId(url, type)
-      const base: Channel = { id, name, url, logo, groupTitle, type, sortIndex: sortIndex++, ...(tvgId ? { tvgId } : {}) }
-
-      if (type === 'series') {
-        let parsed = parseSeries(name)
-        // Fallback: "EP01 - Title" with no show name — group under placeholder keyed by group
-        if (!parsed) {
-          const epOnly = EP_ONLY_RE.exec(normalizeSeriesName(name))
-          if (epOnly) {
-            const cleanGroup = groupTitle.replace(/^Series:\s*/i, '').trim()
-            parsed = {
-              showName: cleanGroup ? `Unknown (${cleanGroup})` : 'Unknown',
-              season: 1,
-              episode: parseInt(epOnly[1]),
-              episodeTitle: epOnly[2]?.trim(),
-            }
-          }
+        if (line.startsWith('#EXTINF:')) {
+          pendingMeta = line
+          continue
         }
-        channels.push(parsed ? { ...base, ...parsed } : base)
-      } else if (type === 'movie') {
-        const { movieTitle, year } = parseMovieTitle(name)
-        channels.push({ ...base, movieTitle, year })
-      } else {
-        channels.push(base)
+        if (!pendingMeta || line.startsWith('#')) continue
+
+        const metaLine = pendingMeta
+        pendingMeta = null
+        const channel = buildChannel(metaLine, line, sortIndex)
+        if (channel) {
+          out.push(channel)
+          sortIndex++
+        }
+      }
+      return out
+    },
+  }
+}
+
+/** One EXTINF line plus its URL, or null for the rows that are only headings. */
+function buildChannel(metaLine: string, url: string, sortIndex: number): Channel | null {
+  const name = displayName(metaLine)
+  const logo = attr(metaLine, 'tvg-logo')
+  const groupTitle = attr(metaLine, 'group-title')
+  const tvgId = attr(metaLine, 'tvg-id')
+
+  if (name.startsWith('-=') && name.endsWith('=-')) return null
+
+  const type = detectType(groupTitle, url)
+  const id = makeId(url, type)
+  const base: Channel = { id, name, url, logo, groupTitle, type, sortIndex, ...(tvgId ? { tvgId } : {}) }
+
+  if (type === 'series') {
+    let parsed = parseSeries(name)
+    // Fallback: "EP01 - Title" with no show name — group under a placeholder
+    // keyed by group, so the episodes at least stay together.
+    if (!parsed) {
+      const epOnly = EP_ONLY_RE.exec(normalizeSeriesName(name))
+      if (epOnly) {
+        const cleanGroup = groupTitle.replace(/^Series:\s*/i, '').trim()
+        parsed = {
+          showName: cleanGroup ? `Unknown (${cleanGroup})` : 'Unknown',
+          season: 1,
+          episode: parseInt(epOnly[1]),
+          episodeTitle: epOnly[2]?.trim(),
+        }
       }
     }
+    return parsed ? { ...base, ...parsed } : base
   }
+  if (type === 'movie') {
+    const { movieTitle, year } = parseMovieTitle(name)
+    return { ...base, movieTitle, year }
+  }
+  return base
+}
 
-  return channels
+export function parseM3ULines(lines: string[]): Channel[] {
+  return createM3UParser().push(lines)
 }

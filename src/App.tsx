@@ -1,13 +1,16 @@
-import { useEffect } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import { Layout } from '@/components/layout/Layout'
+// Home is what almost every visit opens, so it stays in the main bundle. The
+// rest load on first navigation — Settings and Series alone are 1500 lines that
+// most sessions never reach.
 import { HomePage } from '@/pages/HomePage'
-import { MoviesPage } from '@/pages/MoviesPage'
-import { SeriesPage } from '@/pages/SeriesPage'
-import { LiveTVPage } from '@/pages/LiveTVPage'
-import { SettingsPage } from '@/pages/SettingsPage'
-import { LibraryPage } from '@/pages/LibraryPage'
+const MoviesPage = lazy(() => import('@/pages/MoviesPage').then(m => ({ default: m.MoviesPage })))
+const SeriesPage = lazy(() => import('@/pages/SeriesPage').then(m => ({ default: m.SeriesPage })))
+const LiveTVPage = lazy(() => import('@/pages/LiveTVPage').then(m => ({ default: m.LiveTVPage })))
+const SettingsPage = lazy(() => import('@/pages/SettingsPage').then(m => ({ default: m.SettingsPage })))
+const LibraryPage = lazy(() => import('@/pages/LibraryPage').then(m => ({ default: m.LibraryPage })))
 import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { ProfilePicker } from '@/components/ProfilePicker'
 import { usePlaylistStore } from '@/stores/playlistStore'
@@ -56,6 +59,14 @@ export default function App() {
   return (
     <>
       <Layout>
+        {/* A route chunk arrives in milliseconds on a warm connection; the
+            fallback exists so a cold one shows the app's own spinner rather
+            than a blank frame. */}
+        <Suspense fallback={
+          <div className="flex h-full items-center justify-center">
+            <div className="h-8 w-8 rounded-full border-2 border-accent-600 border-t-transparent animate-spin" />
+          </div>
+        }>
         <AnimatePresence mode="wait" initial={false}>
           <Routes location={location} key={location.pathname.split('/')[1] || 'home'}>
             <Route path="/"           element={<PageTransition><HomePage /></PageTransition>} />
@@ -68,6 +79,7 @@ export default function App() {
             <Route path="*"           element={<Navigate to="/" replace />} />
           </Routes>
         </AnimatePresence>
+        </Suspense>
       </Layout>
       <VideoPlayer />
       {(!activeProfileId || showPicker) && (

@@ -96,25 +96,46 @@ export async function clearPlaylist() {
 
 const SAVE_CHUNK = 2000
 
-export async function saveChannels(
-  channels: Channel[],
-  url: string,
-  onProgress?: (pct: number) => void,
-) {
+/**
+ * Clear the old playlist, ready for entries to stream in.
+ *
+ * Split from the write itself because the worker delivers batches as it parses:
+ * the table has to be emptied once at the start, not per batch, and the metadata
+ * row is only meaningful once the whole file has landed.
+ */
+export async function startPlaylistSave(): Promise<void> {
   await db.channels.clear()
-  for (let i = 0; i < channels.length; i += SAVE_CHUNK) {
-    await db.channels.bulkPut(channels.slice(i, i + SAVE_CHUNK))
-    onProgress?.(Math.min(99, Math.round(((i + SAVE_CHUNK) / channels.length) * 100)))
+}
+
+/** Record what was stored. Written last, so a half-finished import is visible as one. */
+export async function finishPlaylistSave(channels: Channel[], url: string): Promise<void> {
+  let movieCount = 0
+  let seriesCount = 0
+  let liveCount = 0
+  for (const c of channels) {
+    if (c.type === 'movie') movieCount++
+    else if (c.type === 'series') seriesCount++
+    else liveCount++
   }
-  const movieCount = channels.filter((c) => c.type === 'movie').length
-  const seriesCount = channels.filter((c) => c.type === 'series').length
-  const liveCount = channels.filter((c) => c.type === 'live').length
   await db.playlistMeta.put({
     id: 1, url,
     fetchedAt: Date.now(),
     entryCount: channels.length,
     movieCount, seriesCount, liveCount,
   })
+}
+
+export async function saveChannels(
+  channels: Channel[],
+  url: string,
+  onProgress?: (pct: number) => void,
+) {
+  await startPlaylistSave()
+  for (let i = 0; i < channels.length; i += SAVE_CHUNK) {
+    await db.channels.bulkPut(channels.slice(i, i + SAVE_CHUNK))
+    onProgress?.(Math.min(99, Math.round(((i + SAVE_CHUNK) / channels.length) * 100)))
+  }
+  await finishPlaylistSave(channels, url)
   onProgress?.(100)
 }
 
