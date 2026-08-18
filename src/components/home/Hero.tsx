@@ -59,7 +59,7 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
     : null
 
   return (
-    <div className="group relative w-full h-[58vh] min-h-[380px] max-h-[640px] overflow-hidden select-none">
+    <div className="group relative w-full h-[52vh] min-h-[360px] max-h-[560px] overflow-hidden select-none">
       {/* Backdrop */}
       <AnimatePresence mode="sync">
         <motion.div

@@ -708,7 +708,7 @@ export function SeriesPage() {
                   <SectionHeader title="Continue Watching" />
                   <ScrollableRow>
                     {continueWatchingSeries.map(({ channel, progress, showKey }) => (
-                      <div key={channel.id} className="flex-shrink-0 w-40">
+                      <div key={channel.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                         <ContinueCard
                           channel={channel}
                           progress={progress}
@@ -737,7 +737,7 @@ export function SeriesPage() {
                     const data = showMap.get(name)!
                     const allEps = Array.from(data.seasons.values()).flat()
                     return (
-                      <div key={name} className="flex-shrink-0 w-40">
+                      <div key={name} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                         <ShowCard
                           showName={data.displayName}
                           poster={data.logo}
@@ -764,7 +764,7 @@ export function SeriesPage() {
                       if (!data) return null
                       const allEps = Array.from(data.seasons.values()).flat()
                       return (
-                        <div key={name} className="flex-shrink-0 w-40">
+                        <div key={name} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                           <ShowCard
                             showName={data.displayName}
                             poster={data.logo}
@@ -795,7 +795,7 @@ export function SeriesPage() {
                       if (!data) return null
                       const allEps = Array.from(data.seasons.values()).flat()
                       return (
-                        <div key={name} className="flex-shrink-0 w-40">
+                        <div key={name} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                           <ShowCard
                             showName={data.displayName}
                             poster={data.logo}

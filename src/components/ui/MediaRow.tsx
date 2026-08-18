@@ -34,7 +34,7 @@ export function ScrollableRow({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="group/row relative">
-      <div ref={ref} className="flex gap-3 overflow-x-auto scrollbar-hide pb-2">{children}</div>
+      <div ref={ref} className="flex gap-3 overflow-x-auto scrollbar-hide pb-2 snap-x snap-proximity overscroll-x-contain">{children}</div>
       {/* Arrows are a pointer affordance: on touch the row is swiped instead,
           so they stay hover-gated and are marked for the touch audit. */}
       {canLeft && (

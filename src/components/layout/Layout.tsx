@@ -1,12 +1,11 @@
 import { useEffect, useRef, type ReactNode } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
-import { Settings } from 'lucide-react'
+import { useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { BottomNav } from './BottomNav'
 import { CommandPalette } from '@/components/search/CommandPalette'
 import { InstallPrompt } from '@/components/ui/InstallPrompt'
 import { useSearchStore } from '@/stores/searchStore'
-import { getProfile, PROFILES, useProfileStore } from '@/stores/profileStore'
+import { PROFILES, useProfileStore } from '@/stores/profileStore'
 
 export function Layout({ children }: { children: ReactNode }) {
   const { toggle } = useSearchStore()
@@ -15,8 +14,6 @@ export function Layout({ children }: { children: ReactNode }) {
   const activeProfileId = useProfileStore((s) => s.activeProfileId)
   const openPicker = useProfileStore((s) => s.openPicker)
   const activeProfile = PROFILES.find((p) => p.id === activeProfileId)
-  const role = getProfile(activeProfileId)?.role ?? 'kid'
-  const canSeeSettings = role === 'parent' || role === 'admin'
 
   useEffect(() => {
     mainRef.current?.scrollTo(0, 0)
@@ -49,17 +46,24 @@ export function Layout({ children }: { children: ReactNode }) {
       >
         {children}
       </main>
-      {/* Profile switching existed only in the sidebar, which is hidden below md.
-          Signed in as one of the kids on a phone, there was no way back without
-          clearing localStorage. The avatar floats over the content rather than
-          taking a sixth slot in a tab bar that is already tight at 375px. */}
+      {/* Profile switching exists only in the sidebar on desktop, which is hidden
+          below md — signed in as one of the kids on a phone there was no way back.
+          It needs to float, but not from the top right: that corner belongs to the
+          controls of whatever is under it. A rating chip on the first row of
+          posters, the close button on a dialog, the search field in a page header
+          — the avatar sat on top of all of them.
+          
+          Bottom right, above the tab bar, is both out of their way and the easiest
+          place on a large phone for a thumb to reach. Settings used to be a second
+          floating button in that same corner; it is a row inside the picker now,
+          so there is one floating control instead of two fighting for the spot. */}
       <button
         onClick={openPicker}
         aria-label={activeProfile ? `Profile: ${activeProfile.name} — switch` : 'Choose profile'}
-        className="fixed top-[calc(0.75rem+env(safe-area-inset-top,0px))] right-3 z-40 flex md:hidden items-center justify-center w-11 h-11"
+        className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] right-3 z-40 flex md:hidden items-center justify-center w-12 h-12 rounded-full bg-surface-200/80 backdrop-blur-xl ring-1 ring-white/12 shadow-cinema active:scale-95 transition-transform"
       >
         <span
-          className="w-9 h-9 rounded-xl flex items-center justify-center text-white text-sm font-bold ring-1 ring-white/20 shadow-lg"
+          className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold"
           style={{ backgroundColor: activeProfile?.color ?? '#404040' }}
         >
           {activeProfile?.name[0] ?? '?'}
@@ -67,18 +71,6 @@ export function Layout({ children }: { children: ReactNode }) {
       </button>
 
       <BottomNav />
-      {canSeeSettings && (
-        <NavLink
-          to="/settings"
-          className={({ isActive }) =>
-            `fixed bottom-20 right-3 z-50 flex md:hidden items-center justify-center w-11 h-11 rounded-full ring-1 ring-white/10 shadow-lg transition-colors ${
-              isActive ? 'bg-accent-600 text-white ring-accent-500' : 'bg-surface-200 text-neutral-400'
-            }`
-          }
-        >
-          <Settings size={16} />
-        </NavLink>
-      )}
       <CommandPalette />
       <InstallPrompt />
     </div>

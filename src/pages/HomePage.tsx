@@ -346,53 +346,14 @@ export function HomePage() {
         />
       )}
 
-      <div className="px-4 sm:px-6 pb-12 pt-16 md:pt-6 space-y-10">
-        {/* Continue Watching */}
-        {continueWatching.length > 0 && (
-          <section>
-            <SectionHeader title="Continue Watching" />
-            <ScrollableRow>
-              {continueWatching.map(({ channel, progress }) => {
-                const tmdbKey =
-                  channel.type === 'series' && channel.showName
-                    ? normalizeShowKey(channel.showName)
-                    : channel.id
-                return (
-                  <div key={channel.id} className="flex-shrink-0 w-40">
-                    <ContinueCard
-                      channel={channel}
-                      progress={progress}
-                      tmdbMeta={tmdbMap.get(tmdbKey)}
-                      onClick={() => {
-                        if (channel.type === 'movie')
-                          navigate(`/movies?playing=${channel.id}`)
-                        else if (channel.type === 'series')
-                          navigate(
-                            `/series?show=${encodeURIComponent(normalizeShowKey(channel.showName ?? channel.name))}&playing=${channel.id}`,
-                          )
-                        play(channel)
-                      }}
-                      onRemove={() => {
-                        if (activeProfileId) {
-                          clearProgress(activeProfileId, channel.id)
-                          deleteRemoteProgress(activeProfileId, channel.id)
-                        }
-                      }}
-                    />
-                  </div>
-                )
-              })}
-            </ScrollableRow>
-          </section>
-        )}
-
+      <div className="px-4 sm:px-6 pb-12 pt-6 space-y-8 sm:space-y-10">
         {/* Recently Added Movies */}
         {recentMovies.length > 0 && (
           <section>
             <SectionHeader title="Recently Added Movies" to="/movies" />
             <ScrollableRow>
               {recentMovies.map((m) => (
-                <div key={m.id} className="flex-shrink-0 w-40">
+                <div key={m.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                   <MovieCard
                     channel={m}
                     progress={progressMap?.[m.id]}
@@ -422,7 +383,7 @@ export function HomePage() {
                     ? `S${String(ch.season).padStart(2, '0')}E${String(ch.episode).padStart(2, '0')}${ch.episodeTitle ? ` · ${ch.episodeTitle}` : ''}`
                     : undefined
                 return (
-                  <div key={ch.id} className="flex-shrink-0 w-40">
+                  <div key={ch.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                     <MovieCard
                       channel={ch}
                       progress={progressMap?.[ch.id]}
@@ -444,6 +405,45 @@ export function HomePage() {
           </section>
         )}
 
+        {/* Continue Watching — a row among the others, after the new arrivals */}
+        {continueWatching.length > 0 && (
+          <section>
+            <SectionHeader title="Continue Watching" />
+            <ScrollableRow>
+              {continueWatching.map(({ channel, progress }) => {
+                const tmdbKey =
+                  channel.type === 'series' && channel.showName
+                    ? normalizeShowKey(channel.showName)
+                    : channel.id
+                return (
+                  <div key={channel.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
+                    <ContinueCard
+                      channel={channel}
+                      progress={progress}
+                      tmdbMeta={tmdbMap.get(tmdbKey)}
+                      onClick={() => {
+                        if (channel.type === 'movie')
+                          navigate(`/movies?playing=${channel.id}`)
+                        else if (channel.type === 'series')
+                          navigate(
+                            `/series?show=${encodeURIComponent(normalizeShowKey(channel.showName ?? channel.name))}&playing=${channel.id}`,
+                          )
+                        play(channel)
+                      }}
+                      onRemove={() => {
+                        if (activeProfileId) {
+                          clearProgress(activeProfileId, channel.id)
+                          deleteRemoteProgress(activeProfileId, channel.id)
+                        }
+                      }}
+                    />
+                  </div>
+                )
+              })}
+            </ScrollableRow>
+          </section>
+        )}
+
         {/* Because you watched X */}
         {recommendations && recommendations.items.length > 0 && (
           <section>
@@ -457,7 +457,7 @@ export function HomePage() {
                     ? normalizeShowKey(ch.showName)
                     : ch.id
                 return (
-                  <div key={ch.id} className="flex-shrink-0 w-40">
+                  <div key={ch.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                     <MovieCard
                       channel={ch}
                       tmdbMeta={tmdbMap.get(key)}
@@ -492,7 +492,7 @@ export function HomePage() {
             />
             <ScrollableRow>
               {items.map((m) => (
-                <div key={m.id} className="flex-shrink-0 w-40">
+                <div key={m.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                   <MovieCard
                     channel={m}
                     progress={progressMap?.[m.id]}
@@ -521,7 +521,7 @@ export function HomePage() {
               {items.map((ch) => {
                 const showKey = normalizeShowKey(ch.showName ?? ch.name)
                 return (
-                  <div key={ch.id} className="flex-shrink-0 w-40">
+                  <div key={ch.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                     <MovieCard
                       channel={ch}
                       isWatchLater={watchLaterSet.has(showKey)}
@@ -545,7 +545,7 @@ export function HomePage() {
             />
             <ScrollableRow>
               {items.map((m) => (
-                <div key={m.id} className="flex-shrink-0 w-40">
+                <div key={m.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                   <MovieCard
                     channel={m}
                     progress={progressMap?.[m.id]}
@@ -574,7 +574,7 @@ export function HomePage() {
               {items.map((ch) => {
                 const showKey = normalizeShowKey(ch.showName ?? ch.name)
                 return (
-                  <div key={ch.id} className="flex-shrink-0 w-40">
+                  <div key={ch.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                     <MovieCard
                       channel={ch}
                       isWatchLater={watchLaterSet.has(showKey)}

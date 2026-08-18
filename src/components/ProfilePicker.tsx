@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import { PROFILES, useProfileStore, type Profile } from '@/stores/profileStore'
+import { Link } from 'react-router-dom'
+import { Settings } from 'lucide-react'
+import { PROFILES, getProfile, useProfileStore, type Profile } from '@/stores/profileStore'
+import { Logo } from '@/ui'
 import { syncFromRemote } from '@/services/sync'
 import { useExclusionsStore } from '@/stores/exclusionsStore'
 import { kidRestrictionsStore } from '@/stores/kidRestrictionsStore'
@@ -145,6 +148,8 @@ function PinEntry({
 
 export function ProfilePicker({ forced }: { forced?: boolean }) {
   const { setProfile, closePicker, activeProfileId } = useProfileStore()
+  const role = getProfile(activeProfileId)?.role ?? 'kid'
+  const canSeeSettings = role === 'parent' || role === 'admin'
   const [pendingId, setPendingId] = useState<string | null>(null)
   const pendingProfile = PROFILES.find((p) => p.id === pendingId)
 
@@ -163,11 +168,7 @@ export function ProfilePicker({ forced }: { forced?: boolean }) {
   return (
     <div className="fixed inset-0 z-[60] bg-black/95 flex flex-col items-center justify-center gap-10 pt-safe pb-safe px-safe">
       <div className="flex flex-col items-center gap-2">
-        <div className="w-10 h-10 rounded-xl bg-accent-600 flex items-center justify-center mb-2">
-          <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5">
-            <path d="M5 3l14 9-14 9V3z" fill="white" />
-          </svg>
-        </div>
+        <Logo size={40} className="rounded-xl mb-2" />
         {!pendingProfile && <h1 className="text-3xl font-bold text-white">Who's watching?</h1>}
       </div>
 
@@ -199,14 +200,26 @@ export function ProfilePicker({ forced }: { forced?: boolean }) {
             ))}
           </div>
 
-          {!forced && activeProfileId && (
-            <button
-              onClick={closePicker}
-              className="text-neutral-600 hover:text-neutral-400 text-sm transition-colors"
-            >
-              Cancel
-            </button>
-          )}
+          <div className="flex flex-col items-center gap-5">
+            {canSeeSettings && (
+              <Link
+                to="/settings"
+                onClick={closePicker}
+                className="flex items-center gap-2 min-h-11 px-5 rounded-full ring-1 ring-white/15 text-neutral-300 hover:text-white hover:ring-white/30 text-sm font-medium transition-colors md:hidden"
+              >
+                <Settings size={15} />
+                Settings
+              </Link>
+            )}
+            {!forced && activeProfileId && (
+              <button
+                onClick={closePicker}
+                className="min-h-11 px-4 text-neutral-600 hover:text-neutral-400 text-sm transition-colors"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
         </>
       )}
     </div>

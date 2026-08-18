@@ -48,6 +48,22 @@
     touch-action: manipulation;
   }
 
+  /* iOS's own grey tap flash is switched off above, and `hover:` states do nothing
+     under a finger — so on a phone, pressing anything produced no feedback at all.
+     This is the baseline acknowledgement every control gets for free.
+
+     Opacity, not a transform: a blanket `scale()` would replace the translate that
+     centres half the overlay controls in this app and make them jump on press.
+     Controls that suit a squeeze opt into one explicitly. */
+  @media (hover: none) {
+    button:active,
+    a:active,
+    [role="button"]:active {
+      opacity: 0.55;
+      transition: opacity 60ms linear;
+    }
+  }
+
   /* iOS zooms the whole page in when a focused field is under 16px. Every input
      in this app was 14px, so tapping the search box moved the layout under the
      user's thumb. The visual size stays where the design put it — only the
@@ -100,6 +116,18 @@
 }
 
 @layer utilities {
+  /* A press that moves. Reserved for large surfaces — cards, tab-bar items — where
+     a scale reads as touching something rather than as a glitch. */
+  .press {
+    transition: transform 120ms var(--ease-out);
+  }
+  .press:active {
+    transform: scale(0.97);
+  }
+  .press-deep:active {
+    transform: scale(0.93);
+  }
+
   .scrollbar-hide {
     -ms-overflow-style: none;
     scrollbar-width: none;

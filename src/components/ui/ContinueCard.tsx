@@ -27,7 +27,7 @@ export function ContinueCard({
 
   return (
     <div className="group relative w-full">
-      <button onClick={onClick} className="block w-full text-left">
+      <button onClick={onClick} className="block w-full text-left press">
         <div className="relative w-full aspect-[2/3] rounded-card overflow-hidden bg-surface-300 ring-1 ring-white/8 transition-all duration-300 ease-out-expo group-hover:scale-[1.04] group-hover:-translate-y-1 shadow-card group-hover:shadow-card-hover">
           <Poster
             src={channel.logo}

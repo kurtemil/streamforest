@@ -22,7 +22,7 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
   const rating       = tmdbMeta && !tmdbMeta.notFound && tmdbMeta.rating > 0 ? tmdbMeta.rating : null
 
   return (
-    <button onClick={onClick} className="group text-left w-full">
+    <button onClick={onClick} className="group press text-left w-full">
       <div className="relative aspect-[2/3] rounded-card overflow-hidden bg-surface-300 ring-1 ring-white/8 transition-all duration-300 ease-out-expo group-hover:scale-[1.04] group-hover:-translate-y-1 shadow-card group-hover:shadow-card-hover">
         <Poster
           src={channel.logo}

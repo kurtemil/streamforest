@@ -308,7 +308,7 @@ export function MoviesPage() {
                     <SectionHeader title="Continue Watching" />
                     <ScrollableRow>
                       {continueWatchingMovies.map(({ channel, progress }) => (
-                        <div key={channel.id} className="flex-shrink-0 w-40">
+                        <div key={channel.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                           <ContinueCard
                             channel={channel}
                             progress={progress}
@@ -334,7 +334,7 @@ export function MoviesPage() {
                   <SectionHeader title="Recently Added" />
                   <ScrollableRow>
                     {movies.slice(0, 20).map((m) => (
-                      <div key={m.id} className="flex-shrink-0 w-40">
+                      <div key={m.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                         <MovieCard
                           channel={m}
                           progress={progressMap?.[m.id]}
@@ -354,7 +354,7 @@ export function MoviesPage() {
                     <SectionHeader title={genre} />
                     <ScrollableRow>
                       {items.map((m) => (
-                        <div key={m.id} className="flex-shrink-0 w-40">
+                        <div key={m.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                           <MovieCard
                             channel={m}
                             progress={progressMap?.[m.id]}
@@ -378,7 +378,7 @@ export function MoviesPage() {
                     />
                     <ScrollableRow>
                       {items.map((m) => (
-                        <div key={m.id} className="flex-shrink-0 w-40">
+                        <div key={m.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                           <MovieCard
                             channel={m}
                             progress={progressMap?.[m.id]}
@@ -400,7 +400,7 @@ export function MoviesPage() {
                     />
                     <ScrollableRow>
                       {recommendations.items.map((m) => (
-                        <div key={m.id} className="flex-shrink-0 w-40">
+                        <div key={m.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                           <MovieCard
                             channel={m}
                             progress={progressMap?.[m.id]}
