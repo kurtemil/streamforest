@@ -278,15 +278,21 @@ export function SettingsPage() {
   const playbackPrefs = { preferredSubtitleLang: '', preferredAudioLang: '', autoplayNextEpisode: true, ...rawPlaybackPrefs }
 
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [clearing, setClearing] = useState(false)
   const [clearingTmdb, setClearingTmdb] = useState(false)
   const [tmdbCleared, setTmdbCleared] = useState<number | null>(null)
   const meta = useLiveQuery(() => getPlaylistMeta())
 
-  const handleSave = () => {
-    setM3uUrl(urlInput.trim())
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+  const handleSave = async () => {
+    setSaveError(null)
+    try {
+      await setM3uUrl(urlInput.trim())
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Could not save the URL')
+    }
   }
 
   const handleClearTmdb = async () => {
@@ -360,6 +366,12 @@ export function SettingsPage() {
               {saved ? <Check size={15} /> : null}
               {saved ? 'Saved' : 'Save URL'}
             </button>
+            {saveError && (
+              <div className="flex items-start gap-2 text-sm text-red-400 bg-red-500/10 rounded-lg p-3">
+                <AlertCircle size={15} className="shrink-0 mt-0.5" />
+                <p>{saveError}</p>
+              </div>
+            )}
           </div>
         </section>
       )}

@@ -11,7 +11,7 @@ interface PlaylistState {
   error: string | null
   m3uUrl: string
 
-  setM3uUrl: (url: string) => void
+  setM3uUrl: (url: string) => Promise<void>
   syncM3uUrlFromRemote: () => Promise<void>
   loadFromDB: () => Promise<void>
   refresh: () => Promise<void>
@@ -27,14 +27,23 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
   error: null,
   m3uUrl: localStorage.getItem(STORAGE_KEY) ?? '',
 
-  setM3uUrl(url) {
+  async setM3uUrl(url) {
     localStorage.setItem(STORAGE_KEY, url)
     set({ m3uUrl: url })
-    fetch('/api/preferences', {
+    // This write must be awaited and its failure surfaced. Swallowing it meant a
+    // save that never reached D1 still rendered as "Saved", and because
+    // syncM3uUrlFromRemote pulls D1 down over local state on the next launch, the
+    // old URL came back — the change looked accepted and then evaporated. That is
+    // how a provider move turned into "the new URL doesn't work": it was never
+    // stored, so every refresh kept using the old host and kept being rejected.
+    const res = await fetch('/api/preferences', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ profileId: '_global', key: 'm3u_url', value: url }),
-    }).catch(() => {})
+    })
+    if (!res.ok) {
+      throw new Error(`Could not save the URL — server returned ${res.status}. It will be lost on the next launch.`)
+    }
   },
 
   async syncM3uUrlFromRemote() {
