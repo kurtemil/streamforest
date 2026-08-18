@@ -36,7 +36,7 @@ export function Sidebar() {
       <div className="px-3 pt-3">
         <button
           onClick={toggleSearch}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg bg-white/5 border border-white/8 hover:border-white/15 text-neutral-500 hover:text-neutral-300 transition-colors group"
+          className="w-full flex items-center gap-2.5 min-h-11 px-3 py-2 rounded-lg bg-white/5 border border-white/8 hover:border-white/15 text-neutral-500 hover:text-neutral-300 transition-colors group"
         >
           <Search size={14} className="shrink-0" />
           <span className="flex-1 text-left text-sm">Search…</span>
@@ -52,7 +52,7 @@ export function Sidebar() {
             to={to}
             end={to === '/'}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+              `flex items-center gap-3 min-h-11 px-3 py-2.5 rounded-lg text-sm transition-colors ${
                 isActive
                   ? 'bg-accent-600/20 text-accent-400 font-medium'
                   : 'text-neutral-400 hover:text-white hover:bg-white/5'
@@ -69,7 +69,7 @@ export function Sidebar() {
       <div className="px-3 py-3 border-t border-white/5">
         <button
           onClick={openPicker}
-          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors group"
+          className="w-full flex items-center gap-3 min-h-11 px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors group"
         >
           {activeProfile ? (
             <>
@@ -102,7 +102,7 @@ export function Sidebar() {
             key={to}
             to={to}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+              `flex items-center gap-3 min-h-11 px-3 py-2.5 rounded-lg text-sm transition-colors ${
                 isActive
                   ? 'bg-accent-600/20 text-accent-400 font-medium'
                   : 'text-neutral-400 hover:text-white hover:bg-white/5'

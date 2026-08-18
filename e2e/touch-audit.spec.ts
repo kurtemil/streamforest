@@ -2,11 +2,14 @@ import { test, expect } from './fixtures'
 
 // The gate for the mobile rebuild (findings B4, B5 and NY 7).
 //
-// An audit that still finds something calls `test.fail()` in its body: it
-// documents a defect that exists today, so the suite stays green while it fails
-// and turns *red* the moment the defect is fixed — which is the prompt to drop the annotation and let the test
-// guard the fix from then on. A plain failing test would just be noise nobody
-// trusts; this way the same assertion serves as both the record and the gate.
+// Both audits ran as `test.fail()` while the defects they describe existed: the
+// suite stayed green on the failure and turned red the moment one was fixed,
+// which was the prompt to drop the annotation. Both are now clean and assert
+// plainly, so they guard the fixes instead of recording their absence.
+//
+// Keep them that way. A control added below 44 px, or an affordance reachable
+// only on hover, fails here — which is the whole point, because neither is
+// visible on the machine this app is developed on.
 
 const AUDIT_PAGES = ["/", "/movies", "/settings"] as const
 const MIN_TOUCH_TARGET = 44 // Apple's Human Interface Guidelines
@@ -21,8 +24,6 @@ test.describe('touch readiness', () => {
   test.skip(({ isMobile }) => !isMobile, 'Touch audits only apply to touch viewports')
 
   test('every visible control is at least 44 px on its shortest side', async ({ libraryPage: page }) => {
-    // Known defect, still shrinking. Remove this line when the count reaches zero.
-    test.fail()
     const offenders: Offender[] = []
 
     for (const path of AUDIT_PAGES) {
@@ -76,8 +77,6 @@ test.describe('touch readiness', () => {
   })
 
   test('no interactive control is hidden behind hover', async ({ libraryPage: page }) => {
-    // Known defect, still shrinking. Remove this line when the count reaches zero.
-    test.fail()
     const offenders: Offender[] = []
 
     for (const path of AUDIT_PAGES) {

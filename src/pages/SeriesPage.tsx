@@ -181,7 +181,7 @@ function EpisodeRow({
         onClick={() => openInVlc(ep)}
         title="Open in VLC"
         aria-label="Open in VLC"
-        className="absolute top-1/2 -translate-y-1/2 right-3 z-10 flex items-center gap-1 px-2 py-1 rounded-md bg-black/75 hover:bg-black/90 ring-1 ring-white/15 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+        className="absolute top-1/2 -translate-y-1/2 right-3 z-10 flex items-center gap-1 px-2 py-1 rounded-md bg-black/75 hover:bg-black/90 ring-1 ring-white/15 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity"
       >
         <span className="w-2 h-2 rounded-sm bg-[#ff8800]" />
         <span className="text-[10px] font-semibold text-white tracking-wide">VLC</span>
@@ -237,7 +237,7 @@ function ShowCard({
             className={`absolute top-2 left-2 w-7 h-7 rounded-full relative after:absolute after:content-[''] after:-inset-2 backdrop-blur-sm flex items-center justify-center ring-1 transition-all z-10 ${
               isWatchLater
                 ? 'bg-accent-600/90 ring-accent-500/60 opacity-100'
-                : 'bg-black/70 ring-white/20 opacity-100 md:opacity-0 md:group-hover:opacity-100 hover:bg-accent-600/80'
+                : 'bg-black/70 ring-white/20 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 hover:bg-accent-600/80'
             }`}
           >
             <Bookmark size={13} fill={isWatchLater ? 'white' : 'none'} className="text-white" />
@@ -687,7 +687,7 @@ export function SeriesPage() {
                 <button
                   onClick={handleSurprise}
                   title="Surprise me — pick a random show"
-                  className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
+                  className="flex items-center justify-center gap-1.5 min-h-11 min-w-11 px-3.5 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
                 >
                   <Shuffle size={13} />
                   <span className="hidden sm:inline">Surprise me</span>
@@ -832,7 +832,7 @@ export function SeriesPage() {
                 <button
                   onClick={handleSurprise}
                   title="Surprise me — pick a random show"
-                  className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
+                  className="flex items-center justify-center gap-1.5 min-h-11 min-w-11 px-3.5 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
                 >
                   <Shuffle size={13} />
                   <span className="hidden sm:inline">Surprise me</span>

@@ -178,7 +178,7 @@ export function CommandPalette() {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search movies, shows, channels…"
-                className="flex-1 bg-transparent text-white text-base md:text-sm placeholder-neutral-500 outline-none"
+                className="flex-1 bg-transparent text-white text-base can-hover:text-sm placeholder-neutral-500 outline-none"
               />
               {query ? (
                 <button onClick={() => setQuery('')} className="text-neutral-500 hover:text-white transition-colors">
@@ -205,7 +205,7 @@ export function CommandPalette() {
                         <span className="flex-1 text-sm text-neutral-300">{q}</span>
                         <button
                           onClick={(e) => { e.stopPropagation(); removeRecent(q); setRecentSearches(loadRecent()) }}
-                          className="opacity-100 md:opacity-0 md:group-hover:opacity-100 text-neutral-600 hover:text-white transition-all"
+                          className="opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 text-neutral-600 hover:text-white transition-all"
                         >
                           <X size={12} />
                         </button>

@@ -30,7 +30,7 @@ export function GroupSidebar({
   cleanTitle = defaultClean,
   prefixItem,
 }: Props) {
-  const pillBase = 'shrink-0 px-4 py-2.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap'
+  const pillBase = 'shrink-0 inline-flex items-center min-h-11 px-4 py-2.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap'
   const pillActive = 'bg-accent-600 text-white'
   const pillInactive = 'bg-white/8 text-neutral-400 hover:text-white active:bg-white/15'
 
@@ -69,7 +69,7 @@ export function GroupSidebar({
           <>
             <button
               onClick={prefixItem.onClick}
-              className={`flex items-center gap-1.5 text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+              className={`flex items-center gap-1.5 text-left min-h-11 px-3 py-2 rounded-lg text-sm transition-colors ${
                 prefixItem.active
                   ? 'bg-accent-600/20 text-accent-400 font-medium'
                   : 'text-neutral-400 hover:text-white hover:bg-white/5'
@@ -82,7 +82,7 @@ export function GroupSidebar({
         )}
         <button
           onClick={() => onSelect(null)}
-          className={`text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+          className={`text-left min-h-11 px-3 py-2 rounded-lg text-sm transition-colors ${
             selected === null && !prefixItem?.active
               ? 'bg-accent-600/20 text-accent-400 font-medium'
               : 'text-neutral-400 hover:text-white hover:bg-white/5'
@@ -95,7 +95,7 @@ export function GroupSidebar({
           <button
             key={g.title}
             onClick={() => onSelect(g.title)}
-            className={`flex items-center justify-between gap-2 text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+            className={`flex items-center justify-between gap-2 text-left min-h-11 px-3 py-2 rounded-lg text-sm transition-colors ${
               selected === g.title
                 ? 'bg-accent-600/20 text-accent-400 font-medium'
                 : 'text-neutral-400 hover:text-white hover:bg-white/5'

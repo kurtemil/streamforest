@@ -1,6 +1,5 @@
 import { Play, Check, Bookmark, Star, X } from 'lucide-react'
 import { Poster } from '@/ui'
-import { ProgressRing } from '@/components/ui/ProgressRing'
 import { progressPercent } from '@/lib/progress'
 import type { Channel, WatchProgress, TmdbMeta } from '@/types'
 
@@ -24,7 +23,7 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
 
   return (
     <button onClick={onClick} className="group text-left w-full">
-      <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-surface-300 ring-1 ring-white/5 group-hover:ring-accent-600/50 transition-all duration-200 group-hover:scale-[1.02] shadow-card group-hover:shadow-card-hover">
+      <div className="relative aspect-[2/3] rounded-card overflow-hidden bg-surface-300 ring-1 ring-white/8 transition-all duration-300 ease-out-expo group-hover:scale-[1.04] group-hover:-translate-y-1 shadow-card group-hover:shadow-card-hover">
         <Poster
           src={channel.logo}
           alt={displayTitle}
@@ -47,7 +46,7 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
           <button
             onClick={(e) => { e.stopPropagation(); onRemove(e) }}
             aria-label="Remove"
-            className="absolute top-2 left-2 w-7 h-7 rounded-full relative after:absolute after:content-[''] after:-inset-2 bg-black/70 hover:bg-red-600/90 backdrop-blur-sm flex items-center justify-center text-white opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all ring-1 ring-white/20 z-10"
+            className="absolute top-2 left-2 w-7 h-7 rounded-full after:absolute after:content-[''] after:-inset-2 bg-black/70 hover:bg-red-600/90 backdrop-blur-sm flex items-center justify-center text-white opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-all ring-1 ring-white/20 z-10"
           >
             <X size={13} />
           </button>
@@ -58,10 +57,10 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
           <button
             onClick={onWatchLater}
             title={isWatchLater ? 'Remove from Watch Later' : 'Add to Watch Later'}
-            className={`absolute top-2 left-2 w-7 h-7 rounded-full relative after:absolute after:content-[''] after:-inset-2 backdrop-blur-sm flex items-center justify-center ring-1 transition-all z-10 ${
+            className={`absolute top-2 left-2 w-7 h-7 rounded-full after:absolute after:content-[''] after:-inset-2 backdrop-blur-sm flex items-center justify-center ring-1 transition-all z-10 ${
               isWatchLater
                 ? 'bg-accent-600/90 ring-accent-500/60 opacity-100'
-                : 'bg-black/70 ring-white/20 opacity-100 md:opacity-0 md:group-hover:opacity-100 hover:bg-accent-600/80'
+                : 'bg-black/70 ring-white/20 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 hover:bg-accent-600/80'
             }`}
           >
             <Bookmark size={13} fill={isWatchLater ? 'white' : 'none'} className="text-white" />
@@ -85,14 +84,9 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
 
         {/* Progress bar + ring */}
         {!progress?.completed && pct > 0 && (
-          <>
-            <div className="absolute bottom-2 right-2">
-              <ProgressRing pct={pct} size={30} stroke={2.5} />
-            </div>
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/10">
-              <div className="h-full bg-accent-500" style={{ width: `${pct}%` }} />
-            </div>
-          </>
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/50">
+            <div className="h-full bg-accent-400 rounded-r-full" style={{ width: `${pct}%` }} />
+          </div>
         )}
       </div>
 

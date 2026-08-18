@@ -7,6 +7,11 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 const DISMISSED_KEY = 'sf_install_dismissed'
+const SHOWN_KEY = 'sf_install_shown'
+/** How many launches may carry the offer before it stops asking. */
+const MAX_SHOWN = 3
+/** How long it may sit over the artwork before retiring itself for this launch. */
+const VISIBLE_MS = 15_000
 
 export type InstallKind =
   /** Chromium-style: the browser hands us an event and we can install in one tap. */
@@ -26,7 +31,14 @@ export type InstallKind =
  */
 export function useInstallPrompt() {
   const [promptEvent, setPromptEvent] = useState<BeforeInstallPromptEvent | null>(null)
-  const [dismissed, setDismissed] = useState(() => !!localStorage.getItem(DISMISSED_KEY))
+  const [dismissed, setDismissed] = useState(
+    () => !!localStorage.getItem(DISMISSED_KEY) || Number(localStorage.getItem(SHOWN_KEY) ?? 0) >= MAX_SHOWN,
+  )
+  // The card is `fixed` over the content, so for as long as it is up it covers a
+  // row of artwork. An offer worth making is worth making briefly: it retires
+  // itself after a few seconds, and stops asking after a few launches, instead of
+  // camping on the home screen until someone finds the little cross.
+  const [expired, setExpired] = useState(false)
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -37,6 +49,14 @@ export function useInstallPrompt() {
     return () => window.removeEventListener('beforeinstallprompt', handler)
   }, [])
 
+  useEffect(() => {
+    if (dismissed) return
+    const n = Number(localStorage.getItem(SHOWN_KEY) ?? 0)
+    localStorage.setItem(SHOWN_KEY, String(n + 1))
+    const t = window.setTimeout(() => setExpired(true), VISIBLE_MS)
+    return () => window.clearTimeout(t)
+  }, [dismissed])
+
   const ctx = getClientContext()
   // Already installed: nothing to offer. navigator.standalone is Apple's older
   // flag and the display-mode query is the standards-based one; a home-screen
@@ -44,7 +64,7 @@ export function useInstallPrompt() {
   const installed = ctx.standalone || ctx.displayModeStandalone
 
   const kind: InstallKind =
-    installed || dismissed ? null
+    installed || dismissed || expired ? null
     : promptEvent ? 'prompt'
     : ctx.isIos ? 'ios-manual'
     : null

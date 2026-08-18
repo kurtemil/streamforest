@@ -291,7 +291,7 @@ export function MoviesPage() {
                   <button
                     onClick={handleSurprise}
                     title="Surprise me — pick a random movie"
-                    className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
+                    className="flex items-center justify-center gap-1.5 min-h-11 min-w-11 px-3.5 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
                   >
                     <Shuffle size={13} />
                     <span className="hidden sm:inline">Surprise me</span>
@@ -430,7 +430,7 @@ export function MoviesPage() {
                   <button
                     onClick={handleSurprise}
                     title="Surprise me — pick a random movie"
-                    className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
+                    className="flex items-center justify-center gap-1.5 min-h-11 min-w-11 px-3.5 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
                   >
                     <Shuffle size={13} />
                     <span className="hidden sm:inline">Surprise me</span>

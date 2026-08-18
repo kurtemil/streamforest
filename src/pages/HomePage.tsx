@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useNavigate } from 'react-router-dom'
 import { normalizeShowKey } from '@/lib/utils'
-import { Film, Tv, Radio, Settings } from 'lucide-react'
+import { Settings } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useProfileStore } from '@/stores/profileStore'
@@ -34,10 +34,6 @@ export function HomePage() {
   const series = useMemo(
     () => channels.filter((c) => c.type === 'series' && !excluded.series.has(c.groupTitle)),
     [channels, excluded.series],
-  )
-  const live = useMemo(
-    () => channels.filter((c) => c.type === 'live' && !excluded.live.has(c.groupTitle)),
-    [channels, excluded.live],
   )
 
   const recentProgress = useLiveQuery(async () => {
@@ -269,7 +265,16 @@ export function HomePage() {
       const key =
         ch.type === 'series' && ch.showName ? normalizeShowKey(ch.showName) : ch.id
       const meta = tmdbMap.get(key)
-      if (meta && !meta.notFound && meta.backdropPath) candidates.push({ channel: ch, tmdbMeta: meta })
+      // A poster is enough — Hero blurs it into a backdrop when no landscape art
+      // exists. Requiring backdropPath meant the hero silently vanished for whole
+      // libraries and the home screen opened on a row heading.
+      // Any picture will do. Hero prefers a landscape backdrop, falls back to the
+      // poster blurred into one, and finally to whatever artwork the playlist
+      // itself carries. Requiring backdropPath meant the hero silently vanished
+      // for whole libraries and the home screen opened on a row heading.
+      if (meta && !meta.notFound && (meta.backdropPath || meta.posterPath || ch.logo)) {
+        candidates.push({ channel: ch, tmdbMeta: meta })
+      }
       if (candidates.length >= 8) break
     }
     return candidates
@@ -342,52 +347,6 @@ export function HomePage() {
       )}
 
       <div className="px-4 sm:px-6 pb-12 pt-16 md:pt-6 space-y-10">
-        {/* Stats bar */}
-        <div className="flex gap-2 sm:gap-3">
-          {[
-            {
-              icon: Film,
-              label: 'Movies',
-              shortLabel: 'Movies',
-              count: movies.length,
-              to: '/movies',
-            },
-            {
-              icon: Tv,
-              label: 'TV Shows',
-              shortLabel: 'Shows',
-              count: new Set(
-                series.filter((s) => s.showName).map((s) => s.showName),
-              ).size,
-              to: '/series',
-            },
-            {
-              icon: Radio,
-              label: 'Live Channels',
-              shortLabel: 'Live',
-              count: live.length,
-              to: '/live',
-            },
-          ].map(({ icon: Icon, label, shortLabel, count, to }) => (
-            <Link
-              key={to}
-              to={to}
-              className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-3 rounded-xl bg-white/3 hover:bg-white/6 ring-1 ring-white/5 hover:ring-accent-600/30 transition-all flex-1 min-w-0"
-            >
-              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-accent-600/20 flex items-center justify-center shrink-0">
-                <Icon size={15} className="text-accent-400" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-white font-semibold text-sm">{count.toLocaleString()}</p>
-                <p className="text-neutral-500 text-[10px] sm:text-caption truncate">
-                  <span className="sm:hidden">{shortLabel}</span>
-                  <span className="hidden sm:inline">{label}</span>
-                </p>
-              </div>
-            </Link>
-          ))}
-        </div>
-
         {/* Continue Watching */}
         {continueWatching.length > 0 && (
           <section>

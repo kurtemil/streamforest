@@ -75,7 +75,7 @@ export function SectionHeader({
   onSeeAll?: () => void
 }) {
   const linkClass =
-    'flex items-center gap-0.5 py-3 -my-3 pl-3 -ml-3 text-caption text-neutral-500 hover:text-accent-400 transition-colors'
+    'flex items-center gap-0.5 min-h-11 py-3 -my-3 pl-3 -ml-3 text-caption text-neutral-500 hover:text-accent-400 transition-colors'
   return (
     <div className="flex items-center justify-between mb-3">
       <h2 className="text-heading-lg text-white">{title}</h2>

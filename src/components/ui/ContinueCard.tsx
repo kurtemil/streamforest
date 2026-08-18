@@ -28,7 +28,7 @@ export function ContinueCard({
   return (
     <div className="group relative w-full">
       <button onClick={onClick} className="block w-full text-left">
-        <div className="relative w-full aspect-[2/3] rounded-lg overflow-hidden bg-surface-300 ring-1 ring-white/5 group-hover:ring-accent-600/50 transition-all group-hover:scale-[1.03] shadow-card group-hover:shadow-card-hover">
+        <div className="relative w-full aspect-[2/3] rounded-card overflow-hidden bg-surface-300 ring-1 ring-white/8 transition-all duration-300 ease-out-expo group-hover:scale-[1.04] group-hover:-translate-y-1 shadow-card group-hover:shadow-card-hover">
           <Poster
             src={channel.logo}
             alt={channel.name}
@@ -68,7 +68,7 @@ export function ContinueCard({
           onRemove()
         }}
         aria-label="Remove from Continue Watching"
-        className="absolute top-2 left-2 w-7 h-7 rounded-full after:absolute after:content-[''] after:-inset-2 bg-black/70 hover:bg-danger-600/90 backdrop-blur-sm flex items-center justify-center text-white opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all ring-1 ring-white/20"
+        className="absolute top-2 left-2 w-7 h-7 rounded-full after:absolute after:content-[''] after:-inset-2 bg-black/70 hover:bg-danger-600/90 backdrop-blur-sm flex items-center justify-center text-white opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-all ring-1 ring-white/20"
       >
         <X size={14} />
       </button>

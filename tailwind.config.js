@@ -1,36 +1,52 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  // A `hover:` class that sticks after a tap is worse than no hover state at all.
+  future: { hoverOnlyWhenSupported: true },
   theme: {
     extend: {
+      screens: {
+        // Reveal-on-hover is a property of the input device, not the viewport
+        // width. Gating it on `md:` hid card controls on an iPad — a touch screen
+        // wide enough to get the desktop layout — where they could never be
+        // revealed at all.
+        'can-hover': { raw: '(hover: hover) and (pointer: fine)' },
+      },
       colors: {
+        // Emerald, not the stock Tailwind green. The old ramp was `green`
+        // straight out of the box — the most common accent on the web — and it
+        // did not match the mark, which is built from #6ee7b7 → #10b981.
         accent: {
-          50:  '#f0fdf4',
-          100: '#dcfce7',
-          200: '#bbf7d0',
-          300: '#86efac',
-          400: '#4ade80',
-          500: '#22c55e',
-          600: '#16a34a',
-          700: '#15803d',
-          800: '#166534',
-          900: '#14532d',
-          950: '#052e16',
+          50:  '#ecfdf5',
+          100: '#d1fae5',
+          200: '#a7f3d0',
+          300: '#6ee7b7',
+          400: '#34d399',
+          500: '#10b981',
+          600: '#059669',
+          700: '#047857',
+          800: '#065f46',
+          900: '#064e3b',
+          950: '#022c22',
         },
         // Cinema-dark surface ramp. 0 = deepest, 900 = brightest layer.
+        //
+        // Biased a few points toward green rather than pure neutral grey. At this
+        // depth it never reads as "green" — it reads as chosen, where #0a0a0b
+        // read as the default dark mode of any framework.
         surface: {
           0:   '#000000',
-          50:  '#070708',
-          100: '#0a0a0b',
-          150: '#0d0d0f',
-          200: '#111114',
-          300: '#15161a',
-          400: '#1a1c21',
-          500: '#22252b',
-          600: '#2c2f37',
-          700: '#3a3e48',
-          800: '#4d525e',
-          900: '#666c79',
+          50:  '#050907',
+          100: '#080d0b',
+          150: '#0b110f',
+          200: '#0e1614',
+          300: '#131d1a',
+          400: '#182420',
+          500: '#202e29',
+          600: '#2a3b35',
+          700: '#384b44',
+          800: '#4b5f57',
+          900: '#66796f',
         },
         // For warnings / destructive / alt CTAs in player chrome
         warn: {
@@ -70,11 +86,18 @@ export default {
       },
       borderRadius: {
         'xl2': '1.125rem',
+        // Artwork wants a generous corner. 8px on a poster reads as a 2019
+        // thumbnail; the card radius is now a token so it stays consistent.
+        'card': '0.875rem',
+        'card-lg': '1.25rem',
       },
       boxShadow: {
         'glow': '0 0 0 1px rgba(255,255,255,0.06), 0 12px 32px -8px rgba(0,0,0,0.6)',
-        'card': '0 2px 8px -2px rgba(0,0,0,0.4)',
-        'card-hover': '0 18px 40px -12px rgba(0,0,0,0.7), 0 0 0 1px rgba(34,197,94,0.18)',
+        // Cards sat flat on the ground with a 2px shadow nothing could see. They
+        // now carry a lit top edge and a shadow deep enough to separate artwork
+        // from the black behind it.
+        'card': '0 1px 0 0 rgba(255,255,255,0.06) inset, 0 4px 16px -4px rgba(0,0,0,0.7)',
+        'card-hover': '0 1px 0 0 rgba(255,255,255,0.10) inset, 0 24px 48px -16px rgba(0,0,0,0.9), 0 0 0 1px rgba(52,211,153,0.35)',
         'cinema': '0 30px 80px -20px rgba(0,0,0,0.85)',
       },
       backdropBlur: {

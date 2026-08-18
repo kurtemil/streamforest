@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Play, Info, Bookmark, Star, Clock, ChevronLeft, ChevronRight } from 'lucide-react'
 import type { Channel, TmdbMeta } from '@/types'
-import { backdropUrl } from '@/services/tmdb'
+import { backdropUrl, posterUrl } from '@/services/tmdb'
 import { heroCrossfade } from '@/styles/motion'
 
 interface HeroItem {
@@ -42,6 +42,13 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
 
   const { channel, tmdbMeta } = items[idx]
   const backdrop = backdropUrl(tmdbMeta.backdropPath, 1280)
+  // Not every title has a landscape backdrop, and without one the whole hero used
+  // to be skipped — so the home screen opened on a bare row heading whenever the
+  // newest titles happened to lack one. A poster blown up and blurred behind the
+  // sharp poster is the standard fallback, and it carries the film's own colour
+  // into the page, which is the point of a hero in the first place.
+  const poster = posterUrl(tmdbMeta.posterPath, 500) ?? channel.logo ?? null
+  const usingPosterFallback = !backdrop && !!poster
   const wl = isWatchLater(channel)
 
   const genres = tmdbMeta.genres?.slice(0, 3) ?? []
@@ -71,15 +78,24 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
               className="w-full h-full object-cover animate-kenburns"
               decoding="async"
             />
+          ) : poster ? (
+            <img
+              src={poster}
+              alt=""
+              aria-hidden="true"
+              className="w-full h-full object-cover scale-150 blur-3xl saturate-[1.7] opacity-95 animate-kenburns"
+              decoding="async"
+            />
           ) : (
             <div className="w-full h-full bg-surface-300" />
           )}
         </motion.div>
       </AnimatePresence>
 
-      {/* Gradient overlays */}
+      {/* Gradient overlays. The horizontal one is tuned for a photographic
+          backdrop; over a blurred poster it removed the only colour on screen. */}
       <div className="absolute inset-0 vignette-bottom" />
-      <div className="absolute inset-0 vignette-left" />
+      <div className={usingPosterFallback ? 'absolute inset-0 vignette-left opacity-50' : 'absolute inset-0 vignette-left'} />
       {/* Extra bottom fade for content legibility */}
       <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-surface-100 to-transparent" />
 
@@ -90,8 +106,18 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0, transition: { duration: 0.5, delay: 0.15, ease: [0.16, 1, 0.3, 1] } }}
           exit={{ opacity: 0, y: -8, transition: { duration: 0.25 } }}
-          className="absolute bottom-0 left-0 right-0 px-8 pb-10 flex flex-col gap-4 max-w-2xl"
+          className="absolute bottom-0 left-0 right-0 px-8 pb-10 flex items-end gap-7 max-w-3xl"
         >
+          {usingPosterFallback && poster && (
+            <img
+              src={poster}
+              alt=""
+              aria-hidden="true"
+              className="hidden sm:block w-36 lg:w-44 aspect-[2/3] object-cover rounded-card-lg ring-1 ring-white/15 shadow-cinema shrink-0"
+              decoding="async"
+            />
+          )}
+          <div className="flex flex-col gap-4 min-w-0">
           {/* Meta chips */}
           <div className="flex items-center gap-2 flex-wrap">
             {tmdbMeta.year && (
@@ -153,6 +179,7 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
             >
               <Bookmark size={16} fill={wl ? 'white' : 'none'} className="text-white" />
             </button>
+          </div>
           </div>
         </motion.div>
       </AnimatePresence>
