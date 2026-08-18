@@ -1,4 +1,4 @@
-import { test, expect, collectConsoleErrors } from './fixtures'
+import { test, expect, collectConsoleErrors, PAGING_COUNT } from './fixtures'
 
 // Baseline shape of the app in WebKit. These are the assertions that should stay
 // true through the whole rebuild — if one of them breaks, something regressed
@@ -71,4 +71,29 @@ test('the tab bar reaches the bottom of the viewport', async ({ libraryPage: pag
   // Note the honest limit: Playwright does not emulate safe-area insets, so this
   // catches a bar that is mispositioned by layout, not one lifted by env().
   expect(Math.round(box.y + box.height)).toBe(viewportHeight)
+})
+
+test('a filtered grid keeps loading past its first page', async ({ pagedPage: page }) => {
+  // Arriving at the grid matters. Landing on /movies?group=… mounts the grid on
+  // the first render and pages fine; the broken path is the one a person takes —
+  // open Movies, then search — because that switches an already-mounted page from
+  // rows to a grid. The sentinel appears only then, after the observer's effect
+  // has already looked for it, found null, and run out of dependencies that could
+  // ever tell it otherwise. Every list ended at 60 titles with nothing logged.
+  await page.goto('/movies')
+  await page.getByPlaceholder('Search movies…').first().fill('Paged Movie')
+
+  const note = page.getByText(/^Showing /)
+  await expect(note).toHaveText(`Showing 60 of ${PAGING_COUNT}`)
+
+  const main = page.locator('main')
+  for (let i = 0; i < 8 && (await note.isVisible()); i++) {
+    await main.evaluate((el) => el.scrollTo(0, el.scrollHeight))
+    await page.waitForTimeout(150)
+  }
+
+  // Note gone means count passed the total: the whole group is rendered, and the
+  // last card of 130 is real rather than a number in a footer.
+  await expect(note).toBeHidden()
+  await expect(page.getByText(`Paged Movie ${PAGING_COUNT}`, { exact: true })).toBeVisible()
 })

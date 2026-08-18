@@ -501,7 +501,7 @@ export function SeriesPage() {
     navigate(`/series?show=${encodeURIComponent(name)}`)
   }, [isRowMode, allShowNames, visibleShowNames, navigate])
 
-  const { count: gridCount, sentinelRef: gridSentinel, reset: resetGrid } = useInfiniteScroll()
+  const { count: gridCount, sentinelRef: gridSentinel, reset: resetGrid } = useInfiniteScroll(visibleShowNames.length)
   useEffect(() => {
     resetGrid()
     document.querySelector('main')?.scrollTo({ top: 0 })

@@ -67,7 +67,14 @@ function detectIos(ua: string): boolean {
 // Reads what the browser actually resolved env(safe-area-inset-*) to. Emulated
 // insets in a test browser and real insets on a notched phone are different
 // numbers, and only the real one tells us whether a padding fix landed.
-function readSafeAreaInsets(): string {
+//
+// Exported because the value moves. `getClientContext()` caches its whole record
+// for the session, which is right for a log line stamped once per load and wrong
+// for a live readout: iOS resolved these to 0/0/0/0 at boot and 34px for the
+// bottom a moment later, so the Device panel spent the tab-bar investigation
+// reporting no insets while the bar it was measuring carried 34px of them.
+// Anything reading insets to decide something has to call this itself.
+export function readSafeAreaInsets(): string {
   if (typeof document === 'undefined') return 'n/a'
   try {
     const probe = document.createElement('div')

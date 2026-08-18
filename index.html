@@ -6,10 +6,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <title>StreamForest</title>
     <meta name="robots" content="noindex, nofollow" />
-    <meta name="theme-color" content="#0d0d0d" />
+    <meta name="theme-color" content="#080d0b" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- `black`, not `black-translucent`, and this is the whole tab-bar bug.
+         Measured on the device: screen 402x874, but window.innerHeight 812 - the
+         web view is 62px shorter than the screen, which is exactly the status-bar
+         inset on this phone. Under black-translucent iOS lifts the web view up to
+         y=0 so the page paints under the status bar, but it does not grow the view
+         to match: the 62px it gained at the top is lost at the bottom, outside the
+         viewport, where nothing the page draws can reach. The bar was never
+         mispositioned - it sat at `bottom: 0` of a viewport that ends 62px above
+         the glass. With `black` the same 812px view is placed below the status bar
+         instead, so its bottom edge lands on the bottom of the screen.
+         The cost is that the status-bar strip is painted by iOS rather than by the
+         page. It is black, and surface-100 is #080d0b, so there is nothing to see.
+         Changing this changes how iOS launches the app: the home-screen app has to
+         be removed and re-added before the phone reads it. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="apple-mobile-web-app-title" content="StreamForest" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />

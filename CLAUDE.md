@@ -37,74 +37,104 @@ npm test             # vitest unit tests
 
 ---
 
-## OPEN: the tab bar sits too high in the installed PWA
+## FIXED (verify on the device): the tab bar sat too high in the installed PWA
 
-**Status:** unresolved as of 2026-08-18. Two fixes were shipped on guesses and
-neither worked. Do not ship a third guess — take the measurement first.
+**Status:** diagnosed by measurement and fixed on 2026-08-18. The fix changes how
+iOS launches the app, so **the home-screen app has to be removed and re-added**
+before the phone can show it working. Until that has been done and the readout
+re-read, treat this as fixed-but-unconfirmed.
 
-**Symptom.** In the home-screen app on an iPhone, the bottom tab bar sits well
-above the bottom edge with a black band beneath it. Estimated from a device
-screenshot: roughly **110 CSS px** between the labels and the bottom edge on a
-402×874 viewport (iPhone 16 Pro, DPR 3), where about 44 would be correct. It does
-not reproduce anywhere locally.
+### What it actually was
 
-### Ruled out, with evidence
+Neither of the two things this was guessed to be. The readout off the phone:
 
-| Suspect | Why it is not that |
-|---|---|
-| Stale build / cache | Production serves the expected hashed assets (checked with curl against the live `index.html`). The PWA was also removed and reinstalled by hand. |
-| The service worker never updating | Real, separate bug — the injected `registerSW.js` was a bare `register()` on `load`, so a home-screen app resumed from the app switcher never checked for updates. Fixed in `4fb9e92`. It was not the cause of this. |
-| The viewport meta | Character-for-character identical to `lagom`, whose tab bar is correct. |
-| An over-reported safe-area inset | Tried bounding it with `min(env(safe-area-inset-bottom), 2.25rem)`. No effect; reverted in `d52737e`. |
-| A missing compositing layer | `lagom` carries a bare `translateZ(0)` on its nav for exactly this class of bug, so it was adopted in `d52737e`. Still wrong after a clean reinstall. |
+```
+viewport            402×812
+screen              402x874
+tab bar             top 718 · h 94 · bottom 812
+bar reaches bottom  yes
+bar padding-bottom  34px
+bar position        fixed / bottom 0px
+```
 
-### Take the measurement first
+The bar's bottom edge equals the viewport height, its inset is the 34px a home
+indicator should be, and its position is exactly what the CSS asks for. The bar
+was never mispositioned and the inset was never over-reported. **The viewport was
+62px shorter than the screen** — and 62px is the status-bar inset on this phone.
 
-**Settings → Device** (admin only, `src/components/settings/ViewportReadout.tsx`)
-reports what the phone actually has, including the tab bar's own rectangle. The
-deciding row is **`bar reaches bottom`**:
+`black-translucent` is what did it. It lifts the web view up to y=0 so the page
+paints under the status bar, but iOS does not grow the view to match: the 62px it
+gains at the top it loses at the bottom, outside the viewport, where nothing the
+page draws can reach. So `bottom: 0` resolved to 62px above the glass, and the
+band underneath was not the app's background — it was screen the app did not own.
+Every layout fix was doomed for the same reason: there was nothing to move the bar
+*into*.
 
-- **`yes`** — the bar is positioned correctly and the gap *is* `env(safe-area-inset-bottom)`.
-  Then the question is why that value is ~4× what an iPhone should report, and the
-  fix belongs in how the inset is consumed, not in the bar's position.
-- **`no — short by Npx`** — the bar is being laid out short and the inset is
-  innocent. Then it is the layout, and the first suspect is below.
+The screenshot agreed once it was read that way: the status bar sat on top of the
+page's own content at the top, which only happens when the view starts at y=0.
 
-These need opposite fixes. Not knowing which one it was is precisely why two
-guesses missed.
+**The fix** is one word in `index.html` — `black` instead of `black-translucent`.
+The same 812px view is then placed *below* the status bar, so its bottom lands on
+the bottom of the screen. iOS paints the status-bar strip itself; it is black and
+`surface-100` is `#080d0b`, so there is nothing to see. `theme-color` was moved
+from `#0d0d0d` to `#080d0b` in the same change for the same reason.
 
-### The leading candidate if the bar is short
+### Why the earlier rounds missed it
 
-The one structural difference left between this app and `lagom`
-(`~/gitRepos/Private/lagom`), whose tab bar is correct, is the scroll model:
+The readout was reporting `insets 0/0/0/0` while the bar it was measuring carried
+34px of them, because `getClientContext()` caches its whole record for the session
+and iOS resolves the insets later than boot. Insets are read live now
+(`readSafeAreaInsets`, exported for exactly this), and the readout has the row
+that would have ended this on day one: **`screen - viewport`**. Non-zero there is
+never a layout problem.
 
-- **lagom** scrolls the document — `src/routes/+layout.svelte` is
-  `<main class="relative min-h-dvh pt-safe pb-safe">`, and the nav is
-  `fixed inset-x-0 bottom-0` with plain `pb-safe`.
-- **this app** uses an app shell — `src/components/layout/Layout.tsx` is
-  `<div class="flex h-full overflow-hidden">` with `<main class="flex-1 overflow-y-auto">`,
-  and `src/index.css` sets `html, body, #root { height: 100%; min-height: 100dvh }`.
+The structural difference from `lagom` — document scrolling versus this app's
+shell — was a red herring. It is real, but it cannot change the height of the web
+view, and `bar reaches bottom: yes` had already cleared the layout. Nothing in
+`Layout.tsx` or `index.css` needs to change.
 
-A `height: 100%` chain resolves against the layout viewport, which on iOS with
-`viewport-fit=cover` can be shorter than the visual viewport — and `position: fixed`
-anchors to the same shorter box. That would place the bar high by exactly the
-difference.
+### Confirming it
 
-Switching to document scrolling is not a one-liner. It touches:
-- `mainRef.current?.scrollTo(0, 0)` on route change in `Layout.tsx` → `window.scrollTo`
-- the desktop sidebar, which is `h-full` inside the flex row and would need `sticky`
-- `overscroll-behavior: none` in `index.css`, which currently depends on the shell
-- the player, which is `fixed z-50` and should be unaffected — verify, do not assume
+Reinstall the home-screen app, then **Settings → Device**:
 
-A cheaper probe before refactoring: set the shell to `height: 100dvh` instead of
-`height: 100%` and re-read the readout on the device.
+- **`screen - viewport: 0px`** — fixed. The bar's `bottom: 0` is now the bottom of
+  the screen.
+- **anything else** — the launch config is still not what this change intended,
+  and the number is how much screen the page is missing. Do not start moving the
+  bar; it is not the bar.
+- Watch `bar padding-bottom` too. Without `black-translucent` iOS may report
+  `safe-area-inset-bottom` as 0, and if it does, `pb-safe` collapses and the
+  labels will sit on the home indicator — a different bug with a different fix
+  (a floor under the inset), and one this readout will show plainly.
 
 ### Guard that already exists
 
 `e2e/baseline.spec.ts` asserts the bar's bottom equals the viewport height. It
-passes in every emulated viewport, which is the point of its own comment: Playwright
-does not emulate safe-area insets, so it catches a bar mispositioned by layout, not
-one lifted by `env()`.
+passed throughout this bug, which is the point of its own comment: Playwright does
+not emulate safe-area insets and cannot see a viewport that does not fill the
+screen. It catches a bar mispositioned by layout — a real class of bug, just not
+this one. The device readout owns this one.
+
+---
+
+## The list that stopped at 60
+
+Fixed on 2026-08-18, and worth knowing the shape of because it failed silently.
+
+`useInfiniteScroll` held its sentinel in a `useRef`. The sentinel only renders in
+the grid branch of Movies and Series — the one that appears once there is a search
+or a group — so on a page that mounts in row mode it does not exist yet. The
+observer's effect read `null`, returned, and had no dependency left that could
+ever tell it the node had arrived: `count` cannot advance without the observer
+that was never attached. Nothing threw. The list just ended at 60 titles.
+
+The node lives in state now, so its appearance is what runs the effect, and the
+hook takes the list total so a fully-rendered list stops re-arming an observer
+that can no longer add anything.
+
+Note which path reproduces it: landing on `/movies?group=…` mounts the grid on the
+first render and pages correctly. The failing path is the one a person takes —
+open Movies, then search. `e2e/baseline.spec.ts` takes the second path on purpose.
 
 ---
 
@@ -128,8 +158,9 @@ than transcribed.
 
 It exists because safe-area insets cannot be emulated: Playwright reports `0/0/0/0`
 for all four, so anything that goes wrong at the screen edges is invisible in every
-local test. See the open tab-bar investigation above for what it is currently
-answering.
+local test. It is also the only place that can see a viewport smaller than the
+screen — the row `screen - viewport`, which is what the tab-bar bug above turned
+out to be.
 
 **`npm run probe:hls`** — `tools/hls-probe.mjs` generates a test clip with ffmpeg,
 serves it over a throwaway HTTP origin, runs a fresh transcode-proxy against it and

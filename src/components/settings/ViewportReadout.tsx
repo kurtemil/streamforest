@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Check, Copy, RefreshCw } from 'lucide-react'
-import { getClientContext } from '@/lib/diagnostics'
+import { getClientContext, readSafeAreaInsets } from '@/lib/diagnostics'
 
 /**
  * What the viewport actually is, on the device holding it.
@@ -10,11 +10,16 @@ import { getClientContext } from '@/lib/diagnostics'
  * safe-area insets, so no amount of local testing could say which number was
  * wrong. Two fixes were guessed and neither landed.
  *
- * This is the loop that replaces guessing: the numbers come off the phone, and
- * the row that matters is `tab bar`, which reports the bar's own rectangle
- * against the viewport height. If its bottom equals the viewport height, the bar
- * is positioned correctly and the gap is the inset; if it does not, the bar is
- * being laid out short and the inset is innocent.
+ * This is the loop that replaced guessing, and the row that settled it was
+ * `screen - viewport`. The bar did reach the bottom of the viewport, and its
+ * inset was the 34px it should be — both suspects innocent. The viewport itself
+ * was 62px shorter than the screen, so `bottom: 0` was 62px above the glass and
+ * no CSS could have reached the rest. A non-zero value there is not a layout
+ * problem: it is screen the page does not own, and it comes from how iOS
+ * launches the app rather than from anything in this codebase.
+ *
+ * Insets are read live here rather than through the session context, which
+ * caches — see readSafeAreaInsets.
  */
 
 interface Row {
@@ -37,12 +42,27 @@ function measure(): Row[] {
   })
   rows.push({ label: 'screen', value: ctx.screen })
   rows.push({ label: 'dpr', value: String(ctx.dpr) })
-  rows.push({ label: 'insets t/r/b/l', value: ctx.insets })
+  rows.push({ label: 'insets t/r/b/l', value: readSafeAreaInsets() })
   rows.push({
     label: 'standalone',
     value: `${ctx.standalone ? 'legacy' : '—'} / ${ctx.displayModeStandalone ? 'display-mode' : '—'}`,
   })
   rows.push({ label: 'ios', value: ctx.iosVersion ? `${ctx.iosVersion} (${ctx.brand})` : ctx.brand })
+
+  // The row that found the bug. screen.height is the glass; innerHeight is what
+  // the page was given. Any difference in an installed app is dead screen the
+  // page cannot paint into, so a bar at `bottom: 0` floats above the edge by
+  // exactly this much. In a browser tab the difference is the toolbars and means
+  // nothing, so it is only worth flagging when there is no browser chrome.
+  if (typeof screen !== 'undefined') {
+    const shortfall = screen.height - window.innerHeight
+    const installed = ctx.standalone || ctx.displayModeStandalone
+    rows.push({
+      label: 'screen - viewport',
+      value: installed ? `${shortfall}px` : `${shortfall}px (browser chrome)`,
+      flag: !installed ? undefined : shortfall === 0 ? 'ok' : 'suspect',
+    })
+  }
 
   if (nav) {
     const r = nav.getBoundingClientRect()
@@ -52,6 +72,9 @@ function measure(): Row[] {
       label: 'tab bar',
       value: `top ${Math.round(r.top)} · h ${Math.round(r.height)} · bottom ${bottomEdge}`,
     })
+    // Reaching the bottom of the viewport is necessary, not sufficient: it says
+    // the layout is right, and says nothing about where that viewport ends. Read
+    // it together with `screen - viewport`.
     rows.push({
       label: 'bar reaches bottom',
       value: reaches ? 'yes' : `no — short by ${Math.round(window.innerHeight - r.bottom)}px`,

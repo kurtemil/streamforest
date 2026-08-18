@@ -244,7 +244,7 @@ export function MoviesPage() {
     }
   }
 
-  const { count, sentinelRef, reset } = useInfiniteScroll()
+  const { count, sentinelRef, reset } = useInfiniteScroll(filtered.length)
   useEffect(() => {
     reset()
     document.querySelector('main')?.scrollTo({ top: 0 })

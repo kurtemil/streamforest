@@ -25,6 +25,24 @@ const SEED_PROGRESS = [
   { id: `${PROFILE_ID}:s_2001`, profileId: PROFILE_ID, channelId: 's_2001', position: 600, duration: 2700, lastWatched: 1_700_000_100_000, completed: false },
 ] as const
 
+// A group large enough to page. The grid renders 60 at a time, so 130 needs the
+// sentinel to fire twice — enough to catch an observer that attaches once and
+// then never again, as well as one that never attaches at all.
+export const PAGING_GROUP = 'VOD: Paging'
+export const PAGING_COUNT = 130
+
+const PAGED_MOVIES = Array.from({ length: PAGING_COUNT }, (_, i) => ({
+  id: `m_9${String(i).padStart(3, '0')}`,
+  name: `Paged Movie ${i + 1}`,
+  url: `http://example.invalid/movie/9${i}.mkv`,
+  logo: '',
+  groupTitle: PAGING_GROUP,
+  type: 'movie',
+  sortIndex: 100 + i,
+  movieTitle: `Paged Movie ${i + 1}`,
+  year: 2000 + (i % 25),
+}))
+
 export async function seedProfile(page: Page, profileId: string = PROFILE_ID): Promise<void> {
   await page.addInitScript(
     ([profileKey, m3uKey, id]) => {
@@ -43,10 +61,13 @@ export async function seedProfile(page: Page, profileId: string = PROFILE_ID): P
  * a database this fixture created would produce one with no object stores. Hence
  * the load, seed, reload sequence.
  */
-export async function seedLibrary(page: Page): Promise<void> {
+export async function seedLibrary(
+  page: Page,
+  extra: readonly Record<string, unknown>[] = [],
+): Promise<void> {
   await seedProfile(page)
   await page.goto('/')
-  await page.waitForFunction(() => document.querySelector('#root')?.children.length ?? 0 > 0)
+  await page.waitForFunction(() => (document.querySelector('#root')?.children.length ?? 0) > 0)
 
   await page.evaluate(async ({ channels, progress }) => {
     const db: IDBDatabase = await new Promise((resolve, reject) => {
@@ -69,10 +90,18 @@ export async function seedLibrary(page: Page): Promise<void> {
       })
     })
     db.close()
-  }, { channels: SEED_CHANNELS as unknown as Record<string, unknown>[], progress: SEED_PROGRESS as unknown as Record<string, unknown>[] })
+  }, {
+    channels: [...(SEED_CHANNELS as unknown as Record<string, unknown>[]), ...extra],
+    progress: SEED_PROGRESS as unknown as Record<string, unknown>[],
+  })
 
   await page.reload()
-  await page.waitForLoadState('networkidle')
+  // Not networkidle. Every card asks TMDB for artwork, so a library of any size
+  // keeps a request in flight and the page never goes idle — the paging fixture
+  // hit the fixture timeout before its first assertion. Waiting for the app to
+  // have rendered is both the condition these tests actually need and one that
+  // does not get slower as the seed grows.
+  await page.waitForFunction(() => (document.querySelector('#root')?.children.length ?? 0) > 0)
 }
 
 /**
@@ -94,7 +123,7 @@ export function collectConsoleErrors(page: Page): string[] {
   return errors
 }
 
-export const test = base.extend<{ seededPage: Page; libraryPage: Page }>({
+export const test = base.extend<{ seededPage: Page; libraryPage: Page; pagedPage: Page }>({
   // Profile only — the app renders its welcome state.
   seededPage: async ({ page }, use) => {
     await seedProfile(page)
@@ -103,6 +132,11 @@ export const test = base.extend<{ seededPage: Page; libraryPage: Page }>({
   // Profile plus a library, so card-level controls actually exist to audit.
   libraryPage: async ({ page }, use) => {
     await seedLibrary(page)
+    await use(page)
+  },
+  // The same library with one group big enough to need more than one page.
+  pagedPage: async ({ page }, use) => {
+    await seedLibrary(page, PAGED_MOVIES)
     await use(page)
   },
 })

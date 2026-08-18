@@ -171,7 +171,9 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
             <button
               onClick={() => onWatchLater(channel)}
               title={wl ? 'Remove from Watch Later' : 'Add to Watch Later'}
-              className={`w-10 h-10 rounded-full flex items-center justify-center backdrop-blur-md transition-all active:scale-95 ring-1 ${
+              // 44px, not 40: the audit's floor, and it matches the height the
+              // Play and More Info pills next to it already stand at.
+              className={`w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-md transition-all active:scale-95 ring-1 ${
                 wl
                   ? 'bg-accent-600/80 ring-accent-500/60'
                   : 'bg-white/15 hover:bg-white/22 ring-white/20'
@@ -187,17 +189,25 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
       {/* Side arrows + dot indicators */}
       {items.length > 1 && (
         <>
+          {/* Pointer-only, and `hidden` rather than just transparent. Under a
+              thumb these were still full-size buttons sitting on the hero's left
+              and right edges — invisible, focusable, and a tap near the artwork's
+              edge jumped a slide with nothing on screen to explain it. Touch
+              reaches every slide through the dots below, and the row advances on
+              its own, so there is no affordance lost by removing them. */}
           <button
             onClick={() => { setIdx((idx - 1 + items.length) % items.length); startTimer() }}
             aria-label="Previous"
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 hover:bg-black/75 backdrop-blur-sm flex items-center justify-center ring-1 ring-white/20 transition-all opacity-0 hover:opacity-100 group-hover:opacity-100 focus:opacity-100"
+            data-pointer-affordance="hero-slide"
+            className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 hover:bg-black/75 backdrop-blur-sm hidden can-hover:flex items-center justify-center ring-1 ring-white/20 transition-all opacity-0 hover:opacity-100 group-hover:opacity-100 focus:opacity-100"
           >
             <ChevronLeft size={20} className="text-white" />
           </button>
           <button
             onClick={() => { setIdx((idx + 1) % items.length); startTimer() }}
             aria-label="Next"
-            className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 hover:bg-black/75 backdrop-blur-sm flex items-center justify-center ring-1 ring-white/20 transition-all opacity-0 hover:opacity-100 group-hover:opacity-100 focus:opacity-100"
+            data-pointer-affordance="hero-slide"
+            className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 hover:bg-black/75 backdrop-blur-sm hidden can-hover:flex items-center justify-center ring-1 ring-white/20 transition-all opacity-0 hover:opacity-100 group-hover:opacity-100 focus:opacity-100"
           >
             <ChevronRight size={20} className="text-white" />
           </button>
