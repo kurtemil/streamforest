@@ -4,6 +4,7 @@ import { usePlaylistStore } from '@/stores/playlistStore'
 import { useEpgStore } from '@/stores/epgStore'
 import { epgUrlFromM3u } from '@/services/epg'
 import { getPlaylistMeta, clearPlaylist, clearTmdbNotFound } from '@/services/db'
+import { ViewportReadout } from '@/components/settings/ViewportReadout'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useExclusionsStore, type ContentType } from '@/stores/exclusionsStore'
 import { useProfileStore, getProfile, PROFILES } from '@/stores/profileStore'
@@ -373,6 +374,14 @@ export function SettingsPage() {
               </div>
             )}
           </div>
+        </section>
+      )}
+
+      {/* Device — admin only. Numbers that can only be read on the phone itself. */}
+      {isAdmin && (
+        <section className="mb-8">
+          <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-4">Device</h2>
+          <ViewportReadout />
         </section>
       )}
 
