@@ -20,19 +20,20 @@ export function BottomNav() {
   return (
     <nav
       aria-label="Primary"
-      className="fixed bottom-0 left-0 right-0 z-40 flex md:hidden bg-surface-100/70 backdrop-blur-2xl backdrop-saturate-150 border-t border-white/10"
-      // Bounded rather than plain pb-safe: 36px covers the home indicator on every
-      // iPhone that has one, so a device reporting a larger inset cannot lift the
-      // bar away from the bottom edge.
-      style={{ paddingBottom: 'min(env(safe-area-inset-bottom, 0px), 2.25rem)' }}
+      className="fixed inset-x-0 bottom-0 z-40 md:hidden bg-surface-100/70 backdrop-blur-2xl backdrop-saturate-150 border-t border-white/10 pb-safe"
+      // Its own compositing layer. A fixed element carrying a backdrop-filter
+      // drifts off the bottom edge on iOS without this, which is how `lagom`
+      // solves the same problem in the same place.
+      style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
     >
+      <div className="mx-auto grid w-full max-w-2xl grid-cols-5 px-1 pt-1.5">
       {NAV_ITEMS.map(({ to, icon: Icon, label, end }) => (
         <NavLink
           key={to}
           to={to}
           end={end}
           className={({ isActive }) =>
-            `flex-1 flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium transition-colors press-deep ${
+            `flex flex-col items-center justify-center gap-0.5 rounded-2xl px-3 py-2 text-[10px] font-medium transition-colors press-deep ${
               isActive ? 'text-accent-400' : 'text-neutral-500 active:text-neutral-300'
             }`
           }
@@ -45,6 +46,7 @@ export function BottomNav() {
           )}
         </NavLink>
       ))}
+      </div>
     </nav>
   )
 }

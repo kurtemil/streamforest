@@ -52,3 +52,23 @@ test('an unseeded visit is stopped by the profile picker', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByText("Who's watching?")).toBeVisible()
 })
+
+test('the tab bar reaches the bottom of the viewport', async ({ libraryPage: page }) => {
+  const nav = page.locator('nav[aria-label="Primary"]')
+  // The bar is md:hidden, and an iPad is a touch device wide enough to get the
+  // sidebar instead — so gate on whether it is actually rendered, not on isMobile.
+  test.skip(!(await nav.isVisible()), 'No tab bar at this width')
+
+  const box = (await nav.boundingBox())!
+  const viewportHeight = page.viewportSize()!.height
+
+  // It sat well above the bottom edge on a real iPhone while looking correct in
+  // every emulated viewport — a fixed element carrying a backdrop-filter drifts
+  // on iOS unless it is promoted to its own compositing layer. This asserts the
+  // geometry that a screenshot from the device disagreed with, so a future change
+  // to the bar's positioning cannot quietly reintroduce it.
+  //
+  // Note the honest limit: Playwright does not emulate safe-area insets, so this
+  // catches a bar that is mispositioned by layout, not one lifted by env().
+  expect(Math.round(box.y + box.height)).toBe(viewportHeight)
+})
