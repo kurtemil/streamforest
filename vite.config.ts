@@ -80,6 +80,12 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // The injected registerSW.js is a bare `register()` and nothing else: no
+      // update check, no reload. src/main.tsx registers through the virtual
+      // module instead, which reloads when a new worker takes control and can be
+      // told to go looking for one. See the comment there for why that matters on
+      // a home-screen app.
+      injectRegister: null,
       includeAssets: ['icon.svg', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'],
       manifest: {
         name: 'StreamForest',
