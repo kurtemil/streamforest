@@ -1,5 +1,6 @@
 import { Download, X, Share } from 'lucide-react'
 import { useInstallPrompt } from '@/hooks/useInstallPrompt'
+import { Logo } from '@/ui'
 
 export function InstallPrompt() {
   const { kind, install, dismiss } = useInstallPrompt()
@@ -12,11 +13,7 @@ export function InstallPrompt() {
 
   return (
     <div className="fixed bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] md:bottom-4 left-4 right-4 md:left-auto md:right-4 md:w-80 z-50 bg-surface-300 border border-white/10 rounded-2xl shadow-cinema p-4 flex items-center gap-3 animate-slide-up">
-      <div className="w-9 h-9 rounded-xl bg-accent-600 flex items-center justify-center shrink-0">
-        <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5">
-          <path d="M5 3l14 9-14 9V3z" fill="white" />
-        </svg>
-      </div>
+      <Logo size={36} className="shrink-0 rounded-xl" />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-white">Install StreamForest</p>
         {manual ? (

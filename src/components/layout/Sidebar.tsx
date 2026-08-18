@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { Home, Film, Tv, Radio, Settings, Library, Search } from 'lucide-react'
 import { PROFILES, getProfile, useProfileStore } from '@/stores/profileStore'
 import { useSearchStore } from '@/stores/searchStore'
+import { Logo } from '@/ui'
 
 const NAV_MAIN = [
   { to: '/',         icon: Home,    label: 'Home',     minRole: 'kid' },
@@ -27,11 +28,7 @@ export function Sidebar() {
     <aside className="hidden md:flex flex-col w-56 shrink-0 border-r border-white/5 bg-[#0d0d0d] h-full">
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-5 py-6 border-b border-white/5">
-        <div className="w-7 h-7 rounded-lg bg-accent-600 flex items-center justify-center shrink-0">
-          <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4">
-            <path d="M5 3l14 9-14 9V3z" fill="white" />
-          </svg>
-        </div>
+        <Logo size={28} className="shrink-0 rounded-lg" />
         <span className="text-white font-semibold tracking-tight text-sm">StreamForest</span>
       </div>
 

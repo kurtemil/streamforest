@@ -4,6 +4,7 @@
 export { Button } from './Button'
 export { Chip } from './Chip'
 export { Dialog } from './Dialog'
+export { Logo } from './Logo'
 export { PageTransition } from './PageTransition'
 export { Poster } from './Poster'
 export { Skeleton, SkeletonText, SkeletonCard } from './Skeleton'

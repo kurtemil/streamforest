@@ -341,19 +341,21 @@ export function HomePage() {
         />
       )}
 
-      <div className="px-4 sm:px-6 pb-12 pt-6 space-y-10">
+      <div className="px-4 sm:px-6 pb-12 pt-16 md:pt-6 space-y-10">
         {/* Stats bar */}
         <div className="flex gap-2 sm:gap-3">
           {[
             {
               icon: Film,
               label: 'Movies',
+              shortLabel: 'Movies',
               count: movies.length,
               to: '/movies',
             },
             {
               icon: Tv,
               label: 'TV Shows',
+              shortLabel: 'Shows',
               count: new Set(
                 series.filter((s) => s.showName).map((s) => s.showName),
               ).size,
@@ -362,10 +364,11 @@ export function HomePage() {
             {
               icon: Radio,
               label: 'Live Channels',
+              shortLabel: 'Live',
               count: live.length,
               to: '/live',
             },
-          ].map(({ icon: Icon, label, count, to }) => (
+          ].map(({ icon: Icon, label, shortLabel, count, to }) => (
             <Link
               key={to}
               to={to}
@@ -376,7 +379,10 @@ export function HomePage() {
               </div>
               <div className="min-w-0">
                 <p className="text-white font-semibold text-sm">{count.toLocaleString()}</p>
-                <p className="text-neutral-500 text-[10px] sm:text-caption truncate">{label}</p>
+                <p className="text-neutral-500 text-[10px] sm:text-caption truncate">
+                  <span className="sm:hidden">{shortLabel}</span>
+                  <span className="hidden sm:inline">{label}</span>
+                </p>
               </div>
             </Link>
           ))}

@@ -17,22 +17,49 @@ import { chromium } from '@playwright/test'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PUBLIC = path.resolve(__dirname, '..', 'public')
 
-const GREEN = '#15803d'
+// The mark: a play triangle whose trailing edge is cut into fir branches. It has
+// to survive 16px in a browser tab, which rules out anything with interior
+// detail — the notches work because they break the silhouette itself.
+//
+// Candidates were rendered side by side at 160/96/48/32/16 before this one was
+// picked; the variants that softened the notches turned back into a plain arrow,
+// and a literal tree lost every connection to playback.
+const CANOPY = '#6ee7b7'
+const MOSS = '#10b981'
+const BARK_DARK = '#02150f'
+const BARK = '#0d4a35'
 
-// The standard mark: rounded square, play triangle, edge to edge.
+const markGradient = `
+  <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="${CANOPY}"/><stop offset="1" stop-color="${MOSS}"/>
+  </linearGradient>`
+
+const backdropGradient = `
+  <linearGradient id="backdrop" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="${BARK}"/><stop offset="1" stop-color="${BARK_DARK}"/>
+  </linearGradient>`
+
+// Sharp notches, full bleed to the rounded square.
+const MARK = 'M176 112 L392 256 L176 400 L176 344 L248 344 L176 296 L176 240 L248 240 L176 192 Z'
+
 const standard = `
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-    <rect width="512" height="512" rx="128" fill="${GREEN}"/>
-    <path d="M160 128l224 128-224 128V128z" fill="white"/>
+    <defs>${backdropGradient}${markGradient}</defs>
+    <rect width="512" height="512" rx="120" fill="url(#backdrop)"/>
+    <path d="${MARK}" fill="url(#mark)"/>
   </svg>`
 
-// Maskable: Android applies its own shape and crops to it, so the background
-// runs to the edges and the mark stays inside the inner 80% safe zone. Reusing
-// the standard art here would have the play triangle clipped on a circle mask.
+// Maskable: Android crops to its own shape, so the backdrop runs to the edges and
+// the mark is scaled into the inner 80% safe zone. Reusing the standard art would
+// have the notches clipped off on a circle mask — which is the half that carries
+// the identity.
 const maskable = `
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-    <rect width="512" height="512" fill="${GREEN}"/>
-    <path d="M198 154l160 102-160 102V154z" fill="white"/>
+    <defs>${backdropGradient}${markGradient}</defs>
+    <rect width="512" height="512" fill="url(#backdrop)"/>
+    <g transform="translate(256 256) scale(0.72) translate(-256 -256)">
+      <path d="${MARK}" fill="url(#mark)"/>
+    </g>
   </svg>`
 
 const TARGETS = [

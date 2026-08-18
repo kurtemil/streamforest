@@ -1,6 +1,5 @@
 import { Play, X } from 'lucide-react'
 import { Poster } from '@/ui'
-import { ProgressRing } from '@/components/ui/ProgressRing'
 import { formatTime } from '@/lib/time'
 import { progressPercent } from '@/lib/progress'
 import type { Channel, WatchProgress, TmdbMeta } from '@/types'
@@ -44,11 +43,10 @@ export function ContinueCard({
               <Play size={16} fill="white" className="text-white ml-0.5" />
             </div>
           </div>
-          <div className="absolute bottom-2 right-2">
-            <ProgressRing pct={pct} size={30} stroke={2.5} />
-          </div>
-          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/10">
-            <div className="h-full bg-accent-500" style={{ width: `${pct}%` }} />
+          {/* One indicator. A ring and a bar in the same corner said the same
+              thing twice and made a poster look instrumented. */}
+          <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/50">
+            <div className="h-full bg-accent-500 rounded-r-full" style={{ width: `${pct}%` }} />
           </div>
         </div>
         <div className="mt-2 px-0.5">
@@ -70,7 +68,7 @@ export function ContinueCard({
           onRemove()
         }}
         aria-label="Remove from Continue Watching"
-        className="absolute top-2 left-2 w-7 h-7 rounded-full relative after:absolute after:content-[''] after:-inset-2 bg-black/70 hover:bg-danger-600/90 backdrop-blur-sm flex items-center justify-center text-white opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all ring-1 ring-white/20"
+        className="absolute top-2 left-2 w-7 h-7 rounded-full after:absolute after:content-[''] after:-inset-2 bg-black/70 hover:bg-danger-600/90 backdrop-blur-sm flex items-center justify-center text-white opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all ring-1 ring-white/20"
       >
         <X size={14} />
       </button>
