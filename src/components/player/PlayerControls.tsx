@@ -117,6 +117,7 @@ export function PlayerControls({
     >
       {/* Top bar */}
       <div
+        data-player-ui
         className="flex items-start justify-between p-4 pt-5 pt-safe px-safe"
         style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.8) 0%, transparent 100%)' }}
         onClick={(e) => e.stopPropagation()}
@@ -154,6 +155,7 @@ export function PlayerControls({
 
       {/* Bottom controls */}
       <div
+        data-player-ui
         className="flex flex-col gap-3 px-4 pb-5 pt-8 pb-safe px-safe"
         style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%)' }}
         onClick={(e) => e.stopPropagation()}

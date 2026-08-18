@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { watchedFraction, isCompleted, resolveSaveDuration, progressPercent } from './progress'
+import { watchedFraction, isCompleted, resolveSaveDuration, progressPercent, isPlaybackAtEnd } from './progress'
 
 // A two-hour film, resumed at 1:36 — the scenario behind finding C1.
 const FILM_DURATION = 7200
@@ -94,5 +94,33 @@ describe('progressPercent', () => {
 
   it('is 0 rather than NaN when the duration is missing', () => {
     expect(progressPercent(1800, 0)).toBe(0)
+  })
+})
+
+describe('isPlaybackAtEnd', () => {
+  // The bug this guards: a 45-minute episode whose encoder had only produced 20
+  // minutes raised 'ended' at 20:00. The old test compared against the window,
+  // where 20:00 *was* the end, so the countdown ran and the episode was filed as
+  // fully watched.
+  it('rejects an ended event that fired mid-episode', () => {
+    expect(isPlaybackAtEnd(20 * 60, 45 * 60)).toBe(false)
+  })
+
+  it('accepts the real end of the film', () => {
+    expect(isPlaybackAtEnd(45 * 60, 45 * 60)).toBe(true)
+  })
+
+  it('absorbs a short final segment', () => {
+    expect(isPlaybackAtEnd(45 * 60 - 12, 45 * 60)).toBe(true)
+  })
+
+  it('does not stretch past the tolerance', () => {
+    expect(isPlaybackAtEnd(45 * 60 - 46, 45 * 60)).toBe(false)
+  })
+
+  it('treats an unknown duration as not-the-end', () => {
+    expect(isPlaybackAtEnd(1200, 0)).toBe(false)
+    expect(isPlaybackAtEnd(1200, NaN)).toBe(false)
+    expect(isPlaybackAtEnd(1200, Infinity)).toBe(false)
   })
 })

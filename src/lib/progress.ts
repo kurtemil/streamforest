@@ -56,3 +56,24 @@ export function resolveSaveDuration(
 export function progressPercent(position: number, duration: number): number {
   return Math.min(100, Math.max(0, watchedFraction(position, duration) * 100))
 }
+
+/**
+ * Whether an `ended` event landed at the real end of the film.
+ *
+ * A transcoded source is served as a window starting at an offset, so `ended`
+ * fires whenever playback catches up with the encoder or the session is torn
+ * down mid-seek — both of which happen in the middle of an episode. Only real
+ * time can tell those apart from a film that actually finished.
+ *
+ * @param realPosition  playbackOffset + video.currentTime
+ * @param realDuration  the probed length of the whole film, not of the window
+ */
+export function isPlaybackAtEnd(
+  realPosition: number,
+  realDuration: number,
+  toleranceSeconds = 45,
+): boolean {
+  if (!Number.isFinite(realDuration) || realDuration <= 0) return false
+  if (!Number.isFinite(realPosition) || realPosition < 0) return false
+  return realDuration - realPosition <= toleranceSeconds
+}

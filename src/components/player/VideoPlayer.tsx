@@ -19,7 +19,7 @@ import {
   trace, traceError, safePlay, mediaSnapshot,
   tracePlaybackStart, tracePlaybackEnd,
 } from '@/lib/diagnostics'
-import { resolveSaveDuration } from '@/lib/progress'
+import { isPlaybackAtEnd, resolveSaveDuration } from '@/lib/progress'
 import { openInVlc } from '@/lib/vlc'
 import { normalizeShowKey } from '@/lib/utils'
 import { parseVttBlock } from '@/lib/vtt'
@@ -533,11 +533,28 @@ export function VideoPlayer() {
   // acting on the single tap, so one gesture never fires both.
   const singleTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const DOUBLE_TAP_MS = 280
+  // How close to the real end an 'ended' event has to land to count as the end of
+  // the film. Wide enough to absorb a short final segment and a probe duration
+  // that disagrees with the container by a second or two.
+  const END_TOLERANCE_S = 45
 
   const handleTouchEnd = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
     if (minimized) return
     const touch = e.changedTouches[0]
     if (!touch) return
+
+    // A tap that landed on a control belongs to that control, not to this
+    // surface. This handler sits on the container that wraps PlayerControls, so
+    // every tap inside the overlay bubbles here too — and the preventDefault()
+    // below suppresses the synthetic click for the whole gesture. Without this
+    // bail, every button in the player was dead on iOS: pause, subtitles, speed,
+    // close. A mouse never routes through touch events, so the desktop was fine
+    // and the defect was invisible everywhere it was tested.
+    const el = e.target as HTMLElement | null
+    if (el?.closest('[data-player-ui], button, a, input, select, [role="slider"], [role="button"]')) {
+      return
+    }
+
     // Stop the synthetic click that would otherwise follow and toggle playback.
     e.preventDefault()
 
@@ -891,15 +908,33 @@ export function VideoPlayer() {
     const onEnded = () => {
       if (!current || current.type === 'live') return
       const localDur = Number.isFinite(video.duration) ? video.duration : 0
+      const realPos = playbackOffsetRef.current + video.currentTime
       const realDur = transcodedDurationRef.current ?? (playbackOffsetRef.current + localDur)
       const profileId = useProfileStore.getState().activeProfileId
-      if (realDur > 0 && profileId) {
-        saveProgress(profileId, current.id, realDur, realDur)
-          .then((entry) => pushProgress(entry))
+
+      // 'ended' does not mean the episode ended. A transcoded source is served as
+      // a window starting at an offset, so playback that catches up with the
+      // encoder raises 'ended' in the middle of the film — as does a session torn
+      // down mid-seek.
+      //
+      // The test therefore has to run against real time. The old one compared
+      // video.currentTime to localDur, but localDur only measures the window, and
+      // reaching the end of the window is exactly what happens when the encoder
+      // falls behind — so the guard was true in precisely the case it existed to
+      // exclude, and "Next episode in 10s" appeared 20 minutes early.
+      const isNearEnd = isPlaybackAtEnd(realPos, realDur, END_TOLERANCE_S)
+
+      if (profileId && realDur > 0) {
+        // A premature 'ended' used to be written as watched-to-the-end, which
+        // discards the resume point and retires the episode from Continue
+        // Watching. Save where playback actually stopped instead.
+        const savedPos = isNearEnd ? realDur : realPos
+        if (savedPos > 0) {
+          saveProgress(profileId, current.id, savedPos, realDur)
+            .then((entry) => pushProgress(entry))
+        }
       }
-      // Only start countdown when genuinely near the end — guards against
-      // spurious 'ended' events browsers fire when video.src is replaced mid-seek.
-      const isNearEnd = localDur > 0 && video.currentTime >= localDur * 0.85
+
       const next = nextEpisodeRef.current
       if (next && isNearEnd && autoplayRef.current) {
         setNextEpCountdown(10)
