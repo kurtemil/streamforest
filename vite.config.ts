@@ -91,8 +91,15 @@ export default defineConfig({
         name: 'StreamForest',
         short_name: 'StreamForest',
         description: 'Personal IPTV player',
-        theme_color: '#0d0d0d',
-        background_color: '#0d0d0d',
+        // Both are #080d0b because both are painted next to surface-100, and it
+        // is surface-100 they have to disappear into: theme_color tints the strip
+        // iOS draws above the app now that the page no longer paints there
+        // itself, and background_color is the splash behind the icon. The meta
+        // theme-color in index.html says the same thing for the same reason —
+        // they disagreed at #0d0d0d, which is a visible seam at a screen edge,
+        // the exact class of bug this change was about.
+        theme_color: '#080d0b',
+        background_color: '#080d0b',
         display: 'standalone',
         orientation: 'any',
         start_url: '/',
