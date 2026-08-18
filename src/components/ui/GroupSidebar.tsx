@@ -15,7 +15,8 @@ interface Props {
   groups: Group[]
   selected: string | null
   onSelect: (title: string | null) => void
-  recentLabel?: string
+  /** Label for the pill that clears the group filter and shows the default rows. */
+  browseLabel?: string
   cleanTitle?: (t: string) => string
   prefixItem?: PrefixItem
 }
@@ -26,7 +27,7 @@ export function GroupSidebar({
   groups,
   selected,
   onSelect,
-  recentLabel = 'Recently Added',
+  browseLabel = 'Browse',
   cleanTitle = defaultClean,
   prefixItem,
 }: Props) {
@@ -50,7 +51,7 @@ export function GroupSidebar({
           onClick={() => onSelect(null)}
           className={`${pillBase} ${selected === null && !prefixItem?.active ? pillActive : pillInactive}`}
         >
-          {recentLabel}
+          {browseLabel}
         </button>
         {groups.map((g) => (
           <button
@@ -88,7 +89,7 @@ export function GroupSidebar({
               : 'text-neutral-400 hover:text-white hover:bg-white/5'
           }`}
         >
-          {recentLabel}
+          {browseLabel}
         </button>
         <div className="my-1 h-px bg-white/5" />
         {groups.map((g) => (

@@ -4,6 +4,15 @@ import { formatTime } from '@/lib/time'
 import { progressPercent } from '@/lib/progress'
 import type { Channel, WatchProgress, TmdbMeta } from '@/types'
 
+/* Card decorations carry no backdrop-filter, and that is deliberate. Measured on
+   a phone-shaped viewport: 49 blurred layers on Home, 23 of them on screen at
+   once, 47 of the 49 being this 28px chip repeated once per card — and scrolling
+   held p50 35-43ms a frame, under 30fps, before any artwork had even loaded.
+   Each one makes the compositor resample and blur the poster behind it every
+   frame the row moves. At 28px over dense artwork the blur was not visible
+   anyway; the translucent fill alone reads identically. Blur is kept where it is
+   one large surface doing the work of glass: the tab bar, dialogs, the player.
+   `e2e/perf-probe.spec.ts` is the measurement, if it needs repeating. */
 export function ContinueCard({
   channel,
   progress,
@@ -39,7 +48,7 @@ export function ContinueCard({
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
           <div className="absolute inset-0 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-            <div className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center ring-2 ring-white/30">
+            <div className="w-10 h-10 rounded-full bg-black/60 flex items-center justify-center ring-2 ring-white/30">
               <Play size={16} fill="white" className="text-white ml-0.5" />
             </div>
           </div>
@@ -68,7 +77,7 @@ export function ContinueCard({
           onRemove()
         }}
         aria-label="Remove from Continue Watching"
-        className="absolute top-2 left-2 w-7 h-7 rounded-full after:absolute after:content-[''] after:-inset-2 bg-black/70 hover:bg-danger-600/90 backdrop-blur-sm flex items-center justify-center text-white opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-all ring-1 ring-white/20"
+        className="absolute top-2 left-2 w-7 h-7 rounded-full after:absolute after:content-[''] after:-inset-2 bg-black/70 hover:bg-danger-600/90 flex items-center justify-center text-white opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-all ring-1 ring-white/20"
       >
         <X size={14} />
       </button>

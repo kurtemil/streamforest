@@ -95,17 +95,25 @@ view, and `bar reaches bottom: yes` had already cleared the layout. Nothing in
 
 ### Confirming it
 
-Reinstall the home-screen app, then **Settings → Device**:
+Confirmed on the device on 2026-08-18: the bar sits on the bottom edge.
 
-- **`screen - viewport: 0px`** — fixed. The bar's `bottom: 0` is now the bottom of
-  the screen.
-- **anything else** — the launch config is still not what this change intended,
-  and the number is how much screen the page is missing. Do not start moving the
-  bar; it is not the bar.
-- Watch `bar padding-bottom` too. Without `black-translucent` iOS may report
-  `safe-area-inset-bottom` as 0, and if it does, `pb-safe` collapses and the
-  labels will sit on the home indicator — a different bug with a different fix
-  (a floor under the inset), and one this readout will show plainly.
+The readout that proved it — Settings → Device, `ViewportReadout.tsx` — has since
+been removed; it was a diagnostic for an open bug and became clutter in a
+settings page once the bug closed. It is in the history if this ever comes back:
+
+```bash
+git show dc61e6e:src/components/settings/ViewportReadout.tsx
+```
+
+Restore it before theorising. It reports `screen - viewport`, and a non-zero
+value there is not a layout problem — it is screen the page does not own, and no
+amount of CSS reaches it.
+
+One thing to watch, since it changed with the fix: without `black-translucent`,
+`env(safe-area-inset-bottom)` could have come back as 0, which would collapse
+`pb-safe` and drop the labels onto the home indicator. It did not — the inset is
+still reported and the padding still resolves — but that is the failure mode to
+look for if the bar ever looks wrong at the bottom rather than above it.
 
 ### Guard that already exists
 
@@ -138,6 +146,69 @@ open Movies, then search. `e2e/baseline.spec.ts` takes the second path on purpos
 
 ---
 
+## Home was slow because of an 18-second animation
+
+Fixed on 2026-08-18. The report was that Home stuttered while scrolling and that
+other pages did too, which reads like a scrolling problem and is not one.
+
+Measured with `npm run probe:scroll` against the production build, same page,
+same inventory, changing one class:
+
+| | median frame | frames over 32ms |
+|---|---|---|
+| `animate-kenburns` on the hero backdrop | 47–49 ms | 88 of 88 |
+| gated off | 16 ms | 27 of 88 |
+
+`kenburns` is `18s ease-in-out infinite` on a full-bleed image. An infinite scale
+never lets the layer settle, so it re-rasterises for as long as the page is open
+— the cost is not paid while scrolling, it is paid always, and scrolling is
+merely when it gets noticed. Home was the worst page because Home has the hero;
+`/movies` measured 15ms all along.
+
+It is `can-hover:animate-kenburns` now: a desktop has the headroom, and the phone
+is what this app is watched on. Worth knowing that the hero's poster fallback
+puts `blur-3xl saturate-[1.7]` on that same element, so the animated case there
+was re-blurring a full-screen image every frame.
+
+Card decorations also lost their `backdrop-filter` in the same pass — 49 blurred
+layers on Home, 23 on screen at once, 47 of them a 28px chip repeated per card.
+Be honest about that one: the probe watches the main thread and could not measure
+it either way. It was removed on the argument that a blur that small over dense
+artwork is not visible and a compositor pass per card is not free, not on a
+number. The kenburns result is the measured one.
+
+---
+
+## "Recently Added" had nothing to be recent about
+
+Fixed on 2026-08-18. It was `movies.slice(0, 20)` — the first twenty lines of the
+M3U file. An M3U carries no dates, so file order was the only ordering available
+and it was being presented as recency. A Christmas film near the top of the
+playlist sat in the row all year, which is how it was noticed.
+
+The app keeps its own history now: `channelSeen` (Dexie v8), a table that
+survives the import that clears `channels`, holding the first time each id was
+stored. `markSeen` stamps ids it has not seen and deletes ids the provider
+dropped, so a removed-and-restored title reads as new again.
+
+`pickRecentlyAdded` in `src/lib/recentlyAdded.ts` decides what that history may
+claim, and both of its rules exist to let the row say nothing:
+
+- the oldest stamp is the baseline import — everything carrying it arrived
+  together, which is a library, not an arrival
+- past 45 days nothing is recent, so a library that stopped being updated cannot
+  keep presenting its last delivery as new
+
+On a fresh install every row shares the baseline and the result is empty, so the
+row hides. It fills on the import after the next one. That is the correct answer
+and it is unit-tested; the previous behaviour could not produce an empty row at
+all, which is precisely why it was always wrong.
+
+The sidebar pill that clears the group filter was also called "Recently Added"
+while actually meaning "the default rows view". It is `browseLabel` / "Browse".
+
+---
+
 ## Diagnostics and tests
 
 Nobody debugs this app on the phone it is watched on, so four tools stand in for
@@ -148,19 +219,24 @@ that. Use the one that owns the question.
 | What did ffmpeg actually produce? | `npm run probe:hls` |
 | Does the interface work under touch? | `npm run test:e2e` |
 | What happened on a real device? | `npm run logs` |
-| What is the viewport on the device right now? | Settings → Device |
+| Why does scrolling stutter? | `npm run probe:scroll` |
 
-**Settings → Device** — `src/components/settings/ViewportReadout.tsx`, admin only.
-Viewport, visual viewport, screen, DPR, the four safe-area insets measured through a
-probe element, display mode, and the tab bar's own rectangle with its computed
-position and padding. There is a Copy button so the numbers can be pasted rather
-than transcribed.
+**`npm run probe:scroll`** — `e2e/perf-probe.spec.ts`, tagged `@probe` so the
+normal suite skips it. Reports what is on a page — rendered nodes, how many carry
+a `backdrop-filter` and how many of those are on screen, shadows, images — and
+then times every frame while `scrollTop` is stepped from inside a rAF chain.
 
-It exists because safe-area insets cannot be emulated: Playwright reports `0/0/0/0`
-for all four, so anything that goes wrong at the screen edges is invisible in every
-local test. It is also the only place that can see a viewport smaller than the
-screen — the row `screen - viewport`, which is what the tab-bar bug above turned
-out to be.
+Read it as a comparison, never as a frame rate. Stepping scroll this way forces a
+layout each tick, so absolute numbers are worse than real scrolling, and it
+watches the main thread rather than the compositor — it cannot see what a stack
+of backdrop-filters costs. What it is good for is A/B against the same page:
+build, measure, change one thing, measure again.
+
+Measure the production build, or it measures React. `npm run build`, then
+`npx vite preview --port 5173`, then run it — Playwright reuses a server already
+on 5173 and otherwise starts the dev one, where StrictMode double-renders
+everything under the instrument. Kill the preview afterwards: the e2e suite will
+happily run against a stale build otherwise.
 
 **`npm run probe:hls`** — `tools/hls-probe.mjs` generates a test clip with ffmpeg,
 serves it over a throwaway HTTP origin, runs a fresh transcode-proxy against it and

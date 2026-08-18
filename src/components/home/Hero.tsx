@@ -60,7 +60,16 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
 
   return (
     <div className="group relative w-full h-[52vh] min-h-[360px] max-h-[560px] overflow-hidden select-none">
-      {/* Backdrop */}
+      {/* Backdrop. The Ken Burns drift is gated to pointer devices, and that gate
+          is the difference between Home scrolling and Home stuttering. Measured
+          on a phone-shaped viewport against the same build and the same page,
+          changing nothing else: with the animation, a median frame took 47-49ms
+          and all 88 sampled frames ran over 32ms; without it, 16ms and 27. An
+          18s infinite scale on a full-bleed image never lets the layer settle —
+          it re-rasterises for the whole time the page is open, which is why this
+          read as the page being slow rather than as an animation being costly.
+          A desktop has the headroom for it and the phone is what this app is
+          watched on. `npm run probe:scroll` is the measurement. */}
       <AnimatePresence mode="sync">
         <motion.div
           key={`bg-${idx}`}
@@ -75,7 +84,7 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
               src={backdrop}
               alt=""
               aria-hidden="true"
-              className="w-full h-full object-cover animate-kenburns"
+              className="w-full h-full object-cover can-hover:animate-kenburns"
               decoding="async"
             />
           ) : poster ? (
@@ -83,7 +92,7 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
               src={poster}
               alt=""
               aria-hidden="true"
-              className="w-full h-full object-cover scale-150 blur-3xl saturate-[1.7] opacity-95 animate-kenburns"
+              className="w-full h-full object-cover scale-150 blur-3xl saturate-[1.7] opacity-95 can-hover:animate-kenburns"
               decoding="async"
             />
           ) : (

@@ -283,7 +283,7 @@ export function LiveTVPage() {
           groups={groups}
           selected={selectedGroup}
           onSelect={(g) => { setSelectedGroup(g); setSearch('') }}
-          recentLabel="Recently Added"
+          browseLabel="Browse"
         />
       </div>
 

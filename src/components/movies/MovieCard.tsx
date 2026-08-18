@@ -14,6 +14,15 @@ interface Props {
   onRemove?: (e: React.MouseEvent) => void
 }
 
+/* Card decorations carry no backdrop-filter, and that is deliberate. Measured on
+   a phone-shaped viewport: 49 blurred layers on Home, 23 of them on screen at
+   once, 47 of the 49 being this 28px chip repeated once per card — and scrolling
+   held p50 35-43ms a frame, under 30fps, before any artwork had even loaded.
+   Each one makes the compositor resample and blur the poster behind it every
+   frame the row moves. At 28px over dense artwork the blur was not visible
+   anyway; the translucent fill alone reads identically. Blur is kept where it is
+   one large surface doing the work of glass: the tab bar, dialogs, the player.
+   `e2e/perf-probe.spec.ts` is the measurement, if it needs repeating. */
 export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLabel, onClick, onWatchLater, onRemove }: Props) {
   const pct = progress ? Math.round(progressPercent(progress.position, progress.duration)) : 0
 
@@ -36,7 +45,7 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
         {/* Hover overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
         <div className="absolute inset-0 hidden md:flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-          <div className="w-11 h-11 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center ring-2 ring-white/30">
+          <div className="w-11 h-11 rounded-full bg-black/60 flex items-center justify-center ring-2 ring-white/30">
             <Play size={18} fill="white" className="text-white ml-0.5" />
           </div>
         </div>
@@ -46,7 +55,7 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
           <button
             onClick={(e) => { e.stopPropagation(); onRemove(e) }}
             aria-label="Remove"
-            className="absolute top-2 left-2 w-7 h-7 rounded-full after:absolute after:content-[''] after:-inset-2 bg-black/70 hover:bg-red-600/90 backdrop-blur-sm flex items-center justify-center text-white opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-all ring-1 ring-white/20 z-10"
+            className="absolute top-2 left-2 w-7 h-7 rounded-full after:absolute after:content-[''] after:-inset-2 bg-black/70 hover:bg-red-600/90 flex items-center justify-center text-white opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-all ring-1 ring-white/20 z-10"
           >
             <X size={13} />
           </button>
@@ -57,7 +66,7 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
           <button
             onClick={onWatchLater}
             title={isWatchLater ? 'Remove from Watch Later' : 'Add to Watch Later'}
-            className={`absolute top-2 left-2 w-7 h-7 rounded-full after:absolute after:content-[''] after:-inset-2 backdrop-blur-sm flex items-center justify-center ring-1 transition-all z-10 ${
+            className={`absolute top-2 left-2 w-7 h-7 rounded-full after:absolute after:content-[''] after:-inset-2 flex items-center justify-center ring-1 transition-all z-10 ${
               isWatchLater
                 ? 'bg-accent-600/90 ring-accent-500/60 opacity-100'
                 : 'bg-black/70 ring-white/20 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 hover:bg-accent-600/80'
@@ -69,7 +78,7 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
 
         {/* Rating chip */}
         {rating !== null && (
-          <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 backdrop-blur-sm rounded-full px-1.5 py-0.5 ring-1 ring-white/15">
+          <div className="absolute top-2 right-2 flex items-center gap-0.5 bg-black/70 rounded-full px-1.5 py-0.5 ring-1 ring-white/15">
             <Star size={9} fill="#f59e0b" className="text-warn-500 shrink-0" />
             <span className="text-micro font-semibold text-white">{rating.toFixed(1)}</span>
           </div>

@@ -43,6 +43,22 @@ const PAGED_MOVIES = Array.from({ length: PAGING_COUNT }, (_, i) => ({
   year: 2000 + (i % 25),
 }))
 
+// A seen-history in the shape the app writes one: a baseline import that brought
+// everything, and a later one that brought a single title. Only that title is
+// recently added, which is the distinction the row exists to make.
+const DAY = 24 * 60 * 60 * 1000
+export const RECENT_TITLE = 'Dune'
+export function recentHistory(now: number) {
+  return [
+    { id: 'm_1001', firstSeenAt: now - 30 * DAY },
+    { id: 'm_1002', firstSeenAt: now - 30 * DAY },
+    { id: 's_2001', firstSeenAt: now - 30 * DAY },
+    { id: 's_2002', firstSeenAt: now - 30 * DAY },
+    { id: 'l_3001', firstSeenAt: now - 30 * DAY },
+    { id: 'm_1003', firstSeenAt: now - 2 * DAY },
+  ]
+}
+
 export async function seedProfile(page: Page, profileId: string = PROFILE_ID): Promise<void> {
   await page.addInitScript(
     ([profileKey, m3uKey, id]) => {
@@ -64,23 +80,25 @@ export async function seedProfile(page: Page, profileId: string = PROFILE_ID): P
 export async function seedLibrary(
   page: Page,
   extra: readonly Record<string, unknown>[] = [],
+  seen: readonly { id: string; firstSeenAt: number }[] = [],
 ): Promise<void> {
   await seedProfile(page)
   await page.goto('/')
   await page.waitForFunction(() => (document.querySelector('#root')?.children.length ?? 0) > 0)
 
-  await page.evaluate(async ({ channels, progress }) => {
+  await page.evaluate(async ({ channels, progress, seen }) => {
     const db: IDBDatabase = await new Promise((resolve, reject) => {
       const req = indexedDB.open('StreamForestDB')
       req.onsuccess = () => resolve(req.result)
       req.onerror = () => reject(req.error)
     })
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(['channels', 'playlistMeta', 'watchProgress'], 'readwrite')
+      const tx = db.transaction(['channels', 'playlistMeta', 'watchProgress', 'channelSeen'], 'readwrite')
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
       for (const c of channels) tx.objectStore('channels').put(c)
       for (const p of progress) tx.objectStore('watchProgress').put(p)
+      for (const sRow of seen) tx.objectStore('channelSeen').put(sRow)
       tx.objectStore('playlistMeta').put({
         id: 1,
         url: 'http://example.invalid/playlist.m3u',
@@ -93,6 +111,7 @@ export async function seedLibrary(
   }, {
     channels: [...(SEED_CHANNELS as unknown as Record<string, unknown>[]), ...extra],
     progress: SEED_PROGRESS as unknown as Record<string, unknown>[],
+    seen: seen as unknown as { id: string; firstSeenAt: number }[],
   })
 
   await page.reload()
@@ -123,7 +142,7 @@ export function collectConsoleErrors(page: Page): string[] {
   return errors
 }
 
-export const test = base.extend<{ seededPage: Page; libraryPage: Page; pagedPage: Page }>({
+export const test = base.extend<{ seededPage: Page; libraryPage: Page; pagedPage: Page; recentPage: Page }>({
   // Profile only — the app renders its welcome state.
   seededPage: async ({ page }, use) => {
     await seedProfile(page)
@@ -132,6 +151,11 @@ export const test = base.extend<{ seededPage: Page; libraryPage: Page; pagedPage
   // Profile plus a library, so card-level controls actually exist to audit.
   libraryPage: async ({ page }, use) => {
     await seedLibrary(page)
+    await use(page)
+  },
+  // The library plus a history in which exactly one title is new.
+  recentPage: async ({ page }, use) => {
+    await seedLibrary(page, [], recentHistory(Date.now()))
     await use(page)
   },
   // The same library with one group big enough to need more than one page.

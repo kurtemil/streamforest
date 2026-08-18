@@ -657,7 +657,7 @@ export function SeriesPage() {
           groups={groups}
           selected={showFavs ? '__favs__' : selectedGroup}
           onSelect={(g) => { setShowFavs(false); setSelectedGroup(g); setSearch('') }}
-          recentLabel="Recently Added"
+          browseLabel="Browse"
           cleanTitle={(t) => t.replace(/^Series:\s*/, '')}
           prefixItem={{
             label: (

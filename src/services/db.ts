@@ -1,8 +1,18 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { Channel, WatchProgress, Favorite, PlaylistMeta, WatchLater, TmdbMeta, EpgProgram } from '@/types'
 import { isCompleted } from '@/lib/progress'
+import { pickRecentlyAdded } from '@/lib/recentlyAdded'
 
 interface EpgChannelName { id: string; channelId: string }
+
+/**
+ * When this app first saw a channel id.
+ *
+ * Its own table because the channels table is emptied on every playlist import —
+ * a diff against rows that are about to be deleted has nothing to compare with.
+ * This one survives the import, which is the whole point of it.
+ */
+interface ChannelSeen { id: string; firstSeenAt: number }
 
 class AppDB extends Dexie {
   channels!: EntityTable<Channel, 'id'>
@@ -13,6 +23,7 @@ class AppDB extends Dexie {
   tmdbCache!: EntityTable<TmdbMeta, 'id'>
   epgPrograms!: EntityTable<EpgProgram, 'id'>
   epgChannelNames!: EntityTable<EpgChannelName, 'id'>
+  channelSeen!: EntityTable<ChannelSeen, 'id'>
 
   constructor() {
     super('StreamForestDB')
@@ -84,6 +95,17 @@ class AppDB extends Dexie {
       epgPrograms: 'id, channelId, start, end',
       epgChannelNames: 'id',
     })
+    this.version(8).stores({
+      channels: 'id, type, groupTitle, showName, season, sortIndex',
+      watchProgress: 'id, profileId, channelId, lastWatched, completed',
+      favorites: 'id, kind, addedAt',
+      playlistMeta: 'id',
+      watchLater: 'id, profileId, contentId, kind, addedAt',
+      tmdbCache: 'id, contentType, tmdbId, cachedAt',
+      epgPrograms: 'id, channelId, start, end',
+      epgChannelNames: 'id',
+      channelSeen: 'id, firstSeenAt',
+    })
   }
 }
 
@@ -92,6 +114,10 @@ export const db = new AppDB()
 export async function clearPlaylist() {
   await db.channels.clear()
   await db.playlistMeta.clear()
+  // The seen-history goes too. Keeping it would date the next import against a
+  // library this install no longer has, and every title would come back "new"
+  // except the ones that happen to match — which is worse than starting over.
+  await db.channelSeen.clear()
 }
 
 const SAVE_CHUNK = 2000
@@ -125,6 +151,59 @@ export async function finishPlaylistSave(channels: Channel[], url: string): Prom
   })
 }
 
+/**
+ * Stamp ids this app has not seen before, and forget the ones the provider
+ * dropped.
+ *
+ * An M3U carries no date. Nothing in the file says when a title appeared, so
+ * "Recently Added" was reading the only ordering there was — the order of lines
+ * in the file — and calling it recency. That is why a Christmas film sat in the
+ * row all year: it was never recent, it was near the top of the playlist.
+ *
+ * The one honest source is this app's own history, so it keeps one: an id it has
+ * not stored before is new as of now. That makes the first run after this ships
+ * a baseline of a single timestamp and nothing genuinely recent, which
+ * `getRecentlyAddedIds` reports as empty rather than dressing up as a row.
+ */
+async function markSeen(channels: Channel[]): Promise<void> {
+  const known = new Set(await db.channelSeen.toCollection().primaryKeys())
+  const now = Date.now()
+  const fresh: ChannelSeen[] = []
+  const present = new Set<string>()
+  for (const c of channels) {
+    present.add(c.id)
+    if (!known.has(c.id)) fresh.push({ id: c.id, firstSeenAt: now })
+  }
+  if (fresh.length) await db.channelSeen.bulkPut(fresh)
+  // A title the provider removed and later restored should read as new again,
+  // and without this the table grows for the life of the install.
+  const gone = [...known].filter((id) => !present.has(id))
+  if (gone.length) await db.channelSeen.bulkDelete(gone)
+}
+
+/**
+ * Ids most recently added, newest first — empty when there is nothing to say.
+ *
+ * Returns a pool rather than a row's worth: callers split it into films and shows
+ * and dedupe shows down to one episode each, so a fixed 20 here would arrive as
+ * three after filtering.
+ *
+ * The oldest stamp in the table is the import that established the baseline;
+ * everything carrying it arrived together and none of it is recent. `maxAgeDays`
+ * stops a row that has not changed in half a year from still calling itself
+ * recent.
+ */
+export async function getRecentlyAddedIds(pool = 240, maxAgeDays = 45): Promise<string[]> {
+  // Newest first and capped: the whole table can be tens of thousands of rows,
+  // and a row of twenty cards does not need any more than this to fill from.
+  const rows = await db.channelSeen.orderBy('firstSeenAt').reverse().limit(pool).toArray()
+  const oldest = await db.channelSeen.orderBy('firstSeenAt').first()
+  if (!oldest) return []
+  // The baseline may be older than anything in `rows`, so pass it in rather than
+  // letting the pure function infer it from a slice that does not contain it.
+  return pickRecentlyAdded([oldest, ...rows], Date.now(), maxAgeDays)
+}
+
 export async function saveChannels(
   channels: Channel[],
   url: string,
@@ -135,6 +214,7 @@ export async function saveChannels(
     await db.channels.bulkPut(channels.slice(i, i + SAVE_CHUNK))
     onProgress?.(Math.min(99, Math.round(((i + SAVE_CHUNK) / channels.length) * 100)))
   }
+  await markSeen(channels)
   await finishPlaylistSave(channels, url)
   onProgress?.(100)
 }

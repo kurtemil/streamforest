@@ -7,7 +7,7 @@ import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useProfileStore } from '@/stores/profileStore'
 import { useActiveExclusions } from '@/hooks/useActiveExclusions'
-import { db, clearProgress, addToWatchLater, removeFromWatchLater } from '@/services/db'
+import { db, clearProgress, addToWatchLater, removeFromWatchLater, getRecentlyAddedIds } from '@/services/db'
 import { deleteRemoteProgress, pushWatchLater, deleteRemoteWatchLater } from '@/services/sync'
 import { MovieCard } from '@/components/movies/MovieCard'
 import { Hero } from '@/components/home/Hero'
@@ -90,21 +90,43 @@ export function HomePage() {
     [activeProfileId, watchLaterSet],
   )
 
-  const recentMovies = useMemo(() => movies.slice(0, 20), [movies])
+  // What is actually new, not what is near the top of the playlist file. An M3U
+  // has no dates, so `movies.slice(0, 20)` was reading line order as recency —
+  // which is why the same handful of titles sat here for months. The app stamps
+  // ids it has not seen before on each import; this is that history, and it is
+  // empty until an import brings something the previous one did not have.
+  const recentIds = useLiveQuery(() => getRecentlyAddedIds(), [])
 
-  const recentShows = useMemo(() => {
-    const seen = new Set<string>()
+  const recentMovies = useMemo(() => {
+    if (!recentIds?.length || !movies.length) return []
+    const byId = new Map(movies.map((m) => [m.id, m]))
     const result: Channel[] = []
-    for (const ch of series) {
-      const key = ch.showName ?? ch.name
-      if (!seen.has(key)) {
-        seen.add(key)
-        result.push(ch)
-      }
+    for (const id of recentIds) {
+      const m = byId.get(id)
+      if (m) result.push(m)
       if (result.length >= 20) break
     }
     return result
-  }, [series])
+  }, [recentIds, movies])
+
+  const recentShows = useMemo(() => {
+    if (!recentIds?.length || !series.length) return []
+    const byId = new Map(series.map((c) => [c.id, c]))
+    // One card per show: a new season arrives as a dozen episodes and would
+    // otherwise fill the whole row with the same title.
+    const seen = new Set<string>()
+    const result: Channel[] = []
+    for (const id of recentIds) {
+      const ch = byId.get(id)
+      if (!ch) continue
+      const key = ch.showName ?? ch.name
+      if (seen.has(key)) continue
+      seen.add(key)
+      result.push(ch)
+      if (result.length >= 20) break
+    }
+    return result
+  }, [recentIds, series])
 
   // Top movie genre rows (top 3 by count, 20 items each)
   const movieGenreRows = useMemo(() => {

@@ -12,6 +12,7 @@ import {
   addToWatchLater,
   removeFromWatchLater,
   clearProgress,
+  getRecentlyAddedIds,
 } from '@/services/db'
 import { pushWatchLater, deleteRemoteWatchLater, deleteRemoteProgress } from '@/services/sync'
 import { MovieCard } from '@/components/movies/MovieCard'
@@ -70,6 +71,21 @@ export function MoviesPage() {
     }
     return Array.from(seen).map((title) => ({ title, count: counts.get(title) ?? 0 }))
   }, [movies])
+
+  // Same history the home screen reads: ids this app first saw on an import that
+  // brought them, rather than the first twenty lines of the playlist file.
+  const recentIds = useLiveQuery(() => getRecentlyAddedIds(), [])
+  const recentlyAdded = useMemo(() => {
+    if (!recentIds?.length || !movies.length) return []
+    const byId = new Map(movies.map((m) => [m.id, m]))
+    const result: Channel[] = []
+    for (const id of recentIds) {
+      const m = byId.get(id)
+      if (m) result.push(m)
+      if (result.length >= 20) break
+    }
+    return result
+  }, [recentIds, movies])
 
   const filtered = useMemo(() => {
     if (search.trim()) {
@@ -271,7 +287,7 @@ export function MoviesPage() {
             groups={groups}
             selected={selectedGroup}
             onSelect={handleGroupSelect}
-            recentLabel="Recently Added"
+            browseLabel="Browse"
             cleanTitle={cleanGroup}
           />
         </div>
@@ -330,10 +346,11 @@ export function MoviesPage() {
                   </section>
                 )}
 
+                {recentlyAdded.length > 0 && (
                 <section>
                   <SectionHeader title="Recently Added" />
                   <ScrollableRow>
-                    {movies.slice(0, 20).map((m) => (
+                    {recentlyAdded.map((m) => (
                       <div key={m.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                         <MovieCard
                           channel={m}
@@ -347,6 +364,7 @@ export function MoviesPage() {
                     ))}
                   </ScrollableRow>
                 </section>
+                )}
 
                 {/* TMDB genre rows */}
                 {tmdbGenreRows.map(({ genre, items }) => (

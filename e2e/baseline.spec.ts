@@ -1,4 +1,4 @@
-import { test, expect, collectConsoleErrors, PAGING_COUNT } from './fixtures'
+import { test, expect, collectConsoleErrors, PAGING_COUNT, RECENT_TITLE } from './fixtures'
 
 // Baseline shape of the app in WebKit. These are the assertions that should stay
 // true through the whole rebuild — if one of them breaks, something regressed
@@ -37,10 +37,26 @@ test('navigation matches the viewport', async ({ seededPage: page }, testInfo) =
 
 test('the seeded library renders its rows', async ({ libraryPage: page }) => {
   await expect(page.getByRole('heading', { name: 'Continue Watching' })).toBeVisible()
-  // The same title legitimately appears in several rows — Continue Watching,
-  // Recently Added and its genre row — so assert presence, not a count.
+  // The same title legitimately appears in several rows — Continue Watching and
+  // its genre row — so assert presence, not a count.
   await expect(page.getByText('Arrival').first()).toBeVisible()
+
+  // And no Recently Added row, which is the point rather than an omission. This
+  // library arrived in one import, so nothing in it is an arrival; the row used
+  // to be here because it ranked by position in the playlist file and therefore
+  // always had twenty titles to show, whether or not any were new.
+  await expect(page.getByRole('heading', { name: 'Recently Added Movies' })).toBeHidden()
+})
+
+test('recently added shows what a later import brought, and only that', async ({ recentPage: page }) => {
   await expect(page.getByRole('heading', { name: 'Recently Added Movies' })).toBeVisible()
+
+  const row = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Recently Added Movies' }) })
+  await expect(row.getByText(RECENT_TITLE, { exact: true })).toBeVisible()
+  // The baseline import's titles are not arrivals and must not appear here, even
+  // though they are on the page in other rows.
+  await expect(row.getByText('Arrival', { exact: true })).toBeHidden()
+  await expect(row.getByText('Sicario', { exact: true })).toBeHidden()
 })
 
 test('the profile picker is bypassed once a profile is stored', async ({ seededPage: page }) => {
