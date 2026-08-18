@@ -37,9 +37,80 @@ npm test             # vitest unit tests
 
 ---
 
+## OPEN: the tab bar sits too high in the installed PWA
+
+**Status:** unresolved as of 2026-08-18. Two fixes were shipped on guesses and
+neither worked. Do not ship a third guess — take the measurement first.
+
+**Symptom.** In the home-screen app on an iPhone, the bottom tab bar sits well
+above the bottom edge with a black band beneath it. Estimated from a device
+screenshot: roughly **110 CSS px** between the labels and the bottom edge on a
+402×874 viewport (iPhone 16 Pro, DPR 3), where about 44 would be correct. It does
+not reproduce anywhere locally.
+
+### Ruled out, with evidence
+
+| Suspect | Why it is not that |
+|---|---|
+| Stale build / cache | Production serves the expected hashed assets (checked with curl against the live `index.html`). The PWA was also removed and reinstalled by hand. |
+| The service worker never updating | Real, separate bug — the injected `registerSW.js` was a bare `register()` on `load`, so a home-screen app resumed from the app switcher never checked for updates. Fixed in `4fb9e92`. It was not the cause of this. |
+| The viewport meta | Character-for-character identical to `lagom`, whose tab bar is correct. |
+| An over-reported safe-area inset | Tried bounding it with `min(env(safe-area-inset-bottom), 2.25rem)`. No effect; reverted in `d52737e`. |
+| A missing compositing layer | `lagom` carries a bare `translateZ(0)` on its nav for exactly this class of bug, so it was adopted in `d52737e`. Still wrong after a clean reinstall. |
+
+### Take the measurement first
+
+**Settings → Device** (admin only, `src/components/settings/ViewportReadout.tsx`)
+reports what the phone actually has, including the tab bar's own rectangle. The
+deciding row is **`bar reaches bottom`**:
+
+- **`yes`** — the bar is positioned correctly and the gap *is* `env(safe-area-inset-bottom)`.
+  Then the question is why that value is ~4× what an iPhone should report, and the
+  fix belongs in how the inset is consumed, not in the bar's position.
+- **`no — short by Npx`** — the bar is being laid out short and the inset is
+  innocent. Then it is the layout, and the first suspect is below.
+
+These need opposite fixes. Not knowing which one it was is precisely why two
+guesses missed.
+
+### The leading candidate if the bar is short
+
+The one structural difference left between this app and `lagom`
+(`~/gitRepos/Private/lagom`), whose tab bar is correct, is the scroll model:
+
+- **lagom** scrolls the document — `src/routes/+layout.svelte` is
+  `<main class="relative min-h-dvh pt-safe pb-safe">`, and the nav is
+  `fixed inset-x-0 bottom-0` with plain `pb-safe`.
+- **this app** uses an app shell — `src/components/layout/Layout.tsx` is
+  `<div class="flex h-full overflow-hidden">` with `<main class="flex-1 overflow-y-auto">`,
+  and `src/index.css` sets `html, body, #root { height: 100%; min-height: 100dvh }`.
+
+A `height: 100%` chain resolves against the layout viewport, which on iOS with
+`viewport-fit=cover` can be shorter than the visual viewport — and `position: fixed`
+anchors to the same shorter box. That would place the bar high by exactly the
+difference.
+
+Switching to document scrolling is not a one-liner. It touches:
+- `mainRef.current?.scrollTo(0, 0)` on route change in `Layout.tsx` → `window.scrollTo`
+- the desktop sidebar, which is `h-full` inside the flex row and would need `sticky`
+- `overscroll-behavior: none` in `index.css`, which currently depends on the shell
+- the player, which is `fixed z-50` and should be unaffected — verify, do not assume
+
+A cheaper probe before refactoring: set the shell to `height: 100dvh` instead of
+`height: 100%` and re-read the readout on the device.
+
+### Guard that already exists
+
+`e2e/baseline.spec.ts` asserts the bar's bottom equals the viewport height. It
+passes in every emulated viewport, which is the point of its own comment: Playwright
+does not emulate safe-area insets, so it catches a bar mispositioned by layout, not
+one lifted by `env()`.
+
+---
+
 ## Diagnostics and tests
 
-Nobody debugs this app on the phone it is watched on, so three tools stand in for
+Nobody debugs this app on the phone it is watched on, so four tools stand in for
 that. Use the one that owns the question.
 
 | Question | Tool |
@@ -47,6 +118,18 @@ that. Use the one that owns the question.
 | What did ffmpeg actually produce? | `npm run probe:hls` |
 | Does the interface work under touch? | `npm run test:e2e` |
 | What happened on a real device? | `npm run logs` |
+| What is the viewport on the device right now? | Settings → Device |
+
+**Settings → Device** — `src/components/settings/ViewportReadout.tsx`, admin only.
+Viewport, visual viewport, screen, DPR, the four safe-area insets measured through a
+probe element, display mode, and the tab bar's own rectangle with its computed
+position and padding. There is a Copy button so the numbers can be pasted rather
+than transcribed.
+
+It exists because safe-area insets cannot be emulated: Playwright reports `0/0/0/0`
+for all four, so anything that goes wrong at the screen edges is invisible in every
+local test. See the open tab-bar investigation above for what it is currently
+answering.
 
 **`npm run probe:hls`** — `tools/hls-probe.mjs` generates a test clip with ffmpeg,
 serves it over a throwaway HTTP origin, runs a fresh transcode-proxy against it and
