@@ -5,6 +5,19 @@ export default {
   future: { hoverOnlyWhenSupported: true },
   theme: {
     extend: {
+      // Colour-opacity shorthands only generate for steps that exist in this
+      // scale. The codebase uses /3, /6, /8, /12 and /22 in 44 places, none of
+      // which were in it, so every one of those classes produced nothing at all —
+      // backgrounds and borders silently vanished, and `ring-*/8` fell through to
+      // Tailwind's own default ring colour, which is blue. That is where the blue
+      // outline around every poster came from.
+      opacity: {
+        3: '0.03',
+        6: '0.06',
+        8: '0.08',
+        12: '0.12',
+        22: '0.22',
+      },
       screens: {
         // Reveal-on-hover is a property of the input device, not the viewport
         // width. Gating it on `md:` hid card controls on an iPad — a touch screen
