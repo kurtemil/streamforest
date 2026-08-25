@@ -6,13 +6,20 @@ import { normalizeShowKey } from '@/lib/utils'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useProfileStore } from '@/stores/profileStore'
-import { db, addToWatchLater, removeFromWatchLater, clearProgress } from '@/services/db'
+import { db, addToWatchLater, removeFromWatchLater, clearProgressMany, dismissRecommendation, recommendationKey } from '@/services/db'
 import { pushWatchLater, deleteRemoteWatchLater, deleteRemoteProgress } from '@/services/sync'
 import { MovieCard } from '@/components/movies/MovieCard'
 import { EmptyState } from '@/components/ui/EmptyState'
 import type { Channel, WatchProgress } from '@/types'
 
 type Tab = 'continue' | 'watchlater' | 'history' | 'favorites'
+
+/** A History card and every progress row it was folded together from. */
+interface HistoryItem {
+  channel: Channel
+  progress: WatchProgress
+  channelIds: string[]
+}
 type SortKey = 'recent' | 'az'
 
 const TABS: { id: Tab; label: string; Icon: React.ElementType }[] = [
@@ -84,10 +91,13 @@ export function LibraryPage() {
   }, [watchLaterEntries, chanById, showRepMap, channels.length])
 
   // ── Continue Watching ───────────────────────────────────────────────────────
-  const continueItems = useMemo((): { channel: Channel; progress: WatchProgress }[] => {
+  // Same folding as History, and the same reason for carrying a list: removing a
+  // show's card has to drop every episode of it that is resumable, or the card
+  // reappears showing the one below. Completed rows are left alone — the card
+  // says "stop offering to resume this", not "forget I watched it".
+  const continueItems = useMemo((): HistoryItem[] => {
     if (!progressEntries || !channels.length) return []
-    const seen = new Set<string>()
-    const out: { channel: Channel; progress: WatchProgress }[] = []
+    const byKey = new Map<string, HistoryItem>()
 
     for (const prog of progressEntries) {
       if (prog.completed) continue
@@ -98,18 +108,20 @@ export function LibraryPage() {
       const dedupeKey = ch.type === 'series' && ch.showName
         ? `show:${normalizeShowKey(ch.showName)}`
         : `ch:${ch.id}`
-      if (seen.has(dedupeKey)) continue
-      seen.add(dedupeKey)
-      out.push({ channel: ch, progress: prog })
+      const existing = byKey.get(dedupeKey)
+      if (existing) existing.channelIds.push(prog.channelId)
+      else byKey.set(dedupeKey, { channel: ch, progress: prog, channelIds: [prog.channelId] })
     }
-    return out
+    return [...byKey.values()]
   }, [progressEntries, chanById, channels.length])
 
   // ── History ─────────────────────────────────────────────────────────────────
-  const historyItems = useMemo((): { channel: Channel; progress: WatchProgress }[] => {
+  // One card per title, but it carries every progress row it stands for: a show's
+  // card is built from its most recent episode and removing it has to forget all
+  // of them, or the next episode down simply takes its place.
+  const historyItems = useMemo((): HistoryItem[] => {
     if (!progressEntries || !channels.length) return []
-    const seen = new Set<string>()
-    const out: { channel: Channel; progress: WatchProgress }[] = []
+    const byKey = new Map<string, HistoryItem>()
 
     for (const prog of progressEntries) {
       const ch = chanById.get(prog.channelId)
@@ -117,11 +129,11 @@ export function LibraryPage() {
       const dedupeKey = ch.type === 'series' && ch.showName
         ? `show:${normalizeShowKey(ch.showName)}`
         : `ch:${ch.id}`
-      if (seen.has(dedupeKey)) continue
-      seen.add(dedupeKey)
-      out.push({ channel: ch, progress: prog })
+      const existing = byKey.get(dedupeKey)
+      if (existing) existing.channelIds.push(prog.channelId)
+      else byKey.set(dedupeKey, { channel: ch, progress: prog, channelIds: [prog.channelId] })
     }
-    return out
+    return [...byKey.values()]
   }, [progressEntries, chanById, channels.length])
 
   // ── Favorites ───────────────────────────────────────────────────────────────
@@ -154,6 +166,21 @@ export function LibraryPage() {
     }
   }
 
+  // The X on a Continue or History card. D1 is told about every row too: it is
+  // what the next device syncs from, so a local-only delete comes straight back.
+  //
+  // `dismiss` separates the two cards. Removing from Continue means "stop offering
+  // to resume this" and nothing more. Removing from History means the title is
+  // gone — and because recommendations are built by excluding what has been
+  // watched, deleting the progress would otherwise hand it straight back to
+  // "Because you watched". The dismissal is what remembers that.
+  const forgetProgress = async (channelIds: string[], dismiss: Channel | null = null) => {
+    if (!activeProfileId) return
+    await clearProgressMany(activeProfileId, channelIds)
+    if (dismiss) await dismissRecommendation(activeProfileId, recommendationKey(dismiss))
+    for (const id of channelIds) deleteRemoteProgress(activeProfileId, id)
+  }
+
   const openChannel = (ch: Channel) => {
     if (ch.type === 'movie') { navigate(`/movies?playing=${ch.id}`); play(ch) }
     else if (ch.type === 'series') { navigate(`/series?show=${encodeURIComponent(normalizeShowKey(ch.showName ?? ch.name))}`) }
@@ -184,7 +211,7 @@ export function LibraryPage() {
     if (tab === 'continue') {
       const items = sortedByAZ(continueItems)
       if (!items.length) return renderEmpty(<Play size={40} />, 'Nothing in progress', 'Start watching something and it will appear here.')
-      return renderGrid(items.map(({ channel, progress }) => (
+      return renderGrid(items.map(({ channel, progress, channelIds }) => (
         <MovieCard
           key={progress.id}
           channel={channel}
@@ -192,10 +219,7 @@ export function LibraryPage() {
           onClick={() => openChannel(channel)}
           onRemove={(e) => {
             e.stopPropagation()
-            if (activeProfileId) {
-              clearProgress(activeProfileId, channel.id)
-              deleteRemoteProgress(activeProfileId, channel.id)
-            }
+            forgetProgress(channelIds)
           }}
         />
       )))
@@ -222,12 +246,16 @@ export function LibraryPage() {
     if (tab === 'history') {
       const items = sortedByAZ(historyItems)
       if (!items.length) return renderEmpty(<Clock size={40} />, 'No history yet', 'Your watched titles will show up here.')
-      return renderGrid(items.map(({ channel, progress }) => (
+      return renderGrid(items.map(({ channel, progress, channelIds }) => (
         <MovieCard
           key={progress.id}
           channel={channel}
           progress={progress}
           onClick={() => openChannel(channel)}
+          onRemove={(e) => {
+            e.stopPropagation()
+            forgetProgress(channelIds, channel)
+          }}
         />
       )))
     }

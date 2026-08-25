@@ -20,7 +20,7 @@ Personal IPTV web player. React SPA on Cloudflare Pages; home transcode server o
     _worker.ts            DOES NOT RUN — see the note at the top of that file
   transcode-proxy/        Node.js HTTP proxy that drives ffmpeg (runs on HP ProDesk)
     server.mjs            THE server — only file that matters at runtime
-    Dockerfile            node:20-bookworm-slim + intel-media-va-driver (ProDesk image)
+    Dockerfile            node:20-bookworm-slim + intel-media-va-driver-non-free
     fly.toml              Fly.io config (alternative cloud deployment, not active)
 ```
 
@@ -309,7 +309,41 @@ The repo lives at `~/streamforest` on the ProDesk. Docker Compose lives at `~/se
 - `GET /subtitle?url=&index=&start=&vstart=` → WebVTT stream
 - `GET /health` → `ok`
 
-**Hardware:** HP ProDesk 400 G4 Desktop Mini, Intel HD Graphics 630 (Kaby Lake). QuickSync via `h264_vaapi + -qp 23` (no CQP support on iHD driver → fixed QP only).
+**Hardware:** HP ProDesk 400 G4 Desktop Mini, Intel Core i5-8500T — **Coffee Lake**
+(family 6, model 158), Intel UHD Graphics 630. This guide said Kaby Lake / HD 630
+until 2026-08-25; `lscpu` on the machine says otherwise.
+
+**QuickSync via `h264_vaapi`, and what the driver decides.** The encoder was on a
+fixed `-qp 23` with no bitrate ceiling because the container carried Debian's DFSG
+`intel-media-va-driver`, whose build drops the pre-compiled GPU kernels — and those
+kernels are the VME encoder. With the free build, `vainfo` in the container offers
+exactly one H.264 encode entrypoint:
+
+```
+VAProfileH264High : VAEntrypointEncSliceLP
+```
+
+and asking it for a bitrate fails outright:
+
+```
+Driver does not support any RC mode compatible with selected options
+(supported modes: CQP)
+```
+
+`intel-media-va-driver-non-free`, same version, adds `VAEntrypointEncSlice` and
+with it AVBR, CBR and QVBR — and HEVC encode, which the free build has no
+entrypoint for at all. The Dockerfile installs the non-free package now, and
+`server.mjs` runs QVBR (`-global_quality $VAAPI_QP` with `-b:v`/`-maxrate` as a
+ceiling). It probes the driver once at boot with a three-frame encode and falls
+back to the old `-qp` arguments if the answer is no, so an image rebuilt from an
+older Dockerfile degrades in quality instead of refusing to play anything.
+
+To check what the running container can do:
+
+```bash
+ssh 192.168.1.111 'docker exec transcode-proxy vainfo --display drm --device /dev/dri/renderD128 | grep Enc'
+ssh 192.168.1.111 'docker logs transcode-proxy 2>&1 | grep "\[vaapi\]"'
+```
 
 **Docker Compose:** runs in `~/services/` on the ProDesk. Port 8787 bound to `127.0.0.1` only.
 
@@ -320,9 +354,10 @@ The repo lives at `~/streamforest` on the ProDesk. Docker Compose lives at `~/se
 **Environment variables for the server:**
 | Var | Used on ProDesk | Notes |
 |-----|-----------------|-------|
-| `H264_ENCODER` | `h264_vaapi` | Kaby Lake QuickSync |
+| `H264_ENCODER` | `h264_vaapi` | Coffee Lake QuickSync |
 | `VAAPI_DEVICE` | `/dev/dri/renderD128` | |
-| `VAAPI_QP` | `23` | Fixed QP (no bitrate control on this driver) |
+| `VAAPI_QP` | `23` | Quality target — `-global_quality` under QVBR, `-qp` if the driver refuses |
+| `VAAPI_RC` | (unset = `auto`) | `qvbr` or `cqp` to skip the boot probe |
 | `ALLOWED_HOSTS` | `nsclient.xyz,45.12.1.27` | Comma-separated allowlist — **the provider moves** |
 | `CLIENT_LOG_TOKEN` | (secret) | Required for `GET /clientlog`; unset = reads refused |
 | `FFMPEG_PATH` | `ffmpeg` | |

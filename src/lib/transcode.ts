@@ -166,6 +166,12 @@ export async function startHlsSession(
     startSeconds?: number
     /** Source video codec from the probe — lets the server tag HEVC as hvc1. */
     videoCodec?: string | null
+    /**
+     * Source audio codec from the probe. AAC is copied straight through in copy
+     * mode rather than re-encoded — see the comment on the server side. Leaving
+     * it out is safe and means "re-encode", which is what the server did before.
+     */
+    audioCodec?: string | null
   } = {},
 ): Promise<string | null> {
   const base = proxyBase()
@@ -178,11 +184,12 @@ export async function startHlsSession(
   if (opts.audioIndex != null) params.set('audio', String(opts.audioIndex))
   if (opts.startSeconds && opts.startSeconds > 0) params.set('start', String(Math.floor(opts.startSeconds)))
   if (opts.videoCodec) params.set('vcodec', opts.videoCodec)
+  if (opts.audioCodec) params.set('acodec', opts.audioCodec)
 
   // Wall-clock here is the number that matters: it is the gap between the user's
   // tap and anything appearing, and the reason play() lands outside the gesture.
   const startedAt = Date.now()
-  trace('hls-start', { live: !!opts.live, mode: opts.mode, audio: opts.audioIndex, start: opts.startSeconds ?? 0 })
+  trace('hls-start', { live: !!opts.live, mode: opts.mode, audio: opts.audioIndex, start: opts.startSeconds ?? 0, acodec: opts.audioCodec ?? null })
 
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt > 0) await new Promise<void>(r => setTimeout(r, 1500))

@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { Channel, WatchProgress, Favorite, PlaylistMeta, WatchLater, TmdbMeta, EpgProgram } from '@/types'
 import { isCompleted } from '@/lib/progress'
+import { normalizeShowKey } from '@/lib/utils'
 import { pickRecentlyAdded } from '@/lib/recentlyAdded'
 
 interface EpgChannelName { id: string; channelId: string }
@@ -14,6 +15,25 @@ interface EpgChannelName { id: string; channelId: string }
  */
 interface ChannelSeen { id: string; firstSeenAt: number }
 
+/**
+ * A title the person removed from History, so the home page stops recommending it.
+ *
+ * Recommendations are built by excluding what has been watched, which means
+ * deleting the progress rows behind a History card hands the title straight back
+ * to "Because you watched" — remove it and it starts being suggested. This table
+ * is the memory of the removal that the progress table no longer holds.
+ *
+ * `key` is the same one the Library folds cards by: `show:<normalized>` for a
+ * series, `ch:<id>` for a film. Nothing ever clears a row, and nothing needs to:
+ * watching the title again writes progress, and progress excludes it from the
+ * pool on its own.
+ *
+ * Local only. Progress deletion reaches D1, this does not, so a second device
+ * can still recommend a title this one has dismissed until it is removed there
+ * too. That needs a table and an endpoint it does not have yet.
+ */
+interface DismissedRec { id: string; profileId: string; key: string; addedAt: number }
+
 class AppDB extends Dexie {
   channels!: EntityTable<Channel, 'id'>
   watchProgress!: EntityTable<WatchProgress, 'id'>
@@ -24,6 +44,7 @@ class AppDB extends Dexie {
   epgPrograms!: EntityTable<EpgProgram, 'id'>
   epgChannelNames!: EntityTable<EpgChannelName, 'id'>
   channelSeen!: EntityTable<ChannelSeen, 'id'>
+  dismissedRecs!: EntityTable<DismissedRec, 'id'>
 
   constructor() {
     super('StreamForestDB')
@@ -105,6 +126,18 @@ class AppDB extends Dexie {
       epgPrograms: 'id, channelId, start, end',
       epgChannelNames: 'id',
       channelSeen: 'id, firstSeenAt',
+    })
+    this.version(9).stores({
+      channels: 'id, type, groupTitle, showName, season, sortIndex',
+      watchProgress: 'id, profileId, channelId, lastWatched, completed',
+      favorites: 'id, kind, addedAt',
+      playlistMeta: 'id',
+      watchLater: 'id, profileId, contentId, kind, addedAt',
+      tmdbCache: 'id, contentType, tmdbId, cachedAt',
+      epgPrograms: 'id, channelId, start, end',
+      epgChannelNames: 'id',
+      channelSeen: 'id, firstSeenAt',
+      dismissedRecs: 'id, profileId, addedAt',
     })
   }
 }
@@ -249,6 +282,34 @@ export async function saveProgress(
 
 export async function clearProgress(profileId: string, channelId: string) {
   await db.watchProgress.delete(`${profileId}:${channelId}`)
+}
+
+/**
+ * Forget a title outright: every progress row behind it, not just one.
+ *
+ * A History card stands for a whole show — the tab dedupes by `normalizeShowKey`
+ * and shows the most recent episode — so deleting the one row it was built from
+ * only reveals the next episode down and the card comes back. It also has to be
+ * all of them for the delete to mean anything beyond the tab: "Because you
+ * watched" reads the same table, and one surviving episode is enough to keep
+ * recommending from a show the person just said they were done with.
+ */
+export async function clearProgressMany(profileId: string, channelIds: string[]) {
+  if (!channelIds.length) return
+  await db.watchProgress.bulkDelete(channelIds.map((id) => `${profileId}:${id}`))
+}
+
+/** The dedupe key a title is known by in the Library and in recommendations. */
+export function recommendationKey(ch: { type: string; id: string; showName?: string | null }): string {
+  return ch.type === 'series' && ch.showName ? `show:${normalizeShowKey(ch.showName)}` : `ch:${ch.id}`
+}
+
+export async function dismissRecommendation(profileId: string, key: string) {
+  await db.dismissedRecs.put({ id: `${profileId}:${key}`, profileId, key, addedAt: Date.now() })
+}
+
+export async function getDismissedRecKeys(profileId: string): Promise<string[]> {
+  return (await db.dismissedRecs.where('profileId').equals(profileId).toArray()).map((r) => r.key)
 }
 
 export async function getRecentlyWatched(profileId: string, limit = 20): Promise<WatchProgress[]> {

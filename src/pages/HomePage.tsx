@@ -7,7 +7,7 @@ import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useProfileStore } from '@/stores/profileStore'
 import { useActiveExclusions } from '@/hooks/useActiveExclusions'
-import { db, clearProgress, addToWatchLater, removeFromWatchLater, getRecentlyAddedIds } from '@/services/db'
+import { db, clearProgress, addToWatchLater, removeFromWatchLater, getRecentlyAddedIds, getDismissedRecKeys } from '@/services/db'
 import { deleteRemoteProgress, pushWatchLater, deleteRemoteWatchLater } from '@/services/sync'
 import { MovieCard } from '@/components/movies/MovieCard'
 import { Hero } from '@/components/home/Hero'
@@ -40,6 +40,15 @@ export function HomePage() {
     if (!activeProfileId) return []
     const all = await db.watchProgress.where('profileId').equals(activeProfileId).toArray()
     return all.sort((a, b) => b.lastWatched - a.lastWatched).slice(0, 40)
+  }, [activeProfileId])
+
+  // Titles removed from Library → History. They carry no progress any more, which
+  // is exactly why they need their own list: the recommendation pool is built by
+  // excluding what has been watched, so without this a removed title would come
+  // back as a suggestion the moment its progress was deleted.
+  const dismissedRecKeys = useLiveQuery(async () => {
+    if (!activeProfileId) return new Set<string>()
+    return new Set(await getDismissedRecKeys(activeProfileId))
   }, [activeProfileId])
 
   // Index the profile's whole progress table, rather than asking about the first
@@ -199,14 +208,15 @@ export function HomePage() {
       ),
     )
 
+    const dismissed = dismissedRecKeys ?? new Set<string>()
     const pool: Channel[] = []
     for (const m of movies) {
-      if (!watchedIds.has(m.id)) pool.push(m)
+      if (!watchedIds.has(m.id) && !dismissed.has(`ch:${m.id}`)) pool.push(m)
     }
     const seenShows = new Set<string>()
     for (const ch of series) {
       const k = normalizeShowKey(ch.showName ?? ch.name)
-      if (!seenShows.has(k) && !watchedShowKeys.has(k)) {
+      if (!seenShows.has(k) && !watchedShowKeys.has(k) && !dismissed.has(`show:${k}`)) {
         seenShows.add(k)
         pool.push(ch)
       }
@@ -219,7 +229,7 @@ export function HomePage() {
     const shuffled = [...candidates].sort(() => Math.random() - 0.5).slice(0, 16)
     const title = source.movieTitle ?? source.showName ?? source.name
     return { title, sourceKey, items: shuffled }
-  }, [recentProgress, channels, movies, series])
+  }, [recentProgress, channels, movies, series, dismissedRecKeys])
 
   const enrichTargets = useMemo(
     () => [

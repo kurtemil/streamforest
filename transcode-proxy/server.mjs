@@ -36,6 +36,68 @@ const CLIENT_LOG_TOKEN = process.env.CLIENT_LOG_TOKEN || ''
 
 const HLS_DIR = path.join(os.tmpdir(), 'streamforest-hls')
 
+// ── VAAPI rate control ─────────────────────────────────────────────────────────
+//
+// Which rate-control modes exist is a property of the *driver build*, not of the
+// chip. Debian's DFSG `intel-media-va-driver` exposes only VAEntrypointEncSliceLP,
+// and that entrypoint answers CQP and nothing else, so every re-encode ran at a
+// fixed QP with no ceiling — fine for a still frame, ruinous for grain, and the
+// stream leaves the house over a home uplink that has a ceiling whether ffmpeg
+// respects one or not. The Dockerfile now installs `intel-media-va-driver-non-free`,
+// which adds VAEntrypointEncSlice and with it AVBR/CBR/QVBR.
+//
+// The image and this file deploy together, but not always: rebuilding from an
+// older Dockerfile brings the free driver back, and asking it for a bitrate is a
+// hard failure — "Driver does not support any RC mode compatible with selected
+// options" — which means nothing plays at all. So the mode is probed once at boot
+// with a three-frame encode and the answer is cached. Until it lands, and forever
+// if it fails, the old fixed-QP arguments are used. That costs one ffmpeg run per
+// restart and turns the bad case into a quality regression instead of an outage.
+const VAAPI_RC = (process.env.VAAPI_RC || 'auto').toLowerCase()   // auto | qvbr | cqp
+let vaapiBitrateOk = false
+
+function vaapiEncodeArgs() {
+  if (!vaapiBitrateOk) return ['-qp', VAAPI_QP]
+  return [
+    '-rc_mode', 'QVBR',
+    '-global_quality', VAAPI_QP,
+    '-b:v', VIDEO_BITRATE,
+    '-maxrate', VIDEO_MAX_BITRATE,
+    '-bufsize', `${parseInt(VIDEO_MAX_BITRATE, 10) * 2}k`,
+  ]
+}
+
+function probeVaapiRateControl() {
+  if (H264_ENCODER !== 'h264_vaapi') return
+  if (VAAPI_RC === 'cqp') { process.stderr.write('[vaapi] rc=cqp (forced)\n'); return }
+  if (VAAPI_RC === 'qvbr') { vaapiBitrateOk = true; process.stderr.write('[vaapi] rc=qvbr (forced)\n'); return }
+  const args = [
+    '-hide_banner', '-loglevel', 'error',
+    '-vaapi_device', VAAPI_DEVICE,
+    '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25',
+    '-frames:v', '3',
+    '-vf', 'format=nv12,hwupload',
+    '-c:v', 'h264_vaapi',
+    '-rc_mode', 'QVBR', '-global_quality', VAAPI_QP,
+    '-b:v', VIDEO_BITRATE, '-maxrate', VIDEO_MAX_BITRATE,
+    '-f', 'null', '-',
+  ]
+  const ff = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+  let err = ''
+  ff.stderr.on('data', (d) => { err += d.toString() })
+  ff.on('error', () => process.stderr.write('[vaapi] rc probe could not run — staying on fixed QP\n'))
+  ff.on('exit', (code) => {
+    vaapiBitrateOk = code === 0
+    process.stderr.write(
+      vaapiBitrateOk
+        ? `[vaapi] rc=qvbr q=${VAAPI_QP} target=${VIDEO_BITRATE} ceiling=${VIDEO_MAX_BITRATE}\n`
+        : `[vaapi] driver refused bitrate control — fixed QP ${VAAPI_QP}. ${err.trim().split('\n').pop() ?? ''}\n`,
+    )
+  })
+}
+probeVaapiRateControl()
+
+
 fs.mkdirSync(SUB_CACHE_DIR, { recursive: true })
 fs.mkdirSync(EPG_CACHE_DIR, { recursive: true })
 fs.mkdirSync(TMDB_CACHE_DIR, { recursive: true })
@@ -189,7 +251,7 @@ function handleTranscode(reqUrl, res) {
     args.push(
       '-c:v', 'h264_vaapi',
       '-vf', `scale='min(iw,${VIDEO_MAX_WIDTH})':-2,format=nv12,hwupload`,
-      '-qp', VAAPI_QP,
+      ...vaapiEncodeArgs(),
       '-c:a', 'aac',
       '-b:a', AUDIO_BITRATE,
       '-ac', '2',
@@ -870,7 +932,7 @@ function handleHlsStart(reqUrl, res) {
   if (mode === 'copy') {
     args.push('-c:v', 'copy')
   } else if (H264_ENCODER === 'h264_vaapi') {
-    args.push('-c:v', 'h264_vaapi', '-vf', `scale='min(iw,${VIDEO_MAX_WIDTH})':-2,format=nv12,hwupload`, '-qp', VAAPI_QP)
+    args.push('-c:v', 'h264_vaapi', '-vf', `scale='min(iw,${VIDEO_MAX_WIDTH})':-2,format=nv12,hwupload`, ...vaapiEncodeArgs())
   } else {
     args.push('-c:v', H264_ENCODER, '-preset', H264_PRESET, '-vf', `scale='min(${VIDEO_MAX_WIDTH},iw)':-2`, '-b:v', VIDEO_BITRATE, '-maxrate', VIDEO_MAX_BITRATE, '-bufsize', '3M', '-pix_fmt', 'yuv420p')
   }
@@ -882,8 +944,37 @@ function handleHlsStart(reqUrl, res) {
   if (wantsFmp4 && mode === 'copy' && (vcodec === 'hevc' || vcodec === 'h265')) {
     args.push('-tag:v', 'hvc1')
   }
+  // Audio: copy it when it is already AAC, re-encode only when it is not.
+  //
+  // This path used to run `-c:a aac` unconditionally, including on the AAC that
+  // most of the library already carries. Two things came of that, both measured
+  // on La Brea S03E01 (h264 + AAC stereo 48 kHz):
+  //
+  //  1. The ffmpeg AAC encoder delays its output by 1024 samples and HLS fMP4
+  //     carries no edit list to declare it, so the audio landed 21.3 ms late.
+  //     Copy: 2.02119 s for a tone the source puts at 2.02135 s. Re-encode:
+  //     2.04269 s.
+  //  2. Worse after a resume. `-ss 653` seeks to the keyframe before 653 — 652.84
+  //     here — and video starts there, but the encoder's first audio packet is
+  //     stamped 0.157, so the rendition opens with 157 ms of video and no audio.
+  //     Apple's authoring rules say the two tracks start together; iOS is where
+  //     this was noticed and iOS is what plays this path. With `-c:a copy` both
+  //     tracks start at 0.000.
+  //
+  // The client sends the codec from the probe it already runs. Absent (an older
+  // client, or a live stream) means re-encode, which is what happened before.
+  // Copy mode is only chosen when the audio codec is already browser-playable,
+  // so the re-encode branch here is for the ones that are playable but not AAC —
+  // mp3, opus, flac — where fMP4 wants AAC anyway.
+  const acodec = (reqUrl.searchParams.get('acodec') || '').toLowerCase()
+  const copyAudio = mode === 'copy' && !live && acodec === 'aac'
+  args.push(...(copyAudio
+    ? ['-c:a', 'copy']
+    : ['-c:a', 'aac', '-b:a', AUDIO_BITRATE, '-ac', '2']))
   args.push(
-    '-c:a', 'aac', '-b:a', AUDIO_BITRATE, '-ac', '2', '-bsf:a', 'aac_adtstoasc',
+    // ADTS → ASC. A no-op on a stream that is already ASC: the filter passes any
+    // packet through that does not open with the ADTS syncword.
+    '-bsf:a', 'aac_adtstoasc',
     '-f', 'hls', '-hls_time', '4',
     '-hls_list_size', live ? '6' : '0',
     '-hls_flags', live ? 'delete_segments+append_list' : 'temp_file',
@@ -908,7 +999,7 @@ function handleHlsStart(reqUrl, res) {
     path.join(dir, 'playlist.m3u8'),
   )
 
-  process.stderr.write(`[hls] start hash=${hash.slice(0, 8)} live=${live} mode=${mode} start=${start}\n`)
+  process.stderr.write(`[hls] start hash=${hash.slice(0, 8)} live=${live} mode=${mode} start=${start} audio=${copyAudio ? "copy" : "aac"}\n`)
   // Run inside the session directory. hls_fmp4_init_filename is resolved against
   // the working directory, not against the segment path — with the server's own
   // cwd it wrote init.mp4 next to the source tree, leaving every fMP4 segment in

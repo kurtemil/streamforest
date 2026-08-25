@@ -93,12 +93,27 @@ export function VideoPlayer() {
   // codecs) or 'transcode' (full re-encode for AC3/DTS/etc.). Re-applied when
   // the URL is rebuilt for seek or audio swap.
   const proxyModeRef = useRef<ProxyMode | null>(null)
+  // Source codecs from the probe. Both matter to the server and both have to
+  // survive a seek or an audio switch, which rebuild the session from scratch:
+  // the video codec decides the fMP4 tag (iOS plays HEVC only under 'hvc1') and
+  // the audio codec decides whether the audio is copied or re-encoded. They used
+  // to be passed only on the first session, so a seek silently dropped both.
+  const videoCodecRef = useRef<string | null>(null)
+  const audioCodecRef = useRef<string | null>(null)
   // format-level start_time from probe — used to normalise subtitle VTT timestamps
   // so they align with the re-based (0-origin) video timeline.
   const videoStartTimeRef = useRef(0)
   // Tracks the active VTT subtitle so we can re-attach after a src reload
   // (audio swap rebuilds video.src, which clears any addTextTrack-created list).
   const activeSubtitleRef = useRef(-1)
+  // The mirrored TextTrack, so its mode can be flipped on a fullscreen change
+  // without rebuilding the cues.
+  const nativeSubTrackRef = useRef<TextTrack | null>(null)
+  // Whether the video is playing fullscreen. Decides which of the two subtitle
+  // renderers is allowed on screen; see the native-track effect. iPhone has no
+  // Fullscreen API on ordinary elements, so the only signal there is the pair of
+  // webkit events the video element fires for itself.
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const subtitleAbortRef = useRef<AbortController | null>(null)
   // Stall threshold: abort only if NO bytes from the proxy for this long.
   // The proxy sends VTT NOTE keepalives every ~20 s during silent stretches so
@@ -479,6 +494,8 @@ export function VideoPlayer() {
         mode: proxyModeRef.current ?? 'copy',
         audioIndex: audioStreamIndexRef.current,
         startSeconds: clamped,
+        videoCodec: videoCodecRef.current,
+        audioCodec: audioCodecRef.current,
       }).then((hlsUrl) => {
         if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
         if (!hlsUrl) {
@@ -616,6 +633,8 @@ export function VideoPlayer() {
     activeSubtitleRef.current = -1
     audioStreamIndexRef.current = null
     proxyModeRef.current = null
+    videoCodecRef.current = null
+    audioCodecRef.current = null
     detachSubtitleTrack()
 
     const load = async () => {
@@ -718,6 +737,8 @@ export function VideoPlayer() {
         if (isProxyVideo(current)) {
           const mode = pickProxyMode(info)
           proxyModeRef.current = mode
+          videoCodecRef.current = info?.videoCodec ?? null
+          audioCodecRef.current = info?.audioCodec ?? null
           isTranscodedRef.current = true
           videoStartTimeRef.current = info?.startTime ?? 0
           playbackOffsetRef.current = startTime
@@ -748,6 +769,7 @@ export function VideoPlayer() {
               audioIndex: audioStreamIndexRef.current,
               startSeconds: startTime,
               videoCodec: info?.videoCodec ?? null,
+              audioCodec: info?.audioCodec ?? null,
             })
             if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
             // Provider stream may be truncated short of the saved position — retry from 0.
@@ -759,6 +781,8 @@ export function VideoPlayer() {
                 mode,
                 audioIndex: audioStreamIndexRef.current,
                 startSeconds: 0,
+                videoCodec: info?.videoCodec ?? null,
+                audioCodec: info?.audioCodec ?? null,
               })
               if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
               if (hlsUrl) setError(null)
@@ -1035,6 +1059,8 @@ export function VideoPlayer() {
           mode: proxyModeRef.current ?? 'copy',
           audioIndex: audioStreamIndexRef.current,
           startSeconds: 0,
+          videoCodec: videoCodecRef.current,
+          audioCodec: audioCodecRef.current,
         }).then((hlsUrl) => {
           if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
           if (!hlsUrl) { setError(`iOS: Stream failed. Try again later. (${getLastHlsError() || 'network error'})`); return }
@@ -1154,7 +1180,7 @@ export function VideoPlayer() {
     }
   }, [current])
 
-  // Native subtitle track, iOS only.
+  // Native subtitle track, iOS only, and only while the video is in fullscreen.
   //
   // The DOM overlay below is the better renderer — absolute timestamps, an
   // adjustable delay, nothing to re-fetch on a seek — but it lives in the page,
@@ -1162,6 +1188,13 @@ export function VideoPlayer() {
   // element's own text tracks. So the overlay simply disappeared at the moment
   // people actually want subtitles. Now that fullscreen works on iPhone at all
   // (B2), the same cues are mirrored into a real TextTrack.
+  //
+  // The mirror was created `showing` and left that way, which is how every line
+  // came out twice inline: the system drew the TextTrack over the video and React
+  // drew the overlay on top of it. Only one renderer can be visible at a time, and
+  // which one it is is decided by fullscreen — the system's is the only one that
+  // reaches the screen there, the overlay is the only one that reaches it here.
+  // The cues stay loaded either way so entering fullscreen needs no rebuild.
   //
   // Cue times are absolute file positions; the element's clock starts at whatever
   // offset the stream was opened at, so each cue is rebased — and the delay is
@@ -1171,7 +1204,8 @@ export function VideoPlayer() {
     if (!IS_IOS || !video || parsedSubtitles.length === 0) return
 
     const track = video.addTextTrack('subtitles', 'StreamForest', 'und')
-    track.mode = 'showing'
+    nativeSubTrackRef.current = track
+    track.mode = isFullscreen ? 'showing' : 'hidden'
     const offset = playbackOffsetRef.current
     let added = 0
     for (const cue of parsedSubtitles) {
@@ -1183,17 +1217,50 @@ export function VideoPlayer() {
         added++
       } catch { /* a malformed cue must not take the rest of the track with it */ }
     }
-    trace('subtitle-native-track', { cues: added, offset, delay: subtitleDelay })
+    trace('subtitle-native-track', { cues: added, offset, delay: subtitleDelay, mode: track.mode })
 
     return () => {
       track.mode = 'disabled'
+      if (nativeSubTrackRef.current === track) nativeSubTrackRef.current = null
       // There is no removeTextTrack; disabling and dropping the cues is the
       // documented way to retire one.
       while (track.cues && track.cues.length > 0) {
         try { track.removeCue(track.cues[0]) } catch { break }
       }
     }
+    // isFullscreen is deliberately not a dependency: the effect below flips the
+    // mode without rebuilding several thousand cues.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parsedSubtitles, subtitleDelay, current?.id])
+
+  // Hand the cues to whichever renderer is on screen.
+  useEffect(() => {
+    const track = nativeSubTrackRef.current
+    if (track) track.mode = isFullscreen ? 'showing' : 'hidden'
+  }, [isFullscreen])
+
+  // Keep isFullscreen honest. Three ways in and out: the Fullscreen API on
+  // desktop, the two webkit events iOS fires on the video element itself, and
+  // the system's own controls — swiping out of fullscreen on iPhone never goes
+  // through toggleFullscreen, so state set by the button alone would go stale.
+  useEffect(() => {
+    const video = videoRef.current
+    const onChange = () => {
+      const iosVideo = video as (HTMLVideoElement & { webkitDisplayingFullscreen?: boolean }) | null
+      setIsFullscreen(Boolean(document.fullscreenElement) || Boolean(iosVideo?.webkitDisplayingFullscreen))
+    }
+    const onIosBegin = () => setIsFullscreen(true)
+    const onIosEnd = () => setIsFullscreen(false)
+    document.addEventListener('fullscreenchange', onChange)
+    video?.addEventListener('webkitbeginfullscreen', onIosBegin)
+    video?.addEventListener('webkitendfullscreen', onIosEnd)
+    onChange()
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange)
+      video?.removeEventListener('webkitbeginfullscreen', onIosBegin)
+      video?.removeEventListener('webkitendfullscreen', onIosEnd)
+    }
+  }, [current?.id])
 
   // Lock screen, control centre, headphone buttons and the car.
   //
@@ -1416,6 +1483,8 @@ export function VideoPlayer() {
           mode: proxyModeRef.current ?? 'copy',
           audioIndex: id,
           startSeconds: realTime,
+          videoCodec: videoCodecRef.current,
+          audioCodec: audioCodecRef.current,
         }).then((hlsUrl) => {
           if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
           if (!hlsUrl) { setError(`iOS: Audio switch failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
@@ -1671,8 +1740,10 @@ export function VideoPlayer() {
           </div>
         )}
 
-        {/* Custom subtitle overlay — absolute-timestamp cues, no re-fetch on seek */}
-        {!minimized && activeCue && (
+        {/* Custom subtitle overlay — absolute-timestamp cues, no re-fetch on seek.
+            Stands down in iOS fullscreen, where the mirrored TextTrack is the only
+            renderer the system draws and having both showed every line twice. */}
+        {!minimized && !(IS_IOS && isFullscreen) && activeCue && (
           <div className="absolute bottom-20 left-0 right-0 flex justify-center pointer-events-none z-10 px-8">
             <div className="bg-black/75 text-white text-base font-medium px-3 py-1.5 rounded text-center max-w-2xl whitespace-pre-wrap leading-snug">
               {activeCue.text.replace(/<[^>]+>/g, '').trim()}

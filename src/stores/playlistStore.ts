@@ -76,8 +76,26 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
       set({ loaded: true })
       return
     }
-    const channels = await db.channels.orderBy('sortIndex').toArray()
+    // Read by primary key and sort here, rather than asking IndexedDB for the
+    // sortIndex order.
+    //
+    // This is the first thing every launch waits on and the library is 205 803
+    // rows, so how it is read is the load time. `orderBy('sortIndex')` makes the
+    // engine walk the index and then fetch each record it points at; a plain
+    // `toArray()` is one getAll over the store. Measured in Chromium on a
+    // seeded copy of a library this size:
+    //
+    //   index('sortIndex').getAll()   2340 ms
+    //   objectStore.getAll()          1008 ms
+    //
+    // and sorting 205 803 numbers afterwards is a fraction of the difference. A
+    // phone is several times slower than that desktop, which is where it was
+    // noticed. The order is identical either way — sortIndex is assigned in file
+    // order on import and is unique.
+    const channels = await db.channels.toArray()
+    channels.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0))
     set({ channels, loaded: true })
+
   },
 
   async refresh() {
