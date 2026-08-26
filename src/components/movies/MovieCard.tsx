@@ -1,6 +1,7 @@
 import { Play, Check, Bookmark, Star, X } from 'lucide-react'
 import { Poster } from '@/ui'
 import { progressPercent } from '@/lib/progress'
+import { useT } from '@/lib/i18n'
 import type { Channel, WatchProgress, TmdbMeta } from '@/types'
 
 interface Props {
@@ -24,6 +25,7 @@ interface Props {
    one large surface doing the work of glass: the tab bar, dialogs, the player.
    `e2e/perf-probe.spec.ts` is the measurement, if it needs repeating. */
 export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLabel, onClick, onWatchLater, onRemove }: Props) {
+  const t = useT()
   const pct = progress ? Math.round(progressPercent(progress.position, progress.duration)) : 0
 
   const displayTitle = tmdbMeta?.title ?? channel.movieTitle ?? channel.showName ?? channel.name
@@ -54,7 +56,7 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
         {onRemove && (
           <button
             onClick={(e) => { e.stopPropagation(); onRemove(e) }}
-            aria-label="Remove"
+            aria-label={t('common.remove')}
             className="absolute top-2 left-2 w-7 h-7 rounded-full after:absolute after:content-[''] after:-inset-2 bg-black/70 hover:bg-red-600/90 flex items-center justify-center text-white opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-all ring-1 ring-white/20 z-10"
           >
             <X size={13} />
@@ -65,7 +67,7 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
         {onWatchLater && (
           <button
             onClick={onWatchLater}
-            title={isWatchLater ? 'Remove from Watch Later' : 'Add to Watch Later'}
+            title={isWatchLater ? t('common.removeWatchLater') : t('common.addWatchLater')}
             className={`absolute top-2 left-2 w-7 h-7 rounded-full after:absolute after:content-[''] after:-inset-2 flex items-center justify-center ring-1 transition-all z-10 ${
               isWatchLater
                 ? 'bg-accent-600/90 ring-accent-500/60 opacity-100'

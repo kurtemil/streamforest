@@ -4,6 +4,7 @@ import { Play, Info, Bookmark, Star, Clock, ChevronLeft, ChevronRight } from 'lu
 import type { Channel, TmdbMeta } from '@/types'
 import { backdropUrl, posterUrl } from '@/services/tmdb'
 import { heroCrossfade } from '@/styles/motion'
+import { formatRuntime, useLocale, useT } from '@/lib/i18n'
 
 interface HeroItem {
   channel: Channel
@@ -21,6 +22,8 @@ interface Props {
 const ROTATE_INTERVAL = 9000 // ms between auto-advances
 
 export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: Props) {
+  const t = useT()
+  const locale = useLocale()
   const [idx, setIdx] = useState(0)
   const timer = useRef<number | null>(null)
 
@@ -52,11 +55,7 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
   const wl = isWatchLater(channel)
 
   const genres = tmdbMeta.genres?.slice(0, 3) ?? []
-  const runtime = tmdbMeta.runtime
-    ? tmdbMeta.runtime >= 60
-      ? `${Math.floor(tmdbMeta.runtime / 60)}h ${tmdbMeta.runtime % 60}m`
-      : `${tmdbMeta.runtime}m`
-    : null
+  const runtime = tmdbMeta.runtime ? formatRuntime(tmdbMeta.runtime, locale) : null
 
   return (
     <div className="group relative w-full h-[52vh] min-h-[360px] max-h-[560px] overflow-hidden select-none">
@@ -168,18 +167,18 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
               className="flex items-center gap-2 px-6 py-3 bg-white hover:bg-neutral-100 rounded-lg text-black font-semibold text-body transition-all active:scale-95 shadow-cinema"
             >
               <Play size={16} fill="black" />
-              Play
+              {t('common.play')}
             </button>
             <button
               onClick={() => onMoreInfo(channel)}
               className="flex items-center gap-2 px-5 py-3 bg-white/15 hover:bg-white/22 backdrop-blur-md rounded-lg text-white font-medium text-body transition-all active:scale-95 ring-1 ring-white/20"
             >
               <Info size={16} />
-              More Info
+              {t('common.moreInfo')}
             </button>
             <button
               onClick={() => onWatchLater(channel)}
-              title={wl ? 'Remove from Watch Later' : 'Add to Watch Later'}
+              title={wl ? t('common.removeWatchLater') : t('common.addWatchLater')}
               // 44px, not 40: the audit's floor, and it matches the height the
               // Play and More Info pills next to it already stand at.
               className={`w-11 h-11 rounded-full flex items-center justify-center backdrop-blur-md transition-all active:scale-95 ring-1 ${
@@ -206,7 +205,7 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
               its own, so there is no affordance lost by removing them. */}
           <button
             onClick={() => { setIdx((idx - 1 + items.length) % items.length); startTimer() }}
-            aria-label="Previous"
+            aria-label={t('common.previous')}
             data-pointer-affordance="hero-slide"
             className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 hover:bg-black/75 backdrop-blur-sm hidden can-hover:flex items-center justify-center ring-1 ring-white/20 transition-all opacity-0 hover:opacity-100 group-hover:opacity-100 focus:opacity-100"
           >
@@ -214,7 +213,7 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
           </button>
           <button
             onClick={() => { setIdx((idx + 1) % items.length); startTimer() }}
-            aria-label="Next"
+            aria-label={t('common.next')}
             data-pointer-affordance="hero-slide"
             className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 hover:bg-black/75 backdrop-blur-sm hidden can-hover:flex items-center justify-center ring-1 ring-white/20 transition-all opacity-0 hover:opacity-100 group-hover:opacity-100 focus:opacity-100"
           >
@@ -229,7 +228,7 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
                 key={i}
                 onClick={() => { setIdx(i); startTimer() }}
                 className="grid place-items-center w-11 h-11 -mx-[1.1rem] -my-[1.1rem] group/dot"
-                aria-label={`Go to slide ${i + 1}`}
+                aria-label={t('hero.goToSlide', { number: i + 1 })}
                 aria-current={i === idx ? 'true' : undefined}
               >
                 <span

@@ -12,21 +12,9 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { GroupSidebar } from '@/components/ui/GroupSidebar'
 import { openInVlc } from '@/lib/vlc'
 import type { Channel, EpgProgram } from '@/types'
+import { formatClock, formatRuntime, useT } from '@/lib/i18n'
 
 const RECENT_COUNT = 80
-
-function formatTime(ms: number): string {
-  const d = new Date(ms)
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-function formatDuration(ms: number): string {
-  const min = Math.ceil(ms / 60000)
-  if (min < 60) return `${min}m`
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  return m === 0 ? `${h}h` : `${h}h ${m}m`
-}
 
 // ── Channel row ────────────────────────────────────────────────────────────────
 
@@ -39,6 +27,7 @@ interface ChannelRowProps {
 }
 
 function ChannelRow({ channel, programs, onPlay, now }: ChannelRowProps) {
+  const t = useT()
   const current = programs.find(p => p.start <= now && p.end > now) ?? null
   const next    = programs.find(p => p.start > now) ?? null
 
@@ -51,8 +40,8 @@ function ChannelRow({ channel, programs, onPlay, now }: ChannelRowProps) {
     <div className="group relative">
       <button
         onClick={() => openInVlc(channel)}
-        title="Open in VLC"
-        aria-label="Open in VLC"
+        title={t('common.openInVlc')}
+        aria-label={t('common.openInVlc')}
         className="absolute top-1/2 -translate-y-1/2 right-3 z-10 flex items-center gap-1 px-2 py-1 rounded-md bg-black/75 hover:bg-black/90 ring-1 ring-white/15 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity"
       >
         <span className="w-2 h-2 rounded-sm bg-[#ff8800]" />
@@ -96,14 +85,14 @@ function ChannelRow({ channel, programs, onPlay, now }: ChannelRowProps) {
               </p>
               {remaining !== null && (
                 <span className="text-xs text-neutral-500 shrink-0 tabular-nums">
-                  {formatDuration(remaining)} left
+                  {t('live.remaining', { duration: formatRuntime(Math.ceil(remaining / 60000)) })}
                 </span>
               )}
               {next && (
                 <div className="flex items-center gap-1.5 shrink-0 max-w-[200px]">
                   <ChevronRight size={12} className="text-neutral-600" />
                   <p className="text-xs text-neutral-500 truncate">{next.title}</p>
-                  <span className="text-xs text-neutral-600 shrink-0">{formatTime(next.start)}</span>
+                  <span className="text-xs text-neutral-600 shrink-0">{formatClock(next.start)}</span>
                 </div>
               )}
             </div>
@@ -118,7 +107,7 @@ function ChannelRow({ channel, programs, onPlay, now }: ChannelRowProps) {
             )}
           </>
         ) : (
-          <p className="text-sm text-neutral-600 italic">No guide data</p>
+          <p className="text-sm text-neutral-600 italic">{t('live.noGuideData')}</p>
         )}
       </div>
     </button>
@@ -129,6 +118,7 @@ function ChannelRow({ channel, programs, onPlay, now }: ChannelRowProps) {
 // ── EPG status bar ─────────────────────────────────────────────────────────────
 
 function EpgStatusBar({ m3uUrl }: { m3uUrl: string }) {
+  const t = useT()
   const { status, lastFetched, error, progress, refresh, resolveUrl, isStale } = useEpgStore()
   const stale = isStale()
   const loading = status === 'loading'
@@ -156,10 +146,10 @@ function EpgStatusBar({ m3uUrl }: { m3uUrl: string }) {
         {loading && progress
           ? progress
           : error
-          ? `EPG error: ${error}`
+          ? t('live.epgError', { error })
           : lastFetched
-          ? `Guide data is ${Math.floor((Date.now() - lastFetched) / 3600000)}h old`
-          : 'No guide data loaded yet'}
+          ? t('live.guideAge', { hours: Math.floor((Date.now() - lastFetched) / 3600000) })
+          : t('live.noGuideLoaded')}
       </span>
       {canLoad && (
         <button
@@ -168,11 +158,11 @@ function EpgStatusBar({ m3uUrl }: { m3uUrl: string }) {
           className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-white/8 hover:bg-white/15 text-white/70 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-wait shrink-0"
         >
           <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-          {loading ? 'Loading…' : 'Load EPG'}
+          {loading ? t('common.loading') : t('live.loadEpg')}
         </button>
       )}
       {!canLoad && !loading && (
-        <span className="text-xs text-neutral-600 shrink-0">Set EPG URL in Settings</span>
+        <span className="text-xs text-neutral-600 shrink-0">{t('live.setEpgUrl')}</span>
       )}
     </div>
   )
@@ -198,6 +188,7 @@ function useMinuteTick(): number {
 }
 
 export function LiveTVPage() {
+  const t = useT()
   const now = useMinuteTick()
   const { channels, m3uUrl } = usePlaylistStore()
   const { play } = usePlayerStore()
@@ -257,8 +248,8 @@ export function LiveTVPage() {
       <div className="p-8">
         <EmptyState
           icon={<Radio size={40} />}
-          title="No live channels yet"
-          description="Download your playlist in Settings to see live TV here."
+          title={t('live.emptyTitle')}
+          description={t('live.emptyBody')}
         />
       </div>
     )
@@ -271,9 +262,9 @@ export function LiveTVPage() {
   }
 
   const heading = search.trim()
-    ? `Results for "${search}"`
+    ? t('common.resultsFor', { query: search })
     : selectedGroup !== null ? selectedGroup
-    : 'Recently Added'
+    : t('common.recentlyAdded')
 
   return (
     <div className="flex flex-col md:flex-row h-full overflow-hidden">
@@ -283,7 +274,6 @@ export function LiveTVPage() {
           groups={groups}
           selected={selectedGroup}
           onSelect={(g) => { setSelectedGroup(g); setSearch('') }}
-          browseLabel="Browse"
         />
       </div>
 
@@ -293,21 +283,21 @@ export function LiveTVPage() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mb-4">
           <div className="flex items-center justify-between sm:justify-start gap-3">
             <h1 className="text-xl font-bold text-white truncate">{heading}</h1>
-            <p className="text-neutral-500 text-sm shrink-0">{filtered.length} channels</p>
+            <p className="text-neutral-500 text-sm shrink-0">{t('live.count', { count: filtered.length })}</p>
             <button
               onClick={handleSurprise}
-              title="Surprise me — pick a random channel"
+              title={t('live.surpriseTitle')}
               className="flex items-center justify-center gap-1.5 min-h-11 min-w-11 px-3.5 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
             >
               <Shuffle size={13} />
-              <span className="hidden sm:inline">Surprise me</span>
+              <span className="hidden sm:inline">{t('common.surpriseMe')}</span>
             </button>
           </div>
           <div className="sm:w-52">
             <SearchBar
               value={search}
               onChange={(v) => { setSearch(v); setSelectedGroup(null) }}
-              placeholder="Search channels…"
+              placeholder={t('live.searchPlaceholder')}
             />
           </div>
         </div>
@@ -318,7 +308,7 @@ export function LiveTVPage() {
         {/* Latest watched */}
         {!search.trim() && selectedGroup === null && recentLive.length > 0 && (
           <div className="mb-6">
-            <p className="text-xs font-semibold text-neutral-500 uppercase tracking-widest mb-2">Latest watched</p>
+            <p className="text-xs font-semibold text-neutral-500 uppercase tracking-widest mb-2">{t('live.latestWatched')}</p>
             <div className="flex flex-col gap-1.5">
               {recentLive.map((ch) => {
                 const epgId = ch.tvgId || resolveByName(ch.name) || ''

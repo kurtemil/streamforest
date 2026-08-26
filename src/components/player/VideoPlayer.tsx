@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { usePlayerStore } from '@/stores/playerStore'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { saveProgress, getProgress, clearProgress, getTmdbMeta } from '@/services/db'
-import { posterUrl } from '@/services/tmdb'
+import { posterUrl, tmdbCacheKey } from '@/services/tmdb'
 import { pushProgress, deleteRemoteProgress } from '@/services/sync'
 import { useProfileStore } from '@/stores/profileStore'
 import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
@@ -21,6 +21,7 @@ import {
 } from '@/lib/diagnostics'
 import { isPlaybackAtEnd, resolveSaveDuration } from '@/lib/progress'
 import { openInVlc } from '@/lib/vlc'
+import { currentLocale, t, useT } from '@/lib/i18n'
 import { normalizeShowKey } from '@/lib/utils'
 import { parseVttBlock } from '@/lib/vtt'
 import { PlayerControls } from './PlayerControls'
@@ -57,6 +58,11 @@ type VideoWithAudioTracks = HTMLVideoElement & {
 }
 
 export function VideoPlayer() {
+  // `tr` for what is rendered, and the module-level `t` for the error strings
+  // set from effects — this component's effects drive playback, and adding the
+  // locale to their dependency arrays would re-initialise a stream on a language
+  // switch. An error already on screen keeps the language it was written in.
+  const tr = useT()
   const navigate = useNavigate()
   const { current, play, close } = usePlayerStore()
   const { channels } = usePlaylistStore()
@@ -360,7 +366,7 @@ export function VideoPlayer() {
         const detail = await res.text().catch(() => '')
         throw new Error(`Proxy ${res.status}${detail ? `: ${detail.slice(0, 120)}` : ''}`)
       }
-      if (!res.body) throw new Error('Subtitle response had no body')
+      if (!res.body) throw new Error(t('player.errSubtitleNoBody'))
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder('utf-8')
@@ -412,13 +418,13 @@ export function VideoPlayer() {
         flush(false)
       }
 
-      if (cueCount === 0) throw new Error('Subtitle stream had no readable cues')
+      if (cueCount === 0) throw new Error(t('player.errSubtitleNoCues'))
     } catch (err) {
       const aborted = (err as { name?: string }).name === 'AbortError'
       if (aborted && !stalled) return
       const msg = stalled
-        ? 'Subtitle extraction stalled — no data from proxy in 5 min'
-        : (err instanceof Error ? err.message : 'Subtitle load failed')
+        ? t('player.errSubtitleStalled')
+        : (err instanceof Error ? err.message : t('player.errSubtitleFailed'))
       console.warn('[subtitle] attach failed:', err)
       flashSubtitleNotice(msg)
       activeSubtitleRef.current = -1
@@ -644,7 +650,7 @@ export function VideoPlayer() {
       // remux to fragmented MP4). Saved progress is irrelevant for live.
       if (current.type === 'live') {
         if (!isTranscodeProxyConfigured()) {
-          setError('Live TV requires the transcode proxy. Set VITE_TRANSCODE_PROXY_URL.')
+          setError(t('player.errLiveNeedsProxy'))
           return
         }
         isTranscodedRef.current = false
@@ -661,7 +667,7 @@ export function VideoPlayer() {
           const capturedCurrent = current
           startHlsSession(current.url, { live: true, mode: 'transcode' }).then((hlsUrl) => {
             if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
-            if (!hlsUrl) { setError(`iOS: HLS generation failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
+            if (!hlsUrl) { setError(t('player.errHlsGeneration', { detail: getLastHlsError() || t('player.errUnknown') })); setIsBuffering(false); return }
             hlsPlaylistUrlRef.current = hlsUrl
             videoRef.current.src = hlsUrl
             attemptPlay(videoRef.current, 'live-ios')
@@ -776,7 +782,7 @@ export function VideoPlayer() {
             if (!hlsUrl && startTime > 0 && !iosHlsRetriedRef.current) {
               iosHlsRetriedRef.current = true
               playbackOffsetRef.current = 0
-              setError('Saved position unavailable — loading from start…')
+              setError(t('player.errSavedPosition'))
               hlsUrl = await startHlsSession(current.url, {
                 mode,
                 audioIndex: audioStreamIndexRef.current,
@@ -787,7 +793,7 @@ export function VideoPlayer() {
               if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
               if (hlsUrl) setError(null)
             }
-            if (!hlsUrl) { setError(`iOS: HLS generation failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
+            if (!hlsUrl) { setError(t('player.errHlsGeneration', { detail: getLastHlsError() || t('player.errUnknown') })); setIsBuffering(false); return }
             hlsPlaylistUrlRef.current = hlsUrl
             videoRef.current.src = hlsUrl
             attemptPlay(videoRef.current, 'vod-ios')
@@ -854,7 +860,7 @@ export function VideoPlayer() {
           video.src = current.url
           video.currentTime = startTime
         } else {
-          setError('HLS not supported in this browser')
+          setError(t('player.errHlsUnsupported'))
         }
       }
 
@@ -1053,7 +1059,7 @@ export function VideoPlayer() {
         iosHlsRetriedRef.current = true
         playbackOffsetRef.current = 0
         setIsBuffering(false)
-        setError('Stream error — retrying from start…')
+        setError(t('player.errStreamRetry'))
         const capturedCurrent = current
         startHlsSession(current.url, {
           mode: proxyModeRef.current ?? 'copy',
@@ -1063,7 +1069,7 @@ export function VideoPlayer() {
           audioCodec: audioCodecRef.current,
         }).then((hlsUrl) => {
           if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
-          if (!hlsUrl) { setError(`iOS: Stream failed. Try again later. (${getLastHlsError() || 'network error'})`); return }
+          if (!hlsUrl) { setError(t('player.errHlsStream', { detail: getLastHlsError() || t('player.errNetwork') })); return }
           setError(null)
           setIsBuffering(true)
           hlsPlaylistUrlRef.current = hlsUrl
@@ -1085,7 +1091,7 @@ export function VideoPlayer() {
           const backoff = Math.min(1000 * reconnectCountRef.current, 5000)
           const retryLabel = current.type === 'live' ? String(reconnectCountRef.current) : `${reconnectCountRef.current}/${maxRetries}`
           const expectedReconnectCount = reconnectCountRef.current
-          setError(`Connection lost — reconnecting (${retryLabel})…`)
+          setError(t('player.errReconnecting', { retry: retryLabel }))
           setIsBuffering(true)
           const capturedCurrent = current
           setTimeout(() => {
@@ -1126,7 +1132,7 @@ export function VideoPlayer() {
               }
             } else {
               const liveUrl = liveStreamUrl(capturedCurrent.url, 'copy')
-              if (!liveUrl) { setError('Live stream reconnect failed'); return }
+              if (!liveUrl) { setError(t('player.errLiveReconnect')); return }
               videoRef.current.src = liveUrl
             }
             attemptPlay(videoRef.current, 'reconnect')
@@ -1138,10 +1144,10 @@ export function VideoPlayer() {
       // is what happened and what to do about it — the previous message put a
       // codec-support matrix in front of whoever was trying to watch something.
       setError(
-        code === 2 ? 'Lost connection to the stream.'
-        : code === 3 ? "This title can't be decoded on this device."
-        : code === 4 ? "The provider didn't return a playable stream."
-        : 'Playback stopped unexpectedly.',
+        code === 2 ? t('player.errLostConnection')
+        : code === 3 ? t('player.errCannotDecode')
+        : code === 4 ? t('player.errNoPlayableStream')
+        : t('player.errUnexpected'),
       )
       setIsBuffering(false)
     }
@@ -1282,7 +1288,9 @@ export function VideoPlayer() {
       ? normalizeShowKey(current.showName)
       : current.id
 
-    getTmdbMeta(tmdbKey).then((meta) => {
+    // The cached row is per language, so the lock screen has to ask for the one
+    // this app is currently in or it finds nothing and shows no artwork.
+    getTmdbMeta(tmdbCacheKey(tmdbKey, currentLocale())).then((meta) => {
       if (cancelled) return
       const poster = meta && !meta.notFound ? posterUrl(meta.posterPath ?? null, 500) : null
       ms.metadata = new MediaMetadata({
@@ -1487,7 +1495,7 @@ export function VideoPlayer() {
           audioCodec: audioCodecRef.current,
         }).then((hlsUrl) => {
           if (usePlayerStore.getState().current !== capturedCurrent || !videoRef.current) return
-          if (!hlsUrl) { setError(`iOS: Audio switch failed: ${getLastHlsError() || 'unknown'}`); setIsBuffering(false); return }
+          if (!hlsUrl) { setError(t('player.errAudioSwitch', { detail: getLastHlsError() || t('player.errUnknown') })); setIsBuffering(false); return }
           hlsPlaylistUrlRef.current = hlsUrl
           videoRef.current.src = hlsUrl
           attemptPlay(videoRef.current, 'audio-switch-ios')
@@ -1681,22 +1689,22 @@ export function VideoPlayer() {
         {!minimized && error && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="bg-surface-50 rounded-xl p-6 max-w-sm text-center">
-              <p className="text-red-400 font-medium mb-2">Playback Error</p>
+              <p className="text-red-400 font-medium mb-2">{tr('player.playbackError')}</p>
               <p className="text-neutral-400 text-sm select-text cursor-text">{error}</p>
               <div className="mt-4 flex items-center justify-center gap-2">
                 <button
                   onClick={(e) => { e.stopPropagation(); openInVlc(current) }}
                   className="flex items-center gap-1.5 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
-                  title="Open in VLC"
+                  title={tr('common.openInVlc')}
                 >
                   <span className="w-2 h-2 rounded-sm bg-[#ff8800]" />
-                  Open in VLC
+                  {tr('common.openInVlc')}
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); setError(null) }}
                   className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm transition-colors"
                 >
-                  Dismiss
+                  {tr('common.dismiss')}
                 </button>
               </div>
             </div>
@@ -1714,13 +1722,13 @@ export function VideoPlayer() {
                 const v = videoRef.current
                 if (v) attemptPlay(v, 'gesture-recovery')
               }}
-              aria-label="Play"
+              aria-label={tr('common.play')}
               className="flex flex-col items-center gap-3 group"
             >
               <span className="w-20 h-20 rounded-full bg-white/15 backdrop-blur-sm ring-1 ring-white/30 flex items-center justify-center transition-transform group-active:scale-95">
                 <Play size={34} fill="white" className="text-white ml-1" />
               </span>
-              <span className="text-white/80 text-sm font-medium">Tap to play</span>
+              <span className="text-white/80 text-sm font-medium">{tr('player.tapToPlay')}</span>
             </button>
           </div>
         )}
@@ -1728,7 +1736,7 @@ export function VideoPlayer() {
         {!minimized && !error && !needsGesture && isBuffering && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none">
             <div className="w-12 h-12 rounded-full border-2 border-white/15 border-t-white animate-spin" />
-            <p className="text-white/60 text-sm font-medium tracking-wide">Buffering…</p>
+            <p className="text-white/60 text-sm font-medium tracking-wide">{tr('player.buffering')}</p>
           </div>
         )}
 
@@ -1806,7 +1814,7 @@ export function VideoPlayer() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="bg-black/85 backdrop-blur-sm rounded-xl p-4 ring-1 ring-white/15 max-w-xs text-right">
-              <p className="text-white/50 text-xs mb-1">Next episode in {nextEpCountdown}s</p>
+              <p className="text-white/50 text-xs mb-1">{tr('player.nextEpisodeIn', { seconds: nextEpCountdown })}</p>
               <p className="text-white text-sm font-medium leading-snug">
                 S{String(nextEpisode.season).padStart(2, '0')}E{String(nextEpisode.episode).padStart(2, '0')}
                 {nextEpisode.episodeTitle ? ` · ${nextEpisode.episodeTitle}` : ''}
@@ -1823,13 +1831,13 @@ export function VideoPlayer() {
                   onClick={clearCountdown}
                   className="text-xs text-white/60 hover:text-white px-2 py-1 rounded hover:bg-white/10 transition-colors"
                 >
-                  Cancel
+                  {tr('common.cancel')}
                 </button>
                 <button
                   onClick={() => { clearCountdown(); play(nextEpisode) }}
                   className="text-xs text-white bg-accent-600 hover:bg-accent-500 px-3 py-1.5 rounded-lg transition-colors font-medium"
                 >
-                  Play now
+                  {tr('player.playNow')}
                 </button>
               </div>
             </div>

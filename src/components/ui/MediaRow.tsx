@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useT } from '@/lib/i18n'
 
 export function ScrollableRow({ children }: { children: React.ReactNode }) {
+  const t = useT()
   const ref = useRef<HTMLDivElement>(null)
   const [canLeft, setCanLeft] = useState(false)
   const [canRight, setCanRight] = useState(false)
@@ -40,7 +42,7 @@ export function ScrollableRow({ children }: { children: React.ReactNode }) {
       {canLeft && (
         <button
           onClick={() => scrollBy(-1)}
-          aria-label="Scroll left"
+          aria-label={t('common.scrollLeft')}
           data-pointer-affordance="row-scroll"
           className="absolute left-0 top-0 bottom-2 w-14 flex items-center justify-center bg-gradient-to-r from-surface-100/95 via-surface-100/60 to-transparent opacity-0 group-hover/row:opacity-100 transition-opacity z-10"
         >
@@ -52,7 +54,7 @@ export function ScrollableRow({ children }: { children: React.ReactNode }) {
       {canRight && (
         <button
           onClick={() => scrollBy(1)}
-          aria-label="Scroll right"
+          aria-label={t('common.scrollRight')}
           data-pointer-affordance="row-scroll"
           className="absolute right-0 top-0 bottom-2 w-14 flex items-center justify-center bg-gradient-to-l from-surface-100/95 via-surface-100/60 to-transparent opacity-0 group-hover/row:opacity-100 transition-opacity z-10"
         >
@@ -74,6 +76,7 @@ export function SectionHeader({
   to?: string
   onSeeAll?: () => void
 }) {
+  const t = useT()
   const linkClass =
     'flex items-center gap-0.5 min-h-11 py-3 -my-3 pl-3 -ml-3 text-caption text-neutral-500 hover:text-accent-400 transition-colors'
   return (
@@ -81,12 +84,12 @@ export function SectionHeader({
       <h2 className="text-heading-lg text-white">{title}</h2>
       {to && (
         <Link to={to} className={linkClass}>
-          See all <ChevronRight size={13} />
+          {t('common.seeAll')} <ChevronRight size={13} />
         </Link>
       )}
       {!to && onSeeAll && (
         <button onClick={onSeeAll} className={linkClass}>
-          See all <ChevronRight size={13} />
+          {t('common.seeAll')} <ChevronRight size={13} />
         </button>
       )}
     </div>

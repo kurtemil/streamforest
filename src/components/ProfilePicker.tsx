@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Settings } from 'lucide-react'
+import { MessageSquarePlus, Settings } from 'lucide-react'
 import { PROFILES, getProfile, useProfileStore, type Profile } from '@/stores/profileStore'
 import { Logo } from '@/ui'
 import { syncFromRemote } from '@/services/sync'
 import { useExclusionsStore } from '@/stores/exclusionsStore'
 import { kidRestrictionsStore } from '@/stores/kidRestrictionsStore'
+import { LanguageSwitch } from '@/components/ui/LanguageSwitch'
+import { useT } from '@/lib/i18n'
 
 const KID_IDS = PROFILES.filter((p) => p.role === 'kid').map((p) => p.id)
 const NUMPAD = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', '←']
@@ -33,6 +35,7 @@ function PinEntry({
   onSuccess: () => void
   onBack: () => void
 }) {
+  const t = useT()
   const [digits, setDigits] = useState<string[]>([])
   const [error, setError] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -140,13 +143,14 @@ function PinEntry({
         onClick={onBack}
         className="text-neutral-600 hover:text-neutral-400 text-sm transition-colors"
       >
-        Back
+        {t('common.back')}
       </button>
     </div>
   )
 }
 
 export function ProfilePicker({ forced }: { forced?: boolean }) {
+  const t = useT()
   const { setProfile, closePicker, activeProfileId } = useProfileStore()
   const role = getProfile(activeProfileId)?.role ?? 'kid'
   const canSeeSettings = role === 'parent' || role === 'admin'
@@ -169,7 +173,7 @@ export function ProfilePicker({ forced }: { forced?: boolean }) {
     <div className="fixed inset-0 z-[60] bg-black/95 flex flex-col items-center justify-center gap-10 pt-safe pb-safe px-safe">
       <div className="flex flex-col items-center gap-2">
         <Logo size={40} className="rounded-xl mb-2" />
-        {!pendingProfile && <h1 className="text-3xl font-bold text-white">Who's watching?</h1>}
+        {!pendingProfile && <h1 className="text-3xl font-bold text-white">{t('profile.whosWatching')}</h1>}
       </div>
 
       {pendingProfile ? (
@@ -201,24 +205,42 @@ export function ProfilePicker({ forced }: { forced?: boolean }) {
           </div>
 
           <div className="flex flex-col items-center gap-5">
-            {canSeeSettings && (
-              <Link
-                to="/settings"
-                onClick={closePicker}
-                className="flex items-center gap-2 min-h-11 px-5 rounded-full ring-1 ring-white/15 text-neutral-300 hover:text-white hover:ring-white/30 text-sm font-medium transition-colors md:hidden"
-              >
-                <Settings size={15} />
-                Settings
-              </Link>
-            )}
+            {/* The phone has no sidebar, so these two rows are the only way in
+                to either page from a small screen. Feedback is open to every
+                role; Settings is not. */}
+            <div className="flex items-center gap-3 md:hidden">
+              {activeProfileId && (
+                <Link
+                  to="/feedback"
+                  onClick={closePicker}
+                  className="flex items-center gap-2 min-h-11 px-5 rounded-full ring-1 ring-white/15 text-neutral-300 hover:text-white hover:ring-white/30 text-sm font-medium transition-colors"
+                >
+                  <MessageSquarePlus size={15} />
+                  {t('nav.feedback')}
+                </Link>
+              )}
+              {canSeeSettings && (
+                <Link
+                  to="/settings"
+                  onClick={closePicker}
+                  className="flex items-center gap-2 min-h-11 px-5 rounded-full ring-1 ring-white/15 text-neutral-300 hover:text-white hover:ring-white/30 text-sm font-medium transition-colors"
+                >
+                  <Settings size={15} />
+                  {t('nav.settings')}
+                </Link>
+              )}
+            </div>
             {!forced && activeProfileId && (
               <button
                 onClick={closePicker}
                 className="min-h-11 px-4 text-neutral-600 hover:text-neutral-400 text-sm transition-colors"
               >
-                Cancel
+                {t('common.cancel')}
               </button>
             )}
+            {/* The only language switch a kid profile can reach — Settings is
+                parent-and-admin only, and the language belongs to the device. */}
+            <LanguageSwitch compact />
           </div>
         </>
       )}

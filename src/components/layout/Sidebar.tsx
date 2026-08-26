@@ -1,24 +1,31 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Film, Tv, Radio, Settings, Library, Search } from 'lucide-react'
+import { Home, Film, Tv, Radio, Settings, Library, Search, MessageSquarePlus } from 'lucide-react'
 import { PROFILES, getProfile, useProfileStore } from '@/stores/profileStore'
 import { useSearchStore } from '@/stores/searchStore'
 import { Logo } from '@/ui'
+import { useT } from '@/lib/i18n'
 
 const NAV_MAIN = [
-  { to: '/',         icon: Home,    label: 'Home',     minRole: 'kid' },
-  { to: '/movies',   icon: Film,    label: 'Movies',   minRole: 'kid' },
-  { to: '/series',   icon: Tv,      label: 'TV Shows', minRole: 'kid' },
-  { to: '/live',     icon: Radio,   label: 'Live TV',  minRole: 'kid' },
-  { to: '/library',  icon: Library, label: 'Library',  minRole: 'kid' },
+  { to: '/',         icon: Home,    label: 'nav.home',    minRole: 'kid' },
+  { to: '/movies',   icon: Film,    label: 'nav.movies',  minRole: 'kid' },
+  { to: '/series',   icon: Tv,      label: 'nav.tvShows', minRole: 'kid' },
+  { to: '/live',     icon: Radio,   label: 'nav.liveTv',  minRole: 'kid' },
+  { to: '/library',  icon: Library, label: 'nav.library', minRole: 'kid' },
 ] as const
 
+// Feedback is above Settings and open to every role: the whole point of writing
+// it down in the app is that the moment you notice something is the moment you
+// are holding the phone, and Settings is a door two of the four profiles cannot
+// open. The picker carries the same link for the phone, which has no sidebar.
 const NAV_BOTTOM = [
-  { to: '/settings',    icon: Settings, label: 'Settings',    minRole: 'parent' },
+  { to: '/feedback', icon: MessageSquarePlus, label: 'nav.feedback', minRole: 'kid' },
+  { to: '/settings', icon: Settings,          label: 'nav.settings', minRole: 'parent' },
 ] as const
 
 const ROLE_RANK: Record<string, number> = { kid: 0, parent: 1, admin: 2 }
 
 export function Sidebar() {
+  const t = useT()
   const { activeProfileId, openPicker } = useProfileStore()
   const activeProfile = PROFILES.find((p) => p.id === activeProfileId)
   const role = getProfile(activeProfileId)?.role ?? 'kid'
@@ -39,13 +46,13 @@ export function Sidebar() {
           className="w-full flex items-center gap-2.5 min-h-11 px-3 py-2 rounded-lg bg-white/5 border border-white/8 hover:border-white/15 text-neutral-500 hover:text-neutral-300 transition-colors group"
         >
           <Search size={14} className="shrink-0" />
-          <span className="flex-1 text-left text-sm">Search…</span>
+          <span className="flex-1 text-left text-sm">{t('sidebar.search')}</span>
           <kbd className="text-xs font-mono bg-white/5 border border-white/10 rounded px-1 py-0.5 group-hover:border-white/20 transition-colors">⌘K</kbd>
         </button>
       </div>
 
       {/* Nav */}
-      <nav aria-label="Sections" className="flex-1 px-3 py-3 flex flex-col gap-0.5">
+      <nav aria-label={t('nav.sections')} className="flex-1 px-3 py-3 flex flex-col gap-0.5">
         {NAV_MAIN.filter((item) => (ROLE_RANK[role] ?? 0) >= (ROLE_RANK[item.minRole] ?? 0)).map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
@@ -60,7 +67,7 @@ export function Sidebar() {
             }
           >
             <Icon size={17} strokeWidth={1.8} />
-            {label}
+            {t(label)}
           </NavLink>
         ))}
       </nav>
@@ -81,7 +88,7 @@ export function Sidebar() {
               </div>
               <div className="flex-1 text-left min-w-0">
                 <p className="text-sm text-white font-medium truncate">{activeProfile.name}</p>
-                <p className="text-xs text-neutral-600 group-hover:text-neutral-500 transition-colors">Switch profile</p>
+                <p className="text-xs text-neutral-600 group-hover:text-neutral-500 transition-colors">{t('sidebar.switchProfile')}</p>
               </div>
             </>
           ) : (
@@ -89,7 +96,7 @@ export function Sidebar() {
               <div className="w-7 h-7 rounded-lg bg-neutral-700 flex items-center justify-center shrink-0">
                 <span className="text-neutral-400 text-xs">?</span>
               </div>
-              <span className="text-sm text-neutral-400">Select profile</span>
+              <span className="text-sm text-neutral-400">{t('sidebar.selectProfile')}</span>
             </>
           )}
         </button>
@@ -110,10 +117,10 @@ export function Sidebar() {
             }
           >
             <Icon size={17} strokeWidth={1.8} />
-            {label}
+            {t(label)}
           </NavLink>
         ))}
-        <p className="text-xs text-neutral-600 px-3 pt-2">Private use only</p>
+        <p className="text-xs text-neutral-600 px-3 pt-2">{t('sidebar.privateUse')}</p>
       </div>
     </aside>
   )

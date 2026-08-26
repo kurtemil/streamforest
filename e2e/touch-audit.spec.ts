@@ -11,7 +11,7 @@ import { test, expect } from './fixtures'
 // only on hover, fails here — which is the whole point, because neither is
 // visible on the machine this app is developed on.
 
-const AUDIT_PAGES = ["/", "/movies", "/settings"] as const
+const AUDIT_PAGES = ["/", "/movies", "/settings", "/feedback"] as const
 const MIN_TOUCH_TARGET = 44 // Apple's Human Interface Guidelines
 
 interface Offender {

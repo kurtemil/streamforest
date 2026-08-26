@@ -1,6 +1,7 @@
 import type { EpgProgram } from '@/types'
 import { proxyUrl } from './fetcher'
 import { epgProxyUrl } from '@/lib/transcode'
+import { t } from '@/lib/i18n'
 
 /** Derive the XMLTV EPG URL from an Xtream Codes M3U URL. */
 export function epgUrlFromM3u(m3uUrl: string): string | null {
@@ -116,8 +117,8 @@ export async function fetchAndParseEpg(
   // Prefer the transcode-proxy /epg endpoint (server-side cache, no CF timeout)
   const fetchUrl = epgProxyUrl(epgUrl, force) ?? proxyUrl(epgUrl)
   const res = await fetch(fetchUrl)
-  if (!res.ok) throw new Error(`EPG fetch failed with status ${res.status}`)
-  if (!res.body) throw new Error('EPG response had no body')
+  if (!res.ok) throw new Error(t('epg.errStatus', { status: res.status }))
+  if (!res.body) throw new Error(t('epg.errNoBody'))
 
   const now      = Date.now()
   const keepFrom = now - 2  * 60 * 60 * 1000  // 2 h back  (current show)

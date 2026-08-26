@@ -101,3 +101,24 @@ export interface TmdbMeta {
   cachedAt: number
   notFound?: true       // searched but no result — skip retrying until TTL expires
 }
+
+// ── Feedback ───────────────────────────────────────────────────────────────────
+
+/** 'bug' = something is broken, 'idea' = a wish for the app. */
+export type FeedbackKind = 'bug' | 'idea'
+
+/** One report, as `functions/api/feedback.ts` returns it. */
+export interface Feedback {
+  id: string
+  profileId: string | null
+  authorName: string
+  kind: FeedbackKind
+  body: string
+  /** Ticked off by the admin. Never deleted on being fixed — see the Function. */
+  resolved: boolean
+  createdAt: number
+  /** Which phone the report came from. Null on nothing, in practice. */
+  userAgent: string | null
+  /** JSON blob of `ClientContext` — debugging colour, not queried on. */
+  context: string | null
+}

@@ -6,8 +6,10 @@ import { CommandPalette } from '@/components/search/CommandPalette'
 import { InstallPrompt } from '@/components/ui/InstallPrompt'
 import { useSearchStore } from '@/stores/searchStore'
 import { PROFILES, useProfileStore } from '@/stores/profileStore'
+import { useT } from '@/lib/i18n'
 
 export function Layout({ children }: { children: ReactNode }) {
+  const t = useT()
   const { toggle } = useSearchStore()
   const mainRef = useRef<HTMLElement>(null)
   const { pathname } = useLocation()
@@ -59,7 +61,11 @@ export function Layout({ children }: { children: ReactNode }) {
           so there is one floating control instead of two fighting for the spot. */}
       <button
         onClick={openPicker}
-        aria-label={activeProfile ? `Profile: ${activeProfile.name} — switch` : 'Choose profile'}
+        aria-label={
+          activeProfile
+            ? t('layout.profileSwitch', { name: activeProfile.name })
+            : t('layout.chooseProfile')
+        }
         className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] right-3 z-40 flex md:hidden items-center justify-center w-12 h-12 rounded-full bg-surface-200/80 backdrop-blur-xl ring-1 ring-white/12 shadow-cinema active:scale-95 transition-transform"
       >
         <span

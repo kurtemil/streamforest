@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X } from 'lucide-react'
 import { ease, dur } from '@/styles/motion'
+import { useT } from '@/lib/i18n'
 
 type Size = 'sm' | 'md' | 'lg' | 'xl' | 'full'
 
@@ -38,6 +39,7 @@ const panelVariants = {
 }
 
 export function Dialog({ open, onClose, title, children, size = 'md', persistent = false, className = '' }: Props) {
+  const t = useT()
   useEffect(() => {
     if (!open) return
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -71,7 +73,7 @@ export function Dialog({ open, onClose, title, children, size = 'md', persistent
                 <button
                   onClick={onClose}
                   className="p-1 rounded-lg text-neutral-400 hover:text-white hover:bg-white/8 transition-colors"
-                  aria-label="Close"
+                  aria-label={t('common.close')}
                 >
                   <X size={18} />
                 </button>

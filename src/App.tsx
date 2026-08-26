@@ -11,6 +11,7 @@ const SeriesPage = lazy(() => import('@/pages/SeriesPage').then(m => ({ default:
 const LiveTVPage = lazy(() => import('@/pages/LiveTVPage').then(m => ({ default: m.LiveTVPage })))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then(m => ({ default: m.SettingsPage })))
 const LibraryPage = lazy(() => import('@/pages/LibraryPage').then(m => ({ default: m.LibraryPage })))
+const FeedbackPage = lazy(() => import('@/pages/FeedbackPage').then(m => ({ default: m.FeedbackPage })))
 import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { ProfilePicker } from '@/components/ProfilePicker'
 import { usePlaylistStore } from '@/stores/playlistStore'
@@ -22,8 +23,10 @@ import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import { useEpgStore } from '@/stores/epgStore'
 import { PROFILES } from '@/stores/profileStore'
 import { PageTransition } from '@/ui'
+import { useT } from '@/lib/i18n'
 
 export default function App() {
+  const t = useT()
   const { loadFromDB, loaded, syncM3uUrlFromRemote } = usePlaylistStore()
   const { activeProfileId, showPicker } = useProfileStore()
   const location = useLocation()
@@ -50,7 +53,7 @@ export default function App() {
       <div className="flex h-full items-center justify-center bg-surface-100">
         <div className="flex flex-col items-center gap-4">
           <div className="h-10 w-10 rounded-full border-2 border-accent-600 border-t-transparent animate-spin" />
-          <p className="text-neutral-500 text-caption">Loading…</p>
+          <p className="text-neutral-500 text-caption">{t('common.loading')}</p>
         </div>
       </div>
     )
@@ -76,6 +79,7 @@ export default function App() {
             <Route path="/library"    element={<PageTransition><LibraryPage /></PageTransition>} />
             <Route path="/watchlater" element={<Navigate to="/library" replace />} />
             <Route path="/settings"   element={<PageTransition><SettingsPage /></PageTransition>} />
+            <Route path="/feedback"   element={<PageTransition><FeedbackPage /></PageTransition>} />
             <Route path="*"           element={<Navigate to="/" replace />} />
           </Routes>
         </AnimatePresence>

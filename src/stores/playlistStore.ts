@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { fetchAndStorePlaylist, type FetchProgress } from '@/services/fetcher'
 import { db, getPlaylistMeta } from '@/services/db'
 import type { Channel } from '@/types'
+import { t } from '@/lib/i18n'
 
 interface PlaylistState {
   channels: Channel[]
@@ -101,7 +102,7 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
   async refresh() {
     const { m3uUrl } = get()
     if (!m3uUrl) {
-      set({ error: 'No M3U URL configured. Go to Settings.' })
+      set({ error: t('playlist.errNoUrl') })
       return
     }
     set({ fetching: true, error: null, progress: null })

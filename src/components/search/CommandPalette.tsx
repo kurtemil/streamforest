@@ -7,6 +7,7 @@ import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
 import { normalizeShowKey } from '@/lib/utils'
 import type { Channel } from '@/types'
+import { useT } from '@/lib/i18n'
 
 const STORAGE_KEY = 'sf_recent_searches'
 const MAX_RECENT = 8
@@ -38,6 +39,7 @@ function match(haystack: string, needle: string): boolean {
 }
 
 export function CommandPalette() {
+  const t = useT()
   const { open, setOpen } = useSearchStore()
   const { channels } = usePlaylistStore()
   const { play } = usePlayerStore()
@@ -70,7 +72,7 @@ export function CommandPalette() {
         if (movies.length < MAX_PER_GROUP) {
           const title = ch.movieTitle ?? ch.name
           if (match(title, q)) {
-            movies.push({ id: ch.id, title, subtitle: ch.year ? String(ch.year) : 'Movie', type: 'movie', channel: ch })
+            movies.push({ id: ch.id, title, subtitle: ch.year ? String(ch.year) : t('search.kindMovie'), type: 'movie', channel: ch })
           }
         }
       } else if (ch.type === 'series' && ch.showName) {
@@ -78,7 +80,7 @@ export function CommandPalette() {
           const key = normalizeShowKey(ch.showName)
           if (!showSeen.has(key) && match(ch.showName, q)) {
             showSeen.add(key)
-            series.push({ id: key, title: ch.showName, subtitle: 'TV Show', type: 'series', channel: ch })
+            series.push({ id: key, title: ch.showName, subtitle: t('search.kindShow'), type: 'series', channel: ch })
           }
         }
       } else if (ch.type === 'live') {
@@ -90,7 +92,7 @@ export function CommandPalette() {
     }
 
     return { movies, series, live }
-  }, [channels, query])
+  }, [channels, query, t])
 
   const allResults = useMemo(() => [...movies, ...series, ...live], [movies, series, live])
   const totalCount = allResults.length
@@ -177,7 +179,7 @@ export function CommandPalette() {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search movies, shows, channels…"
+                placeholder={t('search.placeholder')}
                 className="flex-1 bg-transparent text-white text-base can-hover:text-sm placeholder-neutral-500 outline-none"
               />
               {query ? (
@@ -194,7 +196,7 @@ export function CommandPalette() {
               {query.trim() === '' ? (
                 recentSearches.length > 0 ? (
                   <div className="p-2">
-                    <p className="text-xs text-neutral-600 uppercase tracking-wider px-2 pt-1 pb-1.5">Recent</p>
+                    <p className="text-xs text-neutral-600 uppercase tracking-wider px-2 pt-1 pb-1.5">{t('search.recent')}</p>
                     {recentSearches.map((q) => (
                       <div
                         key={q}
@@ -215,30 +217,30 @@ export function CommandPalette() {
                 ) : (
                   <div className="flex flex-col items-center gap-2 py-10 text-neutral-600">
                     <Search size={22} />
-                    <p className="text-sm">Search across your library</p>
+                    <p className="text-sm">{t('search.acrossLibrary')}</p>
                   </div>
                 )
               ) : totalCount === 0 ? (
                 <div className="flex items-center justify-center py-10">
-                  <p className="text-sm text-neutral-600">No results for "{query}"</p>
+                  <p className="text-sm text-neutral-600">{t('search.noResultsFor', { query })}</p>
                 </div>
               ) : (
                 <div className="p-2">
                   {movies.length > 0 && (
                     <>
-                      <SectionHeader label="Movies" />
+                      <SectionHeader label={t('common.movies')} />
                       {movies.map((r, i) => <ResultRow key={r.id} result={r} idx={i} />)}
                     </>
                   )}
                   {series.length > 0 && (
                     <>
-                      <SectionHeader label="TV Shows" />
+                      <SectionHeader label={t('common.tvShows')} />
                       {series.map((r, i) => <ResultRow key={r.id} result={r} idx={movies.length + i} />)}
                     </>
                   )}
                   {live.length > 0 && (
                     <>
-                      <SectionHeader label="Live TV" />
+                      <SectionHeader label={t('common.liveTv')} />
                       {live.map((r, i) => <ResultRow key={r.id} result={r} idx={movies.length + series.length + i} />)}
                     </>
                   )}
@@ -248,9 +250,9 @@ export function CommandPalette() {
 
             {/* Footer */}
             <div className="flex items-center gap-4 px-4 py-2 border-t border-white/5 text-xs text-neutral-600">
-              <span><kbd className="font-mono bg-white/5 border border-white/10 rounded px-1 py-0.5">↑↓</kbd> navigate</span>
-              <span><kbd className="font-mono bg-white/5 border border-white/10 rounded px-1 py-0.5">↵</kbd> open</span>
-              <span><kbd className="font-mono bg-white/5 border border-white/10 rounded px-1 py-0.5">Esc</kbd> close</span>
+              <span><kbd className="font-mono bg-white/5 border border-white/10 rounded px-1 py-0.5">↑↓</kbd> {t('search.navigate')}</span>
+              <span><kbd className="font-mono bg-white/5 border border-white/10 rounded px-1 py-0.5">↵</kbd> {t('search.open')}</span>
+              <span><kbd className="font-mono bg-white/5 border border-white/10 rounded px-1 py-0.5">Esc</kbd> {t('search.close')}</span>
             </div>
           </motion.div>
         </motion.div>

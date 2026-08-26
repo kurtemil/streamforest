@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
-import { Settings, RefreshCw, Trash2, Check, AlertCircle, Download, Database, ChevronDown, EyeOff, Shield, Users, Tv, ImageOff, Play } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Settings, RefreshCw, Trash2, Check, AlertCircle, Download, Database, ChevronDown, EyeOff, Shield, Users, Tv, ImageOff, Play, Languages, MessageSquarePlus } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { useEpgStore } from '@/stores/epgStore'
 import { epgUrlFromM3u } from '@/services/epg'
@@ -10,6 +11,8 @@ import { useProfileStore, getProfile, PROFILES } from '@/stores/profileStore'
 import { useKidRestrictions } from '@/stores/kidRestrictionsStore'
 import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import { VlcHandlerSection } from '@/components/settings/VlcHandlerSection'
+import { LanguageSwitch } from '@/components/ui/LanguageSwitch'
+import { formatDateTime, formatNumber, useT, type MessageKey } from '@/lib/i18n'
 
 function formatBytes(bytes: number) {
   if (bytes === 0) return '0 B'
@@ -19,9 +22,8 @@ function formatBytes(bytes: number) {
   return `${parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`
 }
 
-function formatDate(ts: number) {
-  return new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(ts))
-}
+/** The languages offered for the audio and subtitle track defaults. */
+const TRACK_LANGS = ['sv', 'en', 'no', 'da', 'fi', 'de', 'fr', 'es', 'ar'] as const
 
 function ProgressBar({ label, icon, pct, indeterminate, detail }: {
   label: string
@@ -30,6 +32,7 @@ function ProgressBar({ label, icon, pct, indeterminate, detail }: {
   indeterminate?: boolean
   detail?: string
 }) {
+  const t = useT()
   const isDone = pct === -1
   const isActive = pct !== null && !isDone
   const displayPct = isDone ? 100 : (pct ?? 0)
@@ -40,7 +43,7 @@ function ProgressBar({ label, icon, pct, indeterminate, detail }: {
         <span className="flex items-center gap-1.5 text-neutral-400">
           {icon}
           {label}
-          {isDone && <span className="text-accent-500 font-medium">✓ Done</span>}
+          {isDone && <span className="text-accent-500 font-medium">{t('settings.progressDone')}</span>}
         </span>
         <span className="text-neutral-500">
           {isDone ? '100%' : isActive && !indeterminate ? `${displayPct}%` : ''}
@@ -64,16 +67,17 @@ function ProgressBar({ label, icon, pct, indeterminate, detail }: {
 }
 
 function GroupFilterPanel({
-  label, type, groups, excluded, toggle, setAll, cleanTitle = (t) => t,
+  label, type, groups, excluded, toggle, setAll, cleanTitle = (g) => g,
 }: {
-  label: string
+  label: MessageKey
   type: ContentType
   groups: { title: string; count: number }[]
   excluded: Set<string>
   toggle: (type: ContentType, group: string) => void
   setAll: (type: ContentType, groups: string[], hide: boolean) => void
-  cleanTitle?: (t: string) => string
+  cleanTitle?: (title: string) => string
 }) {
+  const t = useT()
   const [expanded, setExpanded] = useState(false)
   const [search, setSearch] = useState('')
 
@@ -89,15 +93,15 @@ function GroupFilterPanel({
         className="flex items-center justify-between w-full px-4 py-3 bg-white/3 hover:bg-white/5 transition-colors"
       >
         <div className="flex items-center gap-3">
-          <span className="text-sm font-medium text-white">{label}</span>
+          <span className="text-sm font-medium text-white">{t(label)}</span>
           {hiddenCount > 0 && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-400">
-              {hiddenCount} hidden
+              {t('settings.hiddenCount', { count: hiddenCount })}
             </span>
           )}
         </div>
         <div className="flex items-center gap-2 text-neutral-500 text-xs">
-          <span>{groups.length} groups</span>
+          <span>{t('settings.groupCount', { count: groups.length })}</span>
           <ChevronDown size={14} className={`transition-transform ${expanded ? 'rotate-180' : ''}`} />
         </div>
       </button>
@@ -109,20 +113,20 @@ function GroupFilterPanel({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filter groups…"
+              placeholder={t('settings.filterGroups')}
               className="flex-1 bg-white/5 border border-white/8 rounded-lg min-h-11 px-3 py-1.5 text-base can-hover:text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-accent-600/60 transition-colors"
             />
             <button
               onClick={() => setAll(type, groups.map((g) => g.title), true)}
               className="min-h-11 px-3 py-1.5 text-xs rounded-lg bg-white/5 hover:bg-red-500/20 hover:text-red-400 text-neutral-400 transition-colors whitespace-nowrap"
             >
-              Hide all
+              {t('settings.hideAll')}
             </button>
             <button
               onClick={() => setAll(type, [], false)}
               className="min-h-11 px-3 py-1.5 text-xs rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-400 transition-colors whitespace-nowrap"
             >
-              Show all
+              {t('settings.showAll')}
             </button>
           </div>
 
@@ -145,12 +149,12 @@ function GroupFilterPanel({
                   <span className={`flex-1 truncate ${hidden ? 'opacity-40' : ''}`}>
                     {cleanTitle(g.title)}
                   </span>
-                  <span className="text-xs text-neutral-600 shrink-0">{g.count.toLocaleString()}</span>
+                  <span className="text-xs text-neutral-600 shrink-0">{formatNumber(g.count)}</span>
                 </button>
               )
             })}
             {filtered.length === 0 && (
-              <p className="text-neutral-600 text-sm text-center py-4">No groups found</p>
+              <p className="text-neutral-600 text-sm text-center py-4">{t('settings.noGroups')}</p>
             )}
           </div>
         </div>
@@ -172,18 +176,21 @@ function KidGroupPanel({
   const { excluded, toggle, setAll } = useKidRestrictions(kidProfileId)
   return (
     <div className="flex flex-col gap-3">
-      <GroupFilterPanel label="Movies"   type="movie"  groups={movieGroups}  excluded={excluded.movie}  toggle={toggle} setAll={setAll} cleanTitle={(t) => t.replace(/^VOD:\s*/i, '')} />
-      <GroupFilterPanel label="TV Shows" type="series" groups={seriesGroups} excluded={excluded.series} toggle={toggle} setAll={setAll} cleanTitle={(t) => t.replace(/^Series:\s*/i, '')} />
-      <GroupFilterPanel label="Live TV"  type="live"   groups={liveGroups}   excluded={excluded.live}   toggle={toggle} setAll={setAll} />
+      <GroupFilterPanel label="common.movies"  type="movie"  groups={movieGroups}  excluded={excluded.movie}  toggle={toggle} setAll={setAll} cleanTitle={(g) => g.replace(/^VOD:\s*/i, '')} />
+      <GroupFilterPanel label="common.tvShows" type="series" groups={seriesGroups} excluded={excluded.series} toggle={toggle} setAll={setAll} cleanTitle={(g) => g.replace(/^Series:\s*/i, '')} />
+      <GroupFilterPanel label="common.liveTv"  type="live"   groups={liveGroups}   excluded={excluded.live}   toggle={toggle} setAll={setAll} />
     </div>
   )
 }
 
 function EpgSection({ m3uUrl }: { m3uUrl: string }) {
+  const t = useT()
   const { status, lastFetched, error, progress, epgUrl, setEpgUrl, resolveUrl, refresh: refreshEpg } = useEpgStore()
   const loading  = status === 'loading'
   const hasError = status === 'error'
-  const label    = loading ? 'Loading…' : lastFetched ? 'Refresh Guide' : 'Load Guide Data'
+  const label    = loading
+    ? t('common.loading')
+    : lastFetched ? t('settings.epgRefresh') : t('settings.epgLoad')
 
   // Pre-populate from M3U URL if the field is empty
   const derivedUrl = epgUrlFromM3u(m3uUrl) ?? ''
@@ -194,12 +201,12 @@ function EpgSection({ m3uUrl }: { m3uUrl: string }) {
     <section className="mb-8">
       <div className="flex items-center gap-2.5 mb-4">
         <Tv size={16} className="text-neutral-400" />
-        <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider">TV Guide (EPG)</h2>
+        <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider">{t('settings.tvGuide')}</h2>
       </div>
       <div className="bg-white/[0.03] rounded-xl p-4 ring-1 ring-white/8 flex flex-col gap-3">
         {/* EPG URL input */}
         <div>
-          <label className="block text-xs text-neutral-500 mb-1.5">EPG URL (XMLTV)</label>
+          <label className="block text-xs text-neutral-500 mb-1.5">{t('settings.epgUrl')}</label>
           <input
             type="url"
             value={displayUrl}
@@ -208,7 +215,7 @@ function EpgSection({ m3uUrl }: { m3uUrl: string }) {
             className="w-full bg-white/5 border border-white/10 rounded-lg min-h-11 px-3 py-2 text-base can-hover:text-sm text-white placeholder-neutral-600 font-mono focus:outline-none focus:border-accent-500/60 focus:bg-white/8 transition-colors"
           />
           {!derivedUrl && !epgUrl && (
-            <p className="text-xs text-neutral-600 mt-1">Enter your provider's XMLTV URL above.</p>
+            <p className="text-xs text-neutral-600 mt-1">{t('settings.epgHint')}</p>
           )}
         </div>
 
@@ -216,17 +223,17 @@ function EpgSection({ m3uUrl }: { m3uUrl: string }) {
         <div className="flex items-center gap-3">
           <div className="flex-1 min-w-0 text-sm">
             {loading ? (
-              <span className="text-neutral-400">{progress ?? 'Loading…'}</span>
+              <span className="text-neutral-400">{progress ?? t('common.loading')}</span>
             ) : hasError ? (
               <span className="text-red-400 flex items-center gap-1.5">
                 <AlertCircle size={13} className="shrink-0" /> {error}
               </span>
             ) : lastFetched ? (
               <span className="text-neutral-400">
-                Last loaded: {new Date(lastFetched).toLocaleString()}
+                {t('settings.epgLastLoaded', { when: formatDateTime(lastFetched) })}
               </span>
             ) : (
-              <span className="text-neutral-600">No guide data loaded yet.</span>
+              <span className="text-neutral-600">{t('settings.epgNone')}</span>
             )}
           </div>
           <button
@@ -244,6 +251,7 @@ function EpgSection({ m3uUrl }: { m3uUrl: string }) {
 }
 
 export function SettingsPage() {
+  const t = useT()
   const { m3uUrl, setM3uUrl, refresh, fetching, progress, error, loadFromDB, channels } = usePlaylistStore()
   const activeProfileId = useProfileStore((s) => s.activeProfileId)
   const role = getProfile(activeProfileId)?.role ?? 'kid'
@@ -292,7 +300,7 @@ export function SettingsPage() {
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e) {
-      setSaveError(e instanceof Error ? e.message : 'Could not save the URL')
+      setSaveError(e instanceof Error ? e.message : t('settings.saveFailed'))
     }
   }
 
@@ -305,7 +313,7 @@ export function SettingsPage() {
   }
 
   const handleClear = async () => {
-    if (!confirm("Clear all cached playlist data? You'll need to re-download it.")) return
+    if (!confirm(t('settings.clearConfirm'))) return
     setClearing(true)
     await clearPlaylist()
     await loadFromDB()
@@ -325,14 +333,14 @@ export function SettingsPage() {
 
   const dlIndeterminate = progress?.phase === 'downloading' && progress.dlTotal === 0
   const buttonLabel = fetching
-    ? progress?.phase === 'saving' ? 'Saving…' : 'Downloading…'
-    : meta ? 'Re-download' : 'Download now'
+    ? progress?.phase === 'saving' ? t('settings.saving') : t('settings.downloadingEllipsis')
+    : meta ? t('settings.reDownload') : t('settings.downloadNow')
 
   if (!canManage) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3 text-neutral-600">
         <Shield size={32} />
-        <p className="text-sm">Settings are restricted to parents and administrators.</p>
+        <p className="text-sm">{t('settings.restricted')}</p>
       </div>
     )
   }
@@ -341,16 +349,36 @@ export function SettingsPage() {
     <div className="p-6 pb-12 max-w-2xl">
       <div className="flex items-center gap-2.5 mb-8">
         <Settings size={20} className="text-neutral-400" />
-        <h1 className="text-2xl font-bold text-white">Settings</h1>
+        <h1 className="text-2xl font-bold text-white">{t('settings.title')}</h1>
       </div>
+
+      {/* Language. First, and reachable by every role that can open this page —
+          a person who cannot read the interface should not have to navigate it
+          to fix that. The same switch is on the profile picker for the roles
+          that cannot open Settings at all. */}
+      <section className="mb-8">
+        <div className="flex items-center gap-2.5 mb-4">
+          <Languages size={16} className="text-neutral-400" />
+          <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider">
+            {t('settings.language')}
+          </h2>
+        </div>
+        <div className="bg-white/[0.03] rounded-xl p-4 ring-1 ring-white/8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="text-sm text-neutral-400 leading-relaxed min-w-0">
+            <p>{t('settings.languageBody')}</p>
+            <p className="text-neutral-600 text-xs mt-0.5">{t('settings.languageHint')}</p>
+          </div>
+          <LanguageSwitch />
+        </div>
+      </section>
 
       {/* M3U URL — admin only */}
       {isAdmin && (
         <section className="mb-8">
-          <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-4">Playlist Source</h2>
+          <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-4">{t('settings.playlistSource')}</h2>
           <div className="bg-[#141414] rounded-xl p-5 flex flex-col gap-4 ring-1 ring-white/5">
             <div>
-              <label className="block text-sm text-neutral-300 mb-2">M3U URL</label>
+              <label className="block text-sm text-neutral-300 mb-2">{t('settings.m3uUrl')}</label>
               <input
                 type="url"
                 value={urlInput}
@@ -358,14 +386,14 @@ export function SettingsPage() {
                 placeholder="http://provider.com/get.php?username=…&password=…&type=m3u_plus"
                 className="w-full bg-white/5 border border-white/8 rounded-lg min-h-11 px-3 py-2.5 text-base can-hover:text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-accent-600/60 transition-colors font-mono"
               />
-              <p className="text-xs text-neutral-600 mt-1.5">Keep this URL private — it contains your credentials.</p>
+              <p className="text-xs text-neutral-600 mt-1.5">{t('settings.m3uPrivate')}</p>
             </div>
             <button
               onClick={handleSave}
               className="flex items-center gap-2 min-h-11 px-4 py-2.5 rounded-lg bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors w-fit"
             >
               {saved ? <Check size={15} /> : null}
-              {saved ? 'Saved' : 'Save URL'}
+              {saved ? t('common.saved') : t('settings.saveUrl')}
             </button>
             {saveError && (
               <div className="flex items-start gap-2 text-sm text-red-400 bg-red-500/10 rounded-lg p-3">
@@ -379,40 +407,40 @@ export function SettingsPage() {
 
       {/* Cached Playlist — admin + parent */}
       <section className="mb-8">
-        <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-4">Cached Playlist</h2>
+        <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-4">{t('settings.cachedPlaylist')}</h2>
         <div className="bg-[#141414] rounded-xl p-5 flex flex-col gap-5 ring-1 ring-white/5">
           {meta ? (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {[
-                { label: 'Total', value: meta.entryCount },
-                { label: 'Movies', value: meta.movieCount ?? 0 },
-                { label: 'TV Episodes', value: meta.seriesCount ?? 0 },
-                { label: 'Live Channels', value: meta.liveCount ?? 0 },
-              ].map(({ label, value }) => (
+              {([
+                { label: 'settings.statTotal',    value: meta.entryCount },
+                { label: 'settings.statMovies',   value: meta.movieCount ?? 0 },
+                { label: 'settings.statEpisodes', value: meta.seriesCount ?? 0 },
+                { label: 'settings.statLive',     value: meta.liveCount ?? 0 },
+              ] as const).map(({ label, value }) => (
                 <div key={label}>
-                  <p className="text-xs text-neutral-500 mb-1">{label}</p>
-                  <p className="text-white font-semibold">{value.toLocaleString()}</p>
+                  <p className="text-xs text-neutral-500 mb-1">{t(label)}</p>
+                  <p className="text-white font-semibold">{formatNumber(value)}</p>
                 </div>
               ))}
               <div className="col-span-2">
-                <p className="text-xs text-neutral-500 mb-1">Last updated</p>
-                <p className="text-white text-sm font-medium">{formatDate(meta.fetchedAt)}</p>
+                <p className="text-xs text-neutral-500 mb-1">{t('settings.lastUpdated')}</p>
+                <p className="text-white text-sm font-medium">{formatDateTime(meta.fetchedAt)}</p>
               </div>
               {isAdmin && (
                 <div className="col-span-2">
-                  <p className="text-xs text-neutral-500 mb-1">Source</p>
+                  <p className="text-xs text-neutral-500 mb-1">{t('settings.source')}</p>
                   <p className="text-neutral-400 text-xs font-mono truncate">{meta.url.slice(0, 50)}…</p>
                 </div>
               )}
             </div>
           ) : (
-            <p className="text-neutral-500 text-sm">No playlist cached yet.</p>
+            <p className="text-neutral-500 text-sm">{t('settings.noPlaylist')}</p>
           )}
 
           {fetching && (
             <div className="flex flex-col gap-3 p-4 bg-white/3 rounded-lg border border-white/5">
-              <ProgressBar label="Downloading" icon={<Download size={12} />} pct={dlPct} indeterminate={dlIndeterminate} detail={progress ? formatBytes(progress.dlBytes) : undefined} />
-              <ProgressBar label="Saving to device" icon={<Database size={12} />} pct={savePct} indeterminate={false} />
+              <ProgressBar label={t('settings.downloading')} icon={<Download size={12} />} pct={dlPct} indeterminate={dlIndeterminate} detail={progress ? formatBytes(progress.dlBytes) : undefined} />
+              <ProgressBar label={t('settings.savingToDevice')} icon={<Database size={12} />} pct={savePct} indeterminate={false} />
             </div>
           )}
 
@@ -439,7 +467,7 @@ export function SettingsPage() {
                 className="flex items-center gap-2 min-h-11 px-4 py-2.5 rounded-lg bg-white/5 hover:bg-red-500/20 hover:text-red-400 text-neutral-400 text-sm font-medium transition-colors"
               >
                 <Trash2 size={14} />
-                Clear cache
+                {t('settings.clearCache')}
               </button>
             )}
           </div>
@@ -453,12 +481,12 @@ export function SettingsPage() {
       <section className="mb-8">
         <div className="flex items-center gap-2.5 mb-4">
           <ImageOff size={16} className="text-neutral-400" />
-          <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider">Metadata (TMDB)</h2>
+          <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider">{t('settings.metadata')}</h2>
         </div>
         <div className="bg-white/[0.03] rounded-xl p-4 ring-1 ring-white/8 flex items-center justify-between gap-4">
           <div className="text-sm text-neutral-400 leading-relaxed">
-            <p>Posters and metadata are cached locally from TMDB.</p>
-            <p className="text-neutral-600 text-xs mt-0.5">Failed lookups are skipped for 24 hours. Use this to retry them immediately.</p>
+            <p>{t('settings.tmdbBody')}</p>
+            <p className="text-neutral-600 text-xs mt-0.5">{t('settings.tmdbHint')}</p>
           </div>
           <button
             onClick={handleClearTmdb}
@@ -466,7 +494,7 @@ export function SettingsPage() {
             className="flex items-center gap-2 min-h-11 px-4 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-400 text-sm font-medium transition-colors shrink-0 disabled:opacity-40"
           >
             <RefreshCw size={14} className={clearingTmdb ? 'animate-spin' : ''} />
-            {tmdbCleared !== null ? `Cleared ${tmdbCleared}` : 'Retry failed'}
+            {tmdbCleared !== null ? t('settings.tmdbCleared', { count: tmdbCleared }) : t('settings.tmdbRetry')}
           </button>
         </div>
       </section>
@@ -475,12 +503,12 @@ export function SettingsPage() {
       <section className="mb-8">
         <div className="flex items-center gap-2.5 mb-4">
           <Play size={16} className="text-neutral-400" />
-          <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider">Playback</h2>
+          <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider">{t('settings.playback')}</h2>
         </div>
         <div className="bg-white/[0.03] rounded-xl p-4 ring-1 ring-white/8 flex flex-col gap-5">
           {/* Profile selector */}
           <div>
-            <p className="text-xs text-neutral-500 mb-2.5">Profile</p>
+            <p className="text-xs text-neutral-500 mb-2.5">{t('settings.profile')}</p>
             <div className="flex gap-2 flex-wrap">
               {PROFILES.map((p) => (
                 <button
@@ -503,8 +531,8 @@ export function SettingsPage() {
           {/* Autoplay next episode */}
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0">
-              <p className="text-sm text-white">Autoplay next episode</p>
-              <p className="text-xs text-neutral-600 mt-0.5">Automatically plays the next episode when one ends</p>
+              <p className="text-sm text-white">{t('settings.autoplayNext')}</p>
+              <p className="text-xs text-neutral-600 mt-0.5">{t('settings.autoplayNextHint')}</p>
             </div>
             <button
               onClick={() => setPlaybackPrefs(selectedPlaybackProfile, { autoplayNextEpisode: !playbackPrefs.autoplayNextEpisode })}
@@ -519,43 +547,31 @@ export function SettingsPage() {
           {/* Language selects — side by side on wider screens */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm text-white mb-1">Default audio language</label>
-              <p className="text-xs text-neutral-600 mb-2">Auto-selects this audio track on playback</p>
+              <label className="block text-sm text-white mb-1">{t('settings.defaultAudio')}</label>
+              <p className="text-xs text-neutral-600 mb-2">{t('settings.defaultAudioHint')}</p>
               <select
                 value={playbackPrefs.preferredAudioLang}
                 onChange={(e) => setPlaybackPrefs(selectedPlaybackProfile, { preferredAudioLang: e.target.value })}
                 className="w-full bg-[#1e1e1e] border border-white/10 rounded-lg h-11 px-3 py-2 text-base can-hover:text-sm text-white focus:outline-none focus:border-accent-500/60 transition-colors"
               >
-                <option value="" className="bg-[#1e1e1e]">Off — manual selection</option>
-                <option value="sv" className="bg-[#1e1e1e]">Swedish (sv)</option>
-                <option value="en" className="bg-[#1e1e1e]">English (en)</option>
-                <option value="no" className="bg-[#1e1e1e]">Norwegian (no)</option>
-                <option value="da" className="bg-[#1e1e1e]">Danish (da)</option>
-                <option value="fi" className="bg-[#1e1e1e]">Finnish (fi)</option>
-                <option value="de" className="bg-[#1e1e1e]">German (de)</option>
-                <option value="fr" className="bg-[#1e1e1e]">French (fr)</option>
-                <option value="es" className="bg-[#1e1e1e]">Spanish (es)</option>
-                <option value="ar" className="bg-[#1e1e1e]">Arabic (ar)</option>
+                <option value="" className="bg-[#1e1e1e]">{t('settings.trackOff')}</option>
+                {TRACK_LANGS.map((code) => (
+                  <option key={code} value={code} className="bg-[#1e1e1e]">{t(`trackLang.${code}`)}</option>
+                ))}
               </select>
             </div>
             <div>
-              <label className="block text-sm text-white mb-1">Default subtitle language</label>
-              <p className="text-xs text-neutral-600 mb-2">Auto-selects this subtitle track on playback</p>
+              <label className="block text-sm text-white mb-1">{t('settings.defaultSubtitle')}</label>
+              <p className="text-xs text-neutral-600 mb-2">{t('settings.defaultSubtitleHint')}</p>
               <select
                 value={playbackPrefs.preferredSubtitleLang}
                 onChange={(e) => setPlaybackPrefs(selectedPlaybackProfile, { preferredSubtitleLang: e.target.value })}
                 className="w-full bg-[#1e1e1e] border border-white/10 rounded-lg h-11 px-3 py-2 text-base can-hover:text-sm text-white focus:outline-none focus:border-accent-500/60 transition-colors"
               >
-                <option value="" className="bg-[#1e1e1e]">Off — manual selection</option>
-                <option value="sv" className="bg-[#1e1e1e]">Swedish (sv)</option>
-                <option value="en" className="bg-[#1e1e1e]">English (en)</option>
-                <option value="no" className="bg-[#1e1e1e]">Norwegian (no)</option>
-                <option value="da" className="bg-[#1e1e1e]">Danish (da)</option>
-                <option value="fi" className="bg-[#1e1e1e]">Finnish (fi)</option>
-                <option value="de" className="bg-[#1e1e1e]">German (de)</option>
-                <option value="fr" className="bg-[#1e1e1e]">French (fr)</option>
-                <option value="es" className="bg-[#1e1e1e]">Spanish (es)</option>
-                <option value="ar" className="bg-[#1e1e1e]">Arabic (ar)</option>
+                <option value="" className="bg-[#1e1e1e]">{t('settings.trackOff')}</option>
+                {TRACK_LANGS.map((code) => (
+                  <option key={code} value={code} className="bg-[#1e1e1e]">{t(`trackLang.${code}`)}</option>
+                ))}
               </select>
             </div>
           </div>
@@ -565,15 +581,38 @@ export function SettingsPage() {
       {/* VLC handover */}
       <VlcHandlerSection />
 
+      {/* Feedback. The page itself is open to every profile — this is only the
+          way in for whoever is already standing in Settings. */}
+      <section className="mb-8">
+        <div className="flex items-center gap-2.5 mb-4">
+          <MessageSquarePlus size={16} className="text-neutral-400" />
+          <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider">
+            {t('feedback.title')}
+          </h2>
+        </div>
+        <Link
+          to="/feedback"
+          className="bg-white/[0.03] rounded-xl p-4 ring-1 ring-white/8 flex items-center justify-between gap-4 hover:bg-white/[0.06] transition-colors"
+        >
+          <div className="text-sm text-neutral-400 leading-relaxed min-w-0">
+            <p>{t('feedback.settingsBody')}</p>
+            <p className="text-neutral-600 text-xs mt-0.5">{t('feedback.hint')}</p>
+          </div>
+          <span className="text-sm font-medium text-accent-400 shrink-0">
+            {t('feedback.settingsLink')} →
+          </span>
+        </Link>
+      </section>
+
       {/* Hidden Groups — admin + parent */}
       {channels.length > 0 && (
         <section className="mb-8">
-          <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-4">Hidden Groups</h2>
-          <p className="text-xs text-neutral-600 mb-4">Groups you hide won't appear anywhere in the app — not in lists, search, or the home screen.</p>
+          <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider mb-4">{t('settings.hiddenGroups')}</h2>
+          <p className="text-xs text-neutral-600 mb-4">{t('settings.hiddenGroupsHint')}</p>
           <div className="flex flex-col gap-3">
-            <GroupFilterPanel label="Movies"   type="movie"  groups={movieGroups}  excluded={excluded.movie}  toggle={toggle} setAll={setAll} cleanTitle={(t) => t.replace(/^VOD:\s*/i, '')} />
-            <GroupFilterPanel label="TV Shows" type="series" groups={seriesGroups} excluded={excluded.series} toggle={toggle} setAll={setAll} cleanTitle={(t) => t.replace(/^Series:\s*/i, '')} />
-            <GroupFilterPanel label="Live TV"  type="live"   groups={liveGroups}   excluded={excluded.live}   toggle={toggle} setAll={setAll} />
+            <GroupFilterPanel label="common.movies"  type="movie"  groups={movieGroups}  excluded={excluded.movie}  toggle={toggle} setAll={setAll} cleanTitle={(g) => g.replace(/^VOD:\s*/i, '')} />
+            <GroupFilterPanel label="common.tvShows" type="series" groups={seriesGroups} excluded={excluded.series} toggle={toggle} setAll={setAll} cleanTitle={(g) => g.replace(/^Series:\s*/i, '')} />
+            <GroupFilterPanel label="common.liveTv"  type="live"   groups={liveGroups}   excluded={excluded.live}   toggle={toggle} setAll={setAll} />
           </div>
         </section>
       )}
@@ -583,9 +622,9 @@ export function SettingsPage() {
         <section>
           <div className="flex items-center gap-2.5 mb-4">
             <Users size={16} className="text-neutral-400" />
-            <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider">Parental Controls</h2>
+            <h2 className="text-sm font-semibold text-neutral-400 uppercase tracking-wider">{t('settings.parentalControls')}</h2>
           </div>
-          <p className="text-xs text-neutral-600 mb-4">Hidden groups apply on top of your global settings for each kid's profile.</p>
+          <p className="text-xs text-neutral-600 mb-4">{t('settings.parentalHint')}</p>
 
           {/* Kid selector */}
           <div className="flex gap-2 mb-5">

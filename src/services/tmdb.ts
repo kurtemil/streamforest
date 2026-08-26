@@ -1,6 +1,7 @@
 import type { TmdbMeta, TmdbCastMember, TmdbSimilarItem } from '@/types'
 import { saveTmdbMeta } from './db'
 import { tmdbCacheGet, tmdbCachePut } from '@/lib/transcode'
+import { DEFAULT_LOCALE, TMDB_TAGS, type Locale } from '@/lib/i18n/locales'
 
 const BASE = 'https://api.themoviedb.org/3'
 const IMG  = 'https://image.tmdb.org/t/p'
@@ -29,10 +30,14 @@ export function profileUrl(path: string | null, width: 45 | 92 | 185 | 'original
 
 // ── API fetch ──────────────────────────────────────────────────────────────────
 
-async function tmdbFetch<T>(path: string, params: Record<string, string> = {}): Promise<T | null> {
+async function tmdbFetch<T>(
+  path: string,
+  locale: Locale,
+  params: Record<string, string> = {},
+): Promise<T | null> {
   if (!BEARER) return null
   const url = new URL(`${BASE}${path}`)
-  url.searchParams.set('language', 'en-US')
+  url.searchParams.set('language', TMDB_TAGS[locale])
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v)
 
   try {
@@ -150,6 +155,58 @@ function pickBlurhash(images: TmdbImage[] | undefined, primaryPath: string | nul
   return images[0]?.blur_hash ?? null
 }
 
+// ── Language ───────────────────────────────────────────────────────────────────
+
+/**
+ * Where one title's metadata is stored, for one language.
+ *
+ * A row holds a synopsis and a list of genres in one language, so a cache keyed
+ * by title alone would hand the Swedish interface the English text it fetched
+ * yesterday and never correct itself — the entries are good for 90 days.
+ *
+ * English keeps the bare id rather than an `@en` suffix, and that is not
+ * cosmetic: it is the key every row already written uses, and the key the
+ * shared cache on the transcode server is keyed by. Suffixing it would throw
+ * away a library's worth of enrichment to gain nothing.
+ */
+export function tmdbCacheKey(id: string, locale: Locale): string {
+  return locale === DEFAULT_LOCALE ? id : `${id}@${locale}`
+}
+
+interface TmdbTranslation {
+  iso_639_1: string
+  data?: { title?: string; name?: string; overview?: string }
+}
+interface TmdbTranslations { translations?: TmdbTranslation[] }
+
+/**
+ * TMDB does not fall back for text. Ask it for Swedish and a title nobody has
+ * translated comes back with `overview: ''` — not the English synopsis, nothing
+ * at all, which is how a detail sheet ends up blank below the poster.
+ *
+ * So a non-English request appends `translations` and this fills the gaps from
+ * the English entry. It is one request rather than two, which is what matters
+ * on a phone; the cost is a fatter response, since TMDB will not let you ask
+ * for only the translation you want.
+ */
+function withEnglishFallback<T extends { overview?: string }>(
+  detail: T & TmdbTranslations,
+  localized: { title: string; overview: string },
+): { title: string; overview: string } {
+  if (localized.title && localized.overview) return localized
+  const english = detail.translations?.find((tr) => tr.iso_639_1 === 'en')?.data
+  return {
+    title: localized.title || english?.title || english?.name || '',
+    overview: localized.overview || english?.overview || '',
+  }
+}
+
+/** What `append_to_response` asks for — `translations` only when it is needed. */
+function appendFor(locale: Locale): string {
+  const base = 'credits,similar,images'
+  return locale === DEFAULT_LOCALE ? base : `${base},translations`
+}
+
 // ── Server cache helpers ───────────────────────────────────────────────────────
 
 async function getFromServerCache(id: string): Promise<TmdbMeta | null> {
@@ -167,8 +224,14 @@ function saveToServerCache(meta: TmdbMeta): void {
 // ── Public enrichment functions ────────────────────────────────────────────────
 
 /** Fetch + cache TMDB metadata for a movie. Returns null if not found. */
-export async function enrichMovie(cacheId: string, title: string, year: number | null): Promise<TmdbMeta | null> {
-  const serverHit = await getFromServerCache(cacheId)
+export async function enrichMovie(
+  cacheId: string,
+  title: string,
+  year: number | null,
+  locale: Locale,
+): Promise<TmdbMeta | null> {
+  const storageId = tmdbCacheKey(cacheId, locale)
+  const serverHit = await getFromServerCache(storageId)
   if (serverHit) {
     await saveTmdbMeta(serverHit)
     return serverHit
@@ -176,7 +239,7 @@ export async function enrichMovie(cacheId: string, title: string, year: number |
 
   const query = normalizeForSearch(title)
 
-  const searchData = await tmdbFetch<TmdbSearchResponse>('/search/movie', {
+  const searchData = await tmdbFetch<TmdbSearchResponse>('/search/movie', locale, {
     query,
     ...(year ? { year: String(year) } : {}),
   })
@@ -184,11 +247,11 @@ export async function enrichMovie(cacheId: string, title: string, year: number |
   if (!searchData?.results?.length) {
     // Try again without year constraint if year was provided
     const fallback = year
-      ? await tmdbFetch<TmdbSearchResponse>('/search/movie', { query })
+      ? await tmdbFetch<TmdbSearchResponse>('/search/movie', locale, { query })
       : null
 
     if (!fallback?.results?.length) {
-      await saveTmdbMeta({ id: cacheId, contentType: 'movie', tmdbId: 0, title: query, overview: '', posterPath: null, backdropPath: null, year, rating: 0, ratingCount: 0, genres: [], runtime: null, cast: [], director: null, similar: [], cachedAt: Date.now(), notFound: true })
+      await saveTmdbMeta({ id: storageId, contentType: 'movie', tmdbId: 0, title: query, overview: '', posterPath: null, backdropPath: null, year, rating: 0, ratingCount: 0, genres: [], runtime: null, cast: [], director: null, similar: [], cachedAt: Date.now(), notFound: true })
       return null
     }
     searchData!.results = fallback!.results
@@ -207,12 +270,16 @@ export async function enrichMovie(cacheId: string, title: string, year: number |
     .sort((a, b) => b.score - a.score)[0]
 
   if (!best || best.score < 10) {
-    await saveTmdbMeta({ id: cacheId, contentType: 'movie', tmdbId: 0, title: query, overview: '', posterPath: null, backdropPath: null, year, rating: 0, ratingCount: 0, genres: [], runtime: null, cast: [], director: null, similar: [], cachedAt: Date.now(), notFound: true })
+    await saveTmdbMeta({ id: storageId, contentType: 'movie', tmdbId: 0, title: query, overview: '', posterPath: null, backdropPath: null, year, rating: 0, ratingCount: 0, genres: [], runtime: null, cast: [], director: null, similar: [], cachedAt: Date.now(), notFound: true })
     return null
   }
 
-  const detail = await tmdbFetch<TmdbMovieDetail>(`/movie/${best.r.id}`, { append_to_response: 'credits,similar,images' })
+  const detail = await tmdbFetch<TmdbMovieDetail & TmdbTranslations>(`/movie/${best.r.id}`, locale, {
+    append_to_response: appendFor(locale),
+  })
   if (!detail) return null
+
+  const text = withEnglishFallback(detail, { title: detail.title, overview: detail.overview })
 
   const cast: TmdbCastMember[] = (detail.credits?.cast ?? [])
     .sort((a, b) => a.order - b.order)
@@ -229,11 +296,11 @@ export async function enrichMovie(cacheId: string, title: string, year: number |
   }))
 
   const meta: TmdbMeta = {
-    id: cacheId,
+    id: storageId,
     contentType: 'movie',
     tmdbId: detail.id,
-    title: detail.title,
-    overview: detail.overview,
+    title: text.title,
+    overview: text.overview,
     posterPath: detail.poster_path,
     backdropPath: detail.backdrop_path,
     blurhashPoster: pickBlurhash(detail.images?.posters, detail.poster_path),
@@ -255,8 +322,13 @@ export async function enrichMovie(cacheId: string, title: string, year: number |
 }
 
 /** Fetch + cache TMDB metadata for a TV show. Returns null if not found. */
-export async function enrichTV(cacheId: string, showName: string): Promise<TmdbMeta | null> {
-  const serverHit = await getFromServerCache(cacheId)
+export async function enrichTV(
+  cacheId: string,
+  showName: string,
+  locale: Locale,
+): Promise<TmdbMeta | null> {
+  const storageId = tmdbCacheKey(cacheId, locale)
+  const serverHit = await getFromServerCache(storageId)
   if (serverHit) {
     await saveTmdbMeta(serverHit)
     return serverHit
@@ -264,9 +336,9 @@ export async function enrichTV(cacheId: string, showName: string): Promise<TmdbM
 
   const query = normalizeForSearch(showName)
 
-  const searchData = await tmdbFetch<TmdbSearchResponse>('/search/tv', { query })
+  const searchData = await tmdbFetch<TmdbSearchResponse>('/search/tv', locale, { query })
   if (!searchData?.results?.length) {
-    await saveTmdbMeta({ id: cacheId, contentType: 'tv', tmdbId: 0, title: query, overview: '', posterPath: null, backdropPath: null, year: null, rating: 0, ratingCount: 0, genres: [], runtime: null, cast: [], director: null, similar: [], cachedAt: Date.now(), notFound: true })
+    await saveTmdbMeta({ id: storageId, contentType: 'tv', tmdbId: 0, title: query, overview: '', posterPath: null, backdropPath: null, year: null, rating: 0, ratingCount: 0, genres: [], runtime: null, cast: [], director: null, similar: [], cachedAt: Date.now(), notFound: true })
     return null
   }
 
@@ -281,12 +353,16 @@ export async function enrichTV(cacheId: string, showName: string): Promise<TmdbM
     .sort((a, b) => b.score - a.score)[0]
 
   if (!best || best.score < 10) {
-    await saveTmdbMeta({ id: cacheId, contentType: 'tv', tmdbId: 0, title: query, overview: '', posterPath: null, backdropPath: null, year: null, rating: 0, ratingCount: 0, genres: [], runtime: null, cast: [], director: null, similar: [], cachedAt: Date.now(), notFound: true })
+    await saveTmdbMeta({ id: storageId, contentType: 'tv', tmdbId: 0, title: query, overview: '', posterPath: null, backdropPath: null, year: null, rating: 0, ratingCount: 0, genres: [], runtime: null, cast: [], director: null, similar: [], cachedAt: Date.now(), notFound: true })
     return null
   }
 
-  const detail = await tmdbFetch<TmdbTVDetail>(`/tv/${best.r.id}`, { append_to_response: 'credits,similar,images' })
+  const detail = await tmdbFetch<TmdbTVDetail & TmdbTranslations>(`/tv/${best.r.id}`, locale, {
+    append_to_response: appendFor(locale),
+  })
   if (!detail) return null
+
+  const text = withEnglishFallback(detail, { title: detail.name, overview: detail.overview })
 
   const cast: TmdbCastMember[] = (detail.credits?.cast ?? [])
     .sort((a, b) => a.order - b.order)
@@ -301,11 +377,11 @@ export async function enrichTV(cacheId: string, showName: string): Promise<TmdbM
   }))
 
   const meta: TmdbMeta = {
-    id: cacheId,
+    id: storageId,
     contentType: 'tv',
     tmdbId: detail.id,
-    title: detail.name,
-    overview: detail.overview,
+    title: text.title,
+    overview: text.overview,
     posterPath: detail.poster_path,
     backdropPath: detail.backdrop_path,
     blurhashPoster: pickBlurhash(detail.images?.posters, detail.poster_path),

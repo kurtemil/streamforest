@@ -14,58 +14,48 @@
 import { useState } from 'react'
 import { Check, ChevronDown, Copy, Loader2, MonitorPlay } from 'lucide-react'
 import { probeVlcHandler, vlcHandler, vlcPlatform } from '@/lib/vlc'
+import { useT, type MessageKey } from '@/lib/i18n'
 
 type Desktop = 'macos' | 'windows'
 
 const INSTALLERS: Record<Desktop, {
+  /** An OS name, not a word — the same in both languages, so not a key. */
   label: string
-  terminal: string
+  terminal: MessageKey
   command: (origin: string) => string
   uninstall: string
 }> = {
   macos: {
     label: 'macOS',
-    terminal: 'Terminal (⌘-space → "Terminal")',
+    terminal: 'vlc.terminalMac',
     command: (origin) => `curl -fsSL ${origin}/vlc-handler.sh | bash`,
     uninstall: 'rm -rf "$HOME/Applications/VLC URL Handler.app"',
   },
   windows: {
     label: 'Windows',
-    terminal: 'PowerShell (Win+X → "Terminal")',
+    terminal: 'vlc.terminalWindows',
     command: (origin) => `irm ${origin}/vlc-handler.ps1 | iex`,
     uninstall: 'reg delete "HKCU\\Software\\Classes\\vlc" /f',
   },
 }
 
 // Where each browser hides "stop asking me about this file type". They all have
-// it; no two of them call it the same thing or keep it in the same place.
-function autoOpenHint(): { browser: string; steps: string } {
+// it; no two of them call it the same thing or keep it in the same place — and
+// none of them call it the same thing in two languages either, so the steps are
+// a key and the browser's own name is not.
+function autoOpenHint(): { browser: string | null; steps: MessageKey } {
   const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent
-  if (/Edg\//.test(ua)) return {
-    browser: 'Edge',
-    steps: 'Open the downloads flyout, hover the .m3u, then ⋯ → "Always open files of this type".',
-  }
-  if (/Firefox\//.test(ua)) return {
-    browser: 'Firefox',
-    steps: 'Settings → General → Files and Applications → find "M3U" and set it to "Use VLC".',
-  }
-  if (/Chrome\//.test(ua)) return {
-    browser: 'Chrome',
-    steps: 'After the first download, click the ⌄ next to the .m3u in the downloads bubble → "Always open files of this type".',
-  }
-  if (/Safari\//.test(ua)) return {
-    browser: 'Safari',
-    steps: 'Safari → Settings → General → tick "Open “safe” files after downloading".',
-  }
-  return {
-    browser: 'your browser',
-    steps: 'Look for "always open files of this type" in its downloads menu.',
-  }
+  if (/Edg\//.test(ua))     return { browser: 'Edge',    steps: 'vlc.stepsEdge' }
+  if (/Firefox\//.test(ua)) return { browser: 'Firefox', steps: 'vlc.stepsFirefox' }
+  if (/Chrome\//.test(ua))  return { browser: 'Chrome',  steps: 'vlc.stepsChrome' }
+  if (/Safari\//.test(ua))  return { browser: 'Safari',  steps: 'vlc.stepsSafari' }
+  return { browser: null, steps: 'vlc.stepsFallback' }
 }
 
 type TestState = 'idle' | 'testing' | 'ok' | 'missing'
 
 export function VlcHandlerSection() {
+  const t = useT()
   const platform = vlcPlatform()
   const [os, setOs] = useState<Desktop>(platform === 'windows' ? 'windows' : 'macos')
   const [copied, setCopied] = useState(false)
@@ -105,23 +95,23 @@ export function VlcHandlerSection() {
 
       <div className="bg-white/[0.03] rounded-xl p-4 ring-1 ring-white/8 flex flex-col gap-4">
         <div className="text-sm text-neutral-400 leading-relaxed">
-          <p>The VLC buttons hand playback to VLC — a season from a show's header, a single episode from its row.</p>
+          <p>{t('vlc.intro')}</p>
           <p className="text-neutral-600 text-xs mt-0.5">
             {isMobile
-              ? 'Nothing to set up on this device: the VLC app registers its own link scheme. Just have it installed.'
+              ? t('vlc.mobileHint')
               : handlerWorks
-              ? 'This computer opens VLC directly — nothing to set up here.'
-              : 'On this computer the button downloads the playlist and VLC opens it. Two clicks, unless you make the second one automatic:'}
+              ? t('vlc.worksHint')
+              : t('vlc.downloadHint')}
           </p>
         </div>
 
         {!isMobile && !handlerWorks && (
           <div className="rounded-lg bg-black/25 ring-1 ring-white/8 px-4 py-3">
-            <p className="text-sm text-white font-medium mb-1">Let {hint.browser} open it for you</p>
-            <p className="text-sm text-neutral-400 leading-relaxed">{hint.steps}</p>
-            <p className="text-xs text-neutral-600 mt-1.5">
-              Once, and every VLC button after that goes straight into VLC. No install, no terminal.
+            <p className="text-sm text-white font-medium mb-1">
+              {t('vlc.autoOpenTitle', { browser: hint.browser ?? t('vlc.browserFallback') })}
             </p>
+            <p className="text-sm text-neutral-400 leading-relaxed">{t(hint.steps)}</p>
+            <p className="text-xs text-neutral-600 mt-1.5">{t('vlc.autoOpenFooter')}</p>
           </div>
         )}
 
@@ -129,17 +119,17 @@ export function VlcHandlerSection() {
           <div className="border-t border-white/5 pt-4 flex flex-col gap-4">
             <div className="flex items-center justify-between gap-4">
               <div className="text-xs text-neutral-500 leading-relaxed min-w-0">
-                {test === 'ok' && <p className="text-accent-400">VLC answered — this computer opens VLC directly.</p>}
-                {test === 'missing' && <p className="text-warn-500">VLC did not open. The downloads route above is the one to use.</p>}
-                {test === 'testing' && <p>Waiting for VLC…</p>}
+                {test === 'ok' && <p className="text-accent-400">{t('vlc.testOk')}</p>}
+                {test === 'missing' && <p className="text-warn-500">{t('vlc.testMissing')}</p>}
+                {test === 'testing' && <p>{t('vlc.testWaiting')}</p>}
                 {test === 'idle' && (
                   <p>
-                    {known === 'installed' ? 'Last checked: VLC opens directly.'
-                      : known === 'missing' ? 'Last checked: no handler, so buttons download the playlist.'
-                      : 'Never checked on this computer.'}
+                    {known === 'installed' ? t('vlc.knownInstalled')
+                      : known === 'missing' ? t('vlc.knownMissing')
+                      : t('vlc.knownUnknown')}
                   </p>
                 )}
-                <p className="text-neutral-600 mt-0.5">Opens VLC on an empty test playlist — it plays nothing.</p>
+                <p className="text-neutral-600 mt-0.5">{t('vlc.testNote')}</p>
               </div>
               <button
                 onClick={runTest}
@@ -147,7 +137,7 @@ export function VlcHandlerSection() {
                 className="flex items-center gap-2 min-h-11 px-4 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-400 text-sm font-medium transition-colors shrink-0 disabled:opacity-40"
               >
                 {test === 'testing' ? <Loader2 size={14} className="animate-spin" /> : <MonitorPlay size={14} />}
-                Test
+                {t('vlc.test')}
               </button>
             </div>
 
@@ -157,14 +147,13 @@ export function VlcHandlerSection() {
                 className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-neutral-300 transition-colors"
               >
                 <ChevronDown size={13} className={`transition-transform ${showInstaller ? 'rotate-180' : ''}`} />
-                Skip the download entirely (one pasted command)
+                {t('vlc.installerToggle')}
               </button>
 
               {showInstaller && (
                 <div className="mt-3 flex flex-col gap-3">
                   <p className="text-xs text-neutral-500 leading-relaxed">
-                    Registers a <code className="font-mono">vlc://</code> handler on this computer, so the buttons open VLC
-                    with nothing downloaded at all. A web page is not allowed to do this for you — on either OS.
+                    {t('vlc.installerBody', { scheme: 'vlc://' })}
                   </p>
                   <div className="flex gap-2">
                     {(Object.keys(INSTALLERS) as Desktop[]).map((key) => (
@@ -178,11 +167,11 @@ export function VlcHandlerSection() {
                         }`}
                       >
                         {INSTALLERS[key].label}
-                        {platform === key && <span className="text-neutral-500 font-normal"> · this one</span>}
+                        {platform === key && <span className="text-neutral-500 font-normal">{t('vlc.thisOne')}</span>}
                       </button>
                     ))}
                   </div>
-                  <p className="text-xs text-neutral-500">Paste into {installer.terminal}. Once per computer.</p>
+                  <p className="text-xs text-neutral-500">{t('vlc.pasteInto', { terminal: t(installer.terminal) })}</p>
                   <div className="flex items-center gap-2">
                     <code className="flex-1 min-w-0 overflow-x-auto whitespace-nowrap rounded-lg bg-black/40 ring-1 ring-white/8 px-3 py-2.5 text-xs text-neutral-300 font-mono">
                       {command}
@@ -192,12 +181,10 @@ export function VlcHandlerSection() {
                       className="flex items-center gap-2 min-h-11 px-4 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-400 text-sm font-medium transition-colors shrink-0"
                     >
                       {copied ? <Check size={14} className="text-accent-500" /> : <Copy size={14} />}
-                      {copied ? 'Copied' : 'Copy'}
+                      {copied ? t('vlc.copied') : t('vlc.copy')}
                     </button>
                   </div>
-                  <p className="text-xs text-neutral-600 truncate">
-                    Undo: <code className="font-mono">{installer.uninstall}</code>
-                  </p>
+                  <p className="text-xs text-neutral-600 truncate">{t('vlc.undo', { command: installer.uninstall })}</p>
                 </div>
               )}
             </div>

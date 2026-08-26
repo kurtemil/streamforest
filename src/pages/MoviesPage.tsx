@@ -24,11 +24,13 @@ import { ScrollableRow, SectionHeader } from '@/components/ui/MediaRow'
 import { ContinueCard } from '@/components/ui/ContinueCard'
 import { useTmdbEnrich } from '@/hooks/useTmdbEnrich'
 import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
+import { formatNumber, useT } from '@/lib/i18n'
 
 const ENRICH_LIMIT = 200
 const cleanGroup = (t: string) => t.replace(/^VOD:\s*/, '')
 
 export function MoviesPage() {
+  const t = useT()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { channels } = usePlaylistStore()
@@ -271,8 +273,8 @@ export function MoviesPage() {
       <div className="p-8">
         <EmptyState
           icon={<Film size={40} />}
-          title="No movies yet"
-          description="Download your playlist in Settings to see movies here."
+          title={t('movies.emptyTitle')}
+          description={t('movies.emptyBody')}
         />
       </div>
     )
@@ -287,7 +289,6 @@ export function MoviesPage() {
             groups={groups}
             selected={selectedGroup}
             onSelect={handleGroupSelect}
-            browseLabel="Browse"
             cleanTitle={cleanGroup}
           />
         </div>
@@ -298,22 +299,22 @@ export function MoviesPage() {
             <div className="px-4 sm:px-6 pb-12">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-5 pb-6">
                 <div>
-                  <h1 className="text-2xl font-bold text-white">Movies</h1>
+                  <h1 className="text-2xl font-bold text-white">{t('movies.title')}</h1>
                   <p className="text-neutral-500 text-sm mt-0.5">
-                    {movies.length.toLocaleString()} titles
+                    {t('movies.count', { count: movies.length })}
                   </p>
                 </div>
                 <div className="flex items-center gap-3">
                   <button
                     onClick={handleSurprise}
-                    title="Surprise me — pick a random movie"
+                    title={t('movies.surpriseTitle')}
                     className="flex items-center justify-center gap-1.5 min-h-11 min-w-11 px-3.5 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
                   >
                     <Shuffle size={13} />
-                    <span className="hidden sm:inline">Surprise me</span>
+                    <span className="hidden sm:inline">{t('common.surpriseMe')}</span>
                   </button>
                   <div className="w-full sm:w-52">
-                    <SearchBar value={search} onChange={setSearch} placeholder="Search movies…" />
+                    <SearchBar value={search} onChange={setSearch} placeholder={t('movies.searchPlaceholder')} />
                   </div>
                 </div>
               </div>
@@ -321,7 +322,7 @@ export function MoviesPage() {
               <div className="space-y-10">
                 {continueWatchingMovies.length > 0 && (
                   <section>
-                    <SectionHeader title="Continue Watching" />
+                    <SectionHeader title={t('common.continueWatching')} />
                     <ScrollableRow>
                       {continueWatchingMovies.map(({ channel, progress }) => (
                         <div key={channel.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
@@ -348,7 +349,7 @@ export function MoviesPage() {
 
                 {recentlyAdded.length > 0 && (
                 <section>
-                  <SectionHeader title="Recently Added" />
+                  <SectionHeader title={t('common.recentlyAdded')} />
                   <ScrollableRow>
                     {recentlyAdded.map((m) => (
                       <div key={m.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
@@ -414,7 +415,9 @@ export function MoviesPage() {
                 {recommendations && recommendations.items.length > 0 && (
                   <section>
                     <SectionHeader
-                      title={`Since you watched ${tmdbMap.get(recommendations.sourceKey)?.title ?? recommendations.title}`}
+                      title={t('movies.sinceYouWatched', {
+                        title: tmdbMap.get(recommendations.sourceKey)?.title ?? recommendations.title,
+                      })}
                     />
                     <ScrollableRow>
                       {recommendations.items.map((m) => (
@@ -440,22 +443,24 @@ export function MoviesPage() {
               <div className="px-4 sm:px-6 pt-5 pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
                 <div className="flex items-center justify-between sm:justify-start gap-3">
                   <h1 className="text-xl font-bold text-white truncate">
-                    {search.trim() ? `Results for "${search}"` : cleanGroup(selectedGroup ?? '')}
+                    {search.trim()
+                      ? t('common.resultsFor', { query: search })
+                      : cleanGroup(selectedGroup ?? '')}
                   </h1>
                   <p className="text-neutral-500 text-caption shrink-0">
-                    {filtered.length.toLocaleString()} titles
+                    {t('movies.count', { count: filtered.length })}
                   </p>
                   <button
                     onClick={handleSurprise}
-                    title="Surprise me — pick a random movie"
+                    title={t('movies.surpriseTitle')}
                     className="flex items-center justify-center gap-1.5 min-h-11 min-w-11 px-3.5 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
                   >
                     <Shuffle size={13} />
-                    <span className="hidden sm:inline">Surprise me</span>
+                    <span className="hidden sm:inline">{t('common.surpriseMe')}</span>
                   </button>
                 </div>
                 <div className="sm:w-52">
-                  <SearchBar value={search} onChange={setSearch} placeholder="Search movies…" />
+                  <SearchBar value={search} onChange={setSearch} placeholder={t('movies.searchPlaceholder')} />
                 </div>
               </div>
 
@@ -463,8 +468,8 @@ export function MoviesPage() {
                 <div className="flex items-center justify-center py-24">
                   <EmptyState
                     icon={<Film size={36} />}
-                    title="No results"
-                    description="Try a different search term."
+                    title={t('common.noResults')}
+                    description={t('common.tryAnotherSearch')}
                   />
                 </div>
               ) : (
@@ -485,8 +490,10 @@ export function MoviesPage() {
                   <div ref={sentinelRef} className="h-1" />
                   {count < filtered.length && (
                     <p className="text-center text-xs text-neutral-600 pb-8">
-                      Showing {Math.min(count, filtered.length).toLocaleString()} of{' '}
-                      {filtered.length.toLocaleString()}
+                      {t('common.showingOf', {
+                        shown: formatNumber(Math.min(count, filtered.length)),
+                        total: formatNumber(filtered.length),
+                      })}
                     </p>
                   )}
                 </>

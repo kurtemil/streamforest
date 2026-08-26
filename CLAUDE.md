@@ -14,9 +14,11 @@ Personal IPTV web player. React SPA on Cloudflare Pages; home transcode server o
     services/db.ts        Dexie (IndexedDB) schema + helpers
     stores/               Zustand stores (player, playlist, profile, etc.)
     pages/                Route-level pages
+    lib/i18n/             Swedish + English catalogs and the t()/useT() layer
   functions/              Cloudflare Pages Functions — file-based routing.
     proxy.ts              /proxy — host-allowlisted CORS bypass + KV cache read
     api/progress.ts       /api/progress — D1-backed cross-device watch state
+    api/feedback.ts       /api/feedback — the in-app suggestion box
     _worker.ts            DOES NOT RUN — see the note at the top of that file
   transcode-proxy/        Node.js HTTP proxy that drives ffmpeg (runs on HP ProDesk)
     server.mjs            THE server — only file that matters at runtime
@@ -296,6 +298,135 @@ registry writes and its embedded `.vbs` are carried over verbatim from the
 selected season; the per-episode button on each row sends that one episode. Both
 are wanted — the header one is "put this season on", the row one is "this episode
 misbehaves in the web player".
+
+---
+
+## Språkstöd: svenska och engelska
+
+Added 2026-08-26. The interface exists in both languages; the switch is per
+device and defaults to what the device asks for.
+
+`src/lib/i18n/` is the whole layer — hand-rolled, no dependency, because it is
+one lookup, one plural rule and a `{name}` replace:
+
+- `en.ts` is the catalog **and** the type. `sv.ts` ends in `satisfies Messages`,
+  so a forgotten key is a build error rather than an English word in the middle
+  of a Swedish screen.
+- Flat dotted keys, prefixed by the screen they belong to. `t('movies.emptyTitle')`
+  is greppable; a nested accessor is not.
+- Counted strings are `_one`/`_other` pairs, called without the suffix:
+  `t('movies.count', { count })`. Both languages split on `n === 1`; a language
+  with more forms replaces `pluralSuffix` with `Intl.PluralRules`, which is why
+  the suffixes are named after its categories.
+- **Never build a sentence from two translated fragments.** Word order is not
+  shared between languages — one key, with placeholders.
+
+### `useT()` in components, `t()` everywhere else
+
+`useT()` subscribes to the locale, so switching the language re-renders. `t()`
+reads the store without subscribing.
+
+The distinction is load-bearing in exactly one place: `VideoPlayer.tsx`. Its
+effects drive playback, and putting `t` in their dependency arrays would
+re-initialise a stream on a language switch. So the errors set from effects use
+the module-level `t` (as `tr` for the rendered strings), and a message already
+on screen keeps the language it was written in. That is the correct trade.
+
+### The switch is in two places, and both are needed
+
+`LanguageSwitch.tsx` sits in Settings **and** on the profile picker. Settings is
+parent-and-admin only, so a kid signed in on their own phone could not otherwise
+reach a setting that belongs to the device rather than to a role. Each language
+names itself — "Svenska", never "Swedish" — because the person who needs the
+switch is the one who cannot read the current language.
+
+### The locale is a cache key
+
+`tmdbCacheKey(id, locale)` in `services/tmdb.ts`. A TMDB row holds a synopsis and
+a genre list *in one language*, so a cache keyed by title alone hands the Swedish
+interface yesterday's English text and never corrects itself — the entries are
+good for 90 days.
+
+**English keeps the bare id, not an `@en` suffix.** That is the key every row
+already written uses and the key the shared cache on the transcode server is
+keyed by; suffixing it would throw away a library's worth of enrichment for
+nothing. Only `sv` (and any future language) gets a suffix.
+
+`useTmdbEnrich` clears its map and its in-flight set on a switch, and drops
+results that were started under the previous locale — without that, requests in
+flight across the switch put the old language back into a map that had just been
+cleared for the new one.
+
+**TMDB does not fall back for text.** Ask for Swedish and an untranslated title
+comes back with `overview: ''` — not the English synopsis, nothing at all. So a
+non-English request appends `translations` and `withEnglishFallback` fills the
+gaps. One request instead of two, at the cost of a fatter response; TMDB will not
+let you ask for only the translation you want.
+
+### What does not follow the switch
+
+- **The PWA manifest.** It is generated at build time and holds one set of
+  values, so its name, description and shortcuts stay English. A manifest cannot
+  be switched at runtime; do not try to make it.
+- **`index.html`'s `lang`.** The static attribute is a starting value —
+  `applyDocumentLang` sets the real one before first paint and on every switch.
+  `<html lang>` is what iOS reads for hyphenation and VoiceOver, so it has to
+  move.
+
+### Formatting goes through the layer, not through templates
+
+`formatNumber`, `formatDateTime`, `formatClock`, `formatRuntime` and
+`titleCollator` in `i18n/index.ts`. Two of these were bugs before they were
+features: `toLocaleString()` with no tag formats to whatever the *device* is set
+to, and `localeCompare` without one puts Ä between A and B on a Swedish phone and
+at the end of the alphabet on an English one — the same library sorting two ways
+depending on whose phone it was opened on.
+
+`src/lib/i18n/i18n.test.ts` guards what the type system cannot see: a Swedish
+string that lost its `{count}` compiles perfectly and renders a sentence with the
+number missing.
+
+---
+
+## Feedback: a suggestion box inside the app
+
+Added 2026-08-26, ported from `lagom`, and for the same reason it exists there:
+the moment you notice something wrong is the moment you are holding the phone,
+and anything that needs a laptop afterwards never gets written down.
+
+- `functions/api/feedback.ts` — GET (own, or `scope=all` for the inbox), POST,
+  PATCH (resolve), DELETE. It creates its own table on first use, like every
+  other Function here; there is no migrations directory in this repo.
+- `src/pages/FeedbackPage.tsx` at `/feedback`, and `services/feedback.ts`.
+
+**Two boxes, not one field with a dropdown.** "Report a fault" and "suggest
+something" ask for different sentences, and someone who has just hit a bug should
+not have to classify it before they can start typing. The kind is decided by
+which box you write in.
+
+**Everyone can write; only the admin reads the inbox.** That is why it is its own
+route rather than a section of Settings, which two of the four profiles cannot
+open. The desktop link is in the sidebar, the phone's is on the profile picker —
+the only screen a kid profile can always reach.
+
+**Resolved is a tick, never a delete.** Ticked-off reports fold away behind a
+count instead of disappearing, because "what did we already fix?" is a real
+question — just not the one the page is normally open for. Emil ticks these off
+himself; nothing else should write `resolved`.
+
+**The device line is shown, not just sent.** `describeDevice()` reuses
+`getClientContext()` from the playback diagnostics, so nothing new is collected,
+and the summary is printed under the form before you press send. Which phone and
+whether the app was launched from the home screen are the two questions almost
+every playback report in this app turns on — and quietly collecting telemetry
+from your own household is not the kind of app this is.
+
+No screenshots, unlike Lagom's version: that needs an R2 bucket, and this project
+has none.
+
+`/feedback` is in `AUDIT_PAGES` in `e2e/touch-audit.spec.ts`, because it is a
+page that gets used on a phone. `Button size="sm"` lands around 28 px, so every
+control on it carries an explicit `min-h-11`.
 
 ---
 

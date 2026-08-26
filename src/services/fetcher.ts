@@ -2,6 +2,7 @@ import { parseM3ULines } from './m3uParser'
 import { db, finishPlaylistSave, startPlaylistSave } from './db'
 import type { Channel } from '@/types'
 import type { WorkerRequest, WorkerResponse } from '@/workers/m3u.worker'
+import { t } from '@/lib/i18n'
 
 export type FetchProgress = {
   phase: 'downloading' | 'saving' | 'done' | 'error'
@@ -79,7 +80,7 @@ export async function fetchAndStorePlaylist(
         }
         reject(new Error(msg.message))
       }
-      worker.onerror = () => reject(new Error('Playlist worker failed to start'))
+      worker.onerror = () => reject(new Error(t('playlist.errWorker')))
 
       const req: WorkerRequest = { type: 'fetch', url: m3uUrl, proxyPath: PROXY_BASE }
       worker.postMessage(req)
@@ -98,9 +99,9 @@ async function fetchAndStorePlaylistInline(
   try {
     response = await fetch(proxyUrl(m3uUrl))
   } catch {
-    throw new Error('Network error — check your connection or M3U URL')
+    throw new Error(t('playlist.errNetwork'))
   }
-  if (!response.ok) throw new Error(`Server returned ${response.status}`)
+  if (!response.ok) throw new Error(t('playlist.errStatus', { status: response.status }))
 
   const dlTotal = parseInt(response.headers.get('content-length') ?? '0')
   const reader = response.body!.getReader()

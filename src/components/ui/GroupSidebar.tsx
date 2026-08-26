@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useT } from '@/lib/i18n'
 
 interface Group {
   title: string
@@ -27,10 +28,12 @@ export function GroupSidebar({
   groups,
   selected,
   onSelect,
-  browseLabel = 'Browse',
+  browseLabel,
   cleanTitle = defaultClean,
   prefixItem,
 }: Props) {
+  const t = useT()
+  const browse = browseLabel ?? t('common.browse')
   const pillBase = 'shrink-0 inline-flex items-center min-h-11 px-4 py-2.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap'
   const pillActive = 'bg-accent-600 text-white'
   const pillInactive = 'bg-white/8 text-neutral-400 hover:text-white active:bg-white/15'
@@ -51,7 +54,7 @@ export function GroupSidebar({
           onClick={() => onSelect(null)}
           className={`${pillBase} ${selected === null && !prefixItem?.active ? pillActive : pillInactive}`}
         >
-          {browseLabel}
+          {browse}
         </button>
         {groups.map((g) => (
           <button
@@ -89,7 +92,7 @@ export function GroupSidebar({
               : 'text-neutral-400 hover:text-white hover:bg-white/5'
           }`}
         >
-          {browseLabel}
+          {browse}
         </button>
         <div className="my-1 h-px bg-white/5" />
         {groups.map((g) => (

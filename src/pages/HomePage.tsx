@@ -16,8 +16,10 @@ import { ScrollableRow, SectionHeader } from '@/components/ui/MediaRow'
 import { ContinueCard } from '@/components/ui/ContinueCard'
 import type { Channel, WatchProgress, TmdbMeta } from '@/types'
 import { useTmdbEnrich } from '@/hooks/useTmdbEnrich'
+import { useT } from '@/lib/i18n'
 
 export function HomePage() {
+  const t = useT()
   const navigate = useNavigate()
   const { channels, loaded, m3uUrl } = usePlaylistStore()
   const { play } = usePlayerStore()
@@ -323,17 +325,15 @@ export function HomePage() {
           </svg>
         </div>
         <div className="text-center max-w-sm">
-          <h1 className="text-heading-xl text-white mb-2">Welcome to StreamForest</h1>
-          <p className="text-neutral-400 text-body leading-relaxed">
-            To get started, add your M3U playlist URL in Settings and download your channels.
-          </p>
+          <h1 className="text-heading-xl text-white mb-2">{t('home.welcomeTitle')}</h1>
+          <p className="text-neutral-400 text-body leading-relaxed">{t('home.welcomeBody')}</p>
         </div>
         <Link
           to="/settings"
           className="flex items-center gap-2 px-5 py-2.5 bg-accent-600 hover:bg-accent-500 rounded-lg text-white text-body font-medium transition-colors"
         >
           <Settings size={15} />
-          Open Settings
+          {t('home.openSettings')}
         </Link>
       </div>
     )
@@ -382,7 +382,7 @@ export function HomePage() {
         {/* Recently Added Movies */}
         {recentMovies.length > 0 && (
           <section>
-            <SectionHeader title="Recently Added Movies" to="/movies" />
+            <SectionHeader title={t('home.recentMovies')} to="/movies" />
             <ScrollableRow>
               {recentMovies.map((m) => (
                 <div key={m.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
@@ -406,7 +406,7 @@ export function HomePage() {
         {/* Recently Added TV Shows */}
         {recentShows.length > 0 && (
           <section>
-            <SectionHeader title="Recently Added TV Shows" to="/series" />
+            <SectionHeader title={t('home.recentShows')} to="/series" />
             <ScrollableRow>
               {recentShows.map((ch) => {
                 const showKey = normalizeShowKey(ch.showName ?? ch.name)
@@ -440,7 +440,7 @@ export function HomePage() {
         {/* Continue Watching — a row among the others, after the new arrivals */}
         {continueWatching.length > 0 && (
           <section>
-            <SectionHeader title="Continue Watching" />
+            <SectionHeader title={t('common.continueWatching')} />
             <ScrollableRow>
               {continueWatching.map(({ channel, progress }) => {
                 const tmdbKey =
@@ -480,7 +480,9 @@ export function HomePage() {
         {recommendations && recommendations.items.length > 0 && (
           <section>
             <SectionHeader
-              title={`Because you watched ${tmdbMap.get(recommendations.sourceKey)?.title ?? recommendations.title}`}
+              title={t('home.becauseYouWatched', {
+                title: tmdbMap.get(recommendations.sourceKey)?.title ?? recommendations.title,
+              })}
             />
             <ScrollableRow>
               {recommendations.items.map((ch) => {

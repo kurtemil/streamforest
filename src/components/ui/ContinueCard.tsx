@@ -2,6 +2,7 @@ import { Play, X } from 'lucide-react'
 import { Poster } from '@/ui'
 import { formatTime } from '@/lib/time'
 import { progressPercent } from '@/lib/progress'
+import { useT } from '@/lib/i18n'
 import type { Channel, WatchProgress, TmdbMeta } from '@/types'
 
 /* Card decorations carry no backdrop-filter, and that is deliberate. Measured on
@@ -26,6 +27,7 @@ export function ContinueCard({
   onClick: () => void
   onRemove: () => void
 }) {
+  const t = useT()
   const pct = progressPercent(progress.position, progress.duration)
   const subtitle =
     channel.type === 'series'
@@ -67,7 +69,7 @@ export function ContinueCard({
           </p>
           <p className="text-caption text-neutral-500 mt-0.5">
             {subtitle && `${subtitle} · `}
-            {formatTime(progress.position)} watched
+            {t('card.watched', { time: formatTime(progress.position) })}
           </p>
         </div>
       </button>
@@ -76,7 +78,7 @@ export function ContinueCard({
           e.stopPropagation()
           onRemove()
         }}
-        aria-label="Remove from Continue Watching"
+        aria-label={t('card.removeContinue')}
         className="absolute top-2 left-2 w-7 h-7 rounded-full after:absolute after:content-[''] after:-inset-2 bg-black/70 hover:bg-danger-600/90 flex items-center justify-center text-white opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-all ring-1 ring-white/20"
       >
         <X size={14} />

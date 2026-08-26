@@ -1,4 +1,5 @@
 import { Search, X } from 'lucide-react'
+import { useT } from '@/lib/i18n'
 
 interface Props {
   value: string
@@ -6,7 +7,8 @@ interface Props {
   placeholder?: string
 }
 
-export function SearchBar({ value, onChange, placeholder = 'Search…' }: Props) {
+export function SearchBar({ value, onChange, placeholder }: Props) {
+  const t = useT()
   return (
     <div className="relative">
       <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
@@ -14,7 +16,7 @@ export function SearchBar({ value, onChange, placeholder = 'Search…' }: Props)
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t('common.search')}
         className="w-full bg-white/5 border border-white/8 rounded-lg min-h-11 pl-9 pr-8 py-2.5 text-base can-hover:text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-accent-600/60 focus:bg-white/8 transition-colors"
       />
       {value && (

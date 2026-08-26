@@ -11,6 +11,7 @@ import { pushWatchLater, deleteRemoteWatchLater, deleteRemoteProgress } from '@/
 import { MovieCard } from '@/components/movies/MovieCard'
 import { EmptyState } from '@/components/ui/EmptyState'
 import type { Channel, WatchProgress } from '@/types'
+import { titleCollator, useLocale, useT, type MessageKey } from '@/lib/i18n'
 
 type Tab = 'continue' | 'watchlater' | 'history' | 'favorites'
 
@@ -22,11 +23,12 @@ interface HistoryItem {
 }
 type SortKey = 'recent' | 'az'
 
-const TABS: { id: Tab; label: string; Icon: React.ElementType }[] = [
-  { id: 'continue',   label: 'Continue',    Icon: Play     },
-  { id: 'watchlater', label: 'Watch Later', Icon: Bookmark },
-  { id: 'history',    label: 'History',     Icon: Clock    },
-  { id: 'favorites',  label: 'Favorites',   Icon: Heart    },
+/** `short` is what the tab shows when there is no room for the full label. */
+const TABS: { id: Tab; label: MessageKey; short?: MessageKey; Icon: React.ElementType }[] = [
+  { id: 'continue',   label: 'library.tabContinue',                                     Icon: Play     },
+  { id: 'watchlater', label: 'common.watchLater', short: 'library.tabWatchLaterShort',  Icon: Bookmark },
+  { id: 'history',    label: 'library.tabHistory',                                      Icon: Clock    },
+  { id: 'favorites',  label: 'common.favorites',                                        Icon: Heart    },
 ]
 
 const MIN_RESUME_POSITION = 60   // seconds — below this, skip in Continue tab
@@ -36,6 +38,8 @@ function getTitle(ch: Channel): string {
 }
 
 export function LibraryPage() {
+  const t = useT()
+  const locale = useLocale()
   const navigate = useNavigate()
   const { channels } = usePlaylistStore()
   const { play } = usePlayerStore()
@@ -148,9 +152,13 @@ export function LibraryPage() {
   }, [favoriteEntries, chanById, showRepMap, channels.length])
 
   // ── Sorting helper ──────────────────────────────────────────────────────────
+  // The collator is built from the app's language rather than the device's, so
+  // "Ängen" sorts under Ä at the end in Swedish and under A in English — and the
+  // same library does not sort two different ways on two different phones.
+  const collator = useMemo(() => titleCollator(locale), [locale])
   function sortedByAZ<T extends { channel: Channel }>(items: T[]): T[] {
     if (sort !== 'az') return items
-    return [...items].sort((a, b) => getTitle(a.channel).localeCompare(getTitle(b.channel)))
+    return [...items].sort((a, b) => collator.compare(getTitle(a.channel), getTitle(b.channel)))
   }
 
   // ── Handlers ────────────────────────────────────────────────────────────────
@@ -210,7 +218,7 @@ export function LibraryPage() {
   const renderTabContent = () => {
     if (tab === 'continue') {
       const items = sortedByAZ(continueItems)
-      if (!items.length) return renderEmpty(<Play size={40} />, 'Nothing in progress', 'Start watching something and it will appear here.')
+      if (!items.length) return renderEmpty(<Play size={40} />, t('library.emptyContinueTitle'), t('library.emptyContinueBody'))
       return renderGrid(items.map(({ channel, progress, channelIds }) => (
         <MovieCard
           key={progress.id}
@@ -227,7 +235,7 @@ export function LibraryPage() {
 
     if (tab === 'watchlater') {
       const items = sortedByAZ(watchLaterItems)
-      if (!items.length) return renderEmpty(<Bookmark size={40} />, 'Nothing saved yet', 'Bookmark movies and TV shows to find them here.')
+      if (!items.length) return renderEmpty(<Bookmark size={40} />, t('library.emptyWatchLaterTitle'), t('library.emptyWatchLaterBody'))
       return (
         <>
           {renderGrid(items.map(({ channel, contentId, kind }) => (
@@ -245,7 +253,7 @@ export function LibraryPage() {
 
     if (tab === 'history') {
       const items = sortedByAZ(historyItems)
-      if (!items.length) return renderEmpty(<Clock size={40} />, 'No history yet', 'Your watched titles will show up here.')
+      if (!items.length) return renderEmpty(<Clock size={40} />, t('library.emptyHistoryTitle'), t('library.emptyHistoryBody'))
       return renderGrid(items.map(({ channel, progress, channelIds }) => (
         <MovieCard
           key={progress.id}
@@ -262,7 +270,7 @@ export function LibraryPage() {
 
     if (tab === 'favorites') {
       const items = sortedByAZ(favoriteItems)
-      if (!items.length) return renderEmpty(<Heart size={40} />, 'No favorites yet', 'Heart titles to build your favorites list.')
+      if (!items.length) return renderEmpty(<Heart size={40} />, t('library.emptyFavoritesTitle'), t('library.emptyFavoritesBody'))
 
       const byKind = {
         movie:  items.filter((i) => i.kind === 'movie'),
@@ -276,7 +284,7 @@ export function LibraryPage() {
             <section>
               <div className="flex items-center gap-2 mb-4">
                 <Film size={15} className="text-neutral-400" />
-                <h2 className="text-sm font-semibold text-white">Movies</h2>
+                <h2 className="text-sm font-semibold text-white">{t('common.movies')}</h2>
                 <span className="text-xs text-neutral-600">{byKind.movie.length}</span>
               </div>
               {renderGrid(byKind.movie.map(({ channel }) => (
@@ -288,7 +296,7 @@ export function LibraryPage() {
             <section>
               <div className="flex items-center gap-2 mb-4">
                 <Tv size={15} className="text-neutral-400" />
-                <h2 className="text-sm font-semibold text-white">TV Shows</h2>
+                <h2 className="text-sm font-semibold text-white">{t('common.tvShows')}</h2>
                 <span className="text-xs text-neutral-600">{byKind.series.length}</span>
               </div>
               {renderGrid(byKind.series.map(({ channel }) => (
@@ -300,7 +308,7 @@ export function LibraryPage() {
             <section>
               <div className="flex items-center gap-2 mb-4">
                 <Radio size={15} className="text-neutral-400" />
-                <h2 className="text-sm font-semibold text-white">Live Channels</h2>
+                <h2 className="text-sm font-semibold text-white">{t('common.liveChannels')}</h2>
                 <span className="text-xs text-neutral-600">{byKind.live.length}</span>
               </div>
               {renderGrid(byKind.live.map(({ channel }) => (
@@ -317,20 +325,20 @@ export function LibraryPage() {
     <div className="p-4 sm:p-6 pb-12">
       {/* Header */}
       <div className="flex items-center justify-between mb-4 sm:mb-6">
-        <h1 className="text-2xl font-bold text-white">Library</h1>
+        <h1 className="text-2xl font-bold text-white">{t('library.title')}</h1>
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
           className="bg-white/5 border border-white/8 text-sm text-neutral-300 rounded-lg px-3 py-1.5 outline-none focus:border-accent-600/60 cursor-pointer"
         >
-          <option value="recent">Recent first</option>
-          <option value="az">A – Z</option>
+          <option value="recent">{t('library.sortRecent')}</option>
+          <option value="az">{t('library.sortAz')}</option>
         </select>
       </div>
 
       {/* Tabs */}
       <div className="flex items-stretch gap-1 mb-6 bg-white/5 rounded-xl p-1">
-        {TABS.map(({ id, label, Icon }) => (
+        {TABS.map(({ id, label, short, Icon }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -341,7 +349,16 @@ export function LibraryPage() {
             }`}
           >
             <Icon size={14} className="shrink-0" />
-            <span>{label === 'Watch Later' ? <><span className="sm:hidden">Later</span><span className="hidden sm:inline">Watch Later</span></> : label}</span>
+            <span>
+              {short ? (
+                <>
+                  <span className="sm:hidden">{t(short)}</span>
+                  <span className="hidden sm:inline">{t(label)}</span>
+                </>
+              ) : (
+                t(label)
+              )}
+            </span>
             {tabCount[id] > 0 && (
               <span className={`hidden sm:inline text-xs px-1.5 py-0.5 rounded-full ${
                 tab === id ? 'bg-white/20 text-white' : 'bg-white/10 text-neutral-500'

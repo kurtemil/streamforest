@@ -6,6 +6,7 @@ import {
 import type { Channel } from '@/types'
 import { formatTime } from '@/lib/time'
 import { openInVlc } from '@/lib/vlc'
+import { useT } from '@/lib/i18n'
 
 interface Track { id: number; name: string; lang: string }
 
@@ -53,6 +54,7 @@ export function PlayerControls({
   onSelectAudioTrack, onSelectSubtitle, onSpeedChange,
   onToggleFullscreen, onPiP, onMinimize, onClose,
 }: Props) {
+  const t = useT()
   const scrubberRef = useRef<HTMLDivElement>(null)
   const [showTrackMenu, setShowTrackMenu] = useState(false)
   const [showSpeedMenu, setShowSpeedMenu] = useState(false)
@@ -132,7 +134,7 @@ export function PlayerControls({
           <button
             onClick={(e) => { e.stopPropagation(); openInVlc(channel) }}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-colors"
-            title="Open in VLC"
+            title={t('common.openInVlc')}
           >
             <span className="w-2 h-2 rounded-sm bg-[#ff8800]" />
             <span className="text-xs font-semibold tracking-wide">VLC</span>
@@ -140,7 +142,7 @@ export function PlayerControls({
           <button
             onClick={onMinimize}
             className="p-2 rounded-full hover:bg-white/10 text-white/70 hover:text-white transition-colors"
-            title="Minimize"
+            title={t('player.minimize')}
           >
             <Minimize2 size={18} />
           </button>
@@ -175,7 +177,7 @@ export function PlayerControls({
               onPointerCancel={handlePointerUp}
               onMouseLeave={() => { if (!dragging) setHoverTime(null) }}
               role="slider"
-              aria-label="Seek"
+              aria-label={t('player.seek')}
               aria-valuemin={0}
               aria-valuemax={Math.round(duration)}
               aria-valuenow={Math.round(currentTime)}
@@ -254,7 +256,7 @@ export function PlayerControls({
                 min="0" max="1" step="0.02"
                 value={muted ? 0 : volume}
                 onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
-                aria-label="Volume"
+                aria-label={t('player.volume')}
                 className="w-20 h-1 accent-accent-500 cursor-pointer hidden md:block md:opacity-0 md:group-hover/vol:opacity-100 transition-opacity"
               />
             </div>
@@ -320,15 +322,15 @@ export function PlayerControls({
                   >
                     {audioTracks.length > 1 && (
                       <>
-                        <p className="text-white/50 text-xs uppercase tracking-wider mb-2 px-2">Audio</p>
-                        {audioTracks.map(t => (
+                        <p className="text-white/50 text-xs uppercase tracking-wider mb-2 px-2">{t('player.audio')}</p>
+                        {audioTracks.map((track) => (
                           <button
-                            key={t.id}
-                            onClick={() => { onSelectAudioTrack(t.id); setShowTrackMenu(false) }}
-                            className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-white/10 text-left text-sm transition-colors ${activeAudioTrack === t.id ? 'text-accent-500' : 'text-white/80'}`}
+                            key={track.id}
+                            onClick={() => { onSelectAudioTrack(track.id); setShowTrackMenu(false) }}
+                            className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-white/10 text-left text-sm transition-colors ${activeAudioTrack === track.id ? 'text-accent-500' : 'text-white/80'}`}
                           >
-                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${activeAudioTrack === t.id ? 'bg-accent-500' : 'bg-white/30'}`} />
-                            {t.name || t.lang || `Track ${t.id + 1}`}
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${activeAudioTrack === track.id ? 'bg-accent-500' : 'bg-white/30'}`} />
+                            {track.name || track.lang || t('player.track', { number: track.id + 1 })}
                           </button>
                         ))}
                       </>
@@ -336,21 +338,21 @@ export function PlayerControls({
                     {subtitleTracks.length > 0 && (
                       <>
                         {audioTracks.length > 1 && <div className="border-t border-white/10 my-2" />}
-                        <p className="text-white/50 text-xs uppercase tracking-wider mb-2 px-2">Subtitles</p>
+                        <p className="text-white/50 text-xs uppercase tracking-wider mb-2 px-2">{t('player.subtitles')}</p>
                         <button
                           onClick={() => { onSelectSubtitle(-1); setShowTrackMenu(false) }}
                           className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-white/10 text-left text-sm transition-colors ${activeSubtitle === -1 ? 'text-accent-500' : 'text-white/80'}`}
                         >
                           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${activeSubtitle === -1 ? 'bg-accent-500' : 'bg-white/30'}`} />
-                          Off
+                          {t('player.subtitlesOff')}
                         </button>
-                        {subtitleTracks.map(t => {
-                          const isLoading = loadingSubtitle === t.id
-                          const isActive = activeSubtitle === t.id
+                        {subtitleTracks.map((track) => {
+                          const isLoading = loadingSubtitle === track.id
+                          const isActive = activeSubtitle === track.id
                           return (
                             <button
-                              key={t.id}
-                              onClick={() => { if (!isLoading) onSelectSubtitle(t.id) }}
+                              key={track.id}
+                              onClick={() => { if (!isLoading) onSelectSubtitle(track.id) }}
                               disabled={isLoading}
                               className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-lg hover:bg-white/10 text-left text-sm transition-colors disabled:opacity-70 ${isActive ? 'text-accent-500' : 'text-white/80'}`}
                             >
@@ -359,14 +361,14 @@ export function PlayerControls({
                               ) : (
                                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isActive ? 'bg-accent-500' : 'bg-white/30'}`} />
                               )}
-                              {t.name || t.lang || `Track ${t.id + 1}`}
+                              {track.name || track.lang || t('player.track', { number: track.id + 1 })}
                             </button>
                           )
                         })}
                         {activeSubtitle !== -1 && (
                           <>
                             <div className="border-t border-white/10 my-2" />
-                            <p className="text-white/50 text-xs uppercase tracking-wider mb-2 px-2">Sync</p>
+                            <p className="text-white/50 text-xs uppercase tracking-wider mb-2 px-2">{t('player.sync')}</p>
                             <div className="flex items-center gap-1 px-2">
                               <button
                                 onClick={() => onSubtitleDelayChange(-0.5)}
@@ -398,7 +400,7 @@ export function PlayerControls({
               <button
                 onClick={onPiP}
                 className="p-2 rounded-full hover:bg-white/10 text-white/80 hover:text-white transition-colors"
-                title="Picture in Picture"
+                title={t('player.pip')}
               >
                 <PictureInPicture2 size={18} />
               </button>

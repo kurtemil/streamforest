@@ -1,16 +1,18 @@
 import { NavLink } from 'react-router-dom'
 import { Home, Film, Tv, Radio, Library } from 'lucide-react'
 import { getProfile, useProfileStore } from '@/stores/profileStore'
+import { useT } from '@/lib/i18n'
 
 const NAV_ITEMS = [
-  { to: '/',        icon: Home,    label: 'Home',    end: true  },
-  { to: '/movies',  icon: Film,    label: 'Movies',  end: false },
-  { to: '/series',  icon: Tv,      label: 'TV',      end: false },
-  { to: '/live',    icon: Radio,   label: 'Live',    end: false },
-  { to: '/library', icon: Library, label: 'Library', end: false },
+  { to: '/',        icon: Home,    label: 'nav.home',    end: true  },
+  { to: '/movies',  icon: Film,    label: 'nav.movies',  end: false },
+  { to: '/series',  icon: Tv,      label: 'nav.tvShort', end: false },
+  { to: '/live',    icon: Radio,   label: 'nav.liveShort', end: false },
+  { to: '/library', icon: Library, label: 'nav.library', end: false },
 ] as const
 
 export function BottomNav() {
+  const t = useT()
   const activeProfileId = useProfileStore((s) => s.activeProfileId)
   const role = getProfile(activeProfileId)?.role ?? 'kid'
 
@@ -19,7 +21,7 @@ export function BottomNav() {
 
   return (
     <nav
-      aria-label="Primary"
+      aria-label={t('nav.primary')}
       className="fixed inset-x-0 bottom-0 z-40 md:hidden bg-surface-100/70 backdrop-blur-2xl backdrop-saturate-150 border-t border-white/10 pb-safe"
       // Its own compositing layer. A fixed element carrying a backdrop-filter
       // drifts off the bottom edge on iOS without this, which is how `lagom`
@@ -41,7 +43,7 @@ export function BottomNav() {
           {({ isActive }) => (
             <>
               <Icon size={20} strokeWidth={isActive ? 2.2 : 1.8} />
-              {label}
+              {t(label)}
             </>
           )}
         </NavLink>

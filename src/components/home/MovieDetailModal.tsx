@@ -4,6 +4,7 @@ import { X, Play, Bookmark, Star, Clock, Users } from 'lucide-react'
 import type { Channel, TmdbMeta } from '@/types'
 import { backdropUrl, posterUrl, profileUrl } from '@/services/tmdb'
 import { openInVlc } from '@/lib/vlc'
+import { formatRuntime, useLocale, useT } from '@/lib/i18n'
 
 interface Props {
   channel: Channel | null
@@ -15,6 +16,8 @@ interface Props {
 }
 
 export function MovieDetailModal({ channel, tmdbMeta, isWatchLater, onClose, onPlay, onWatchLater }: Props) {
+  const t = useT()
+  const locale = useLocale()
   const open = channel !== null
 
   // Close on Escape
@@ -35,11 +38,7 @@ export function MovieDetailModal({ channel, tmdbMeta, isWatchLater, onClose, onP
   const poster   = posterUrl(tmdbMeta?.posterPath ?? null, 342)
   const fallbackPoster = channel?.logo ?? ''
 
-  const runtime = tmdbMeta?.runtime
-    ? tmdbMeta.runtime >= 60
-      ? `${Math.floor(tmdbMeta.runtime / 60)}h ${tmdbMeta.runtime % 60}m`
-      : `${tmdbMeta.runtime}m`
-    : null
+  const runtime = tmdbMeta?.runtime ? formatRuntime(tmdbMeta.runtime, locale) : null
 
   const title = tmdbMeta?.title ?? channel?.movieTitle ?? channel?.showName ?? channel?.name ?? ''
 
@@ -125,7 +124,7 @@ export function MovieDetailModal({ channel, tmdbMeta, isWatchLater, onClose, onP
                   className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-100 rounded-lg text-black font-semibold text-body transition-all active:scale-95"
                 >
                   <Play size={16} fill="black" />
-                  Play
+                  {t('common.play')}
                 </button>
                 <button
                   onClick={onWatchLater}
@@ -136,12 +135,12 @@ export function MovieDetailModal({ channel, tmdbMeta, isWatchLater, onClose, onP
                   }`}
                 >
                   <Bookmark size={15} fill={isWatchLater ? 'currentColor' : 'none'} />
-                  {isWatchLater ? 'Saved' : 'Watch Later'}
+                  {isWatchLater ? t('common.saved') : t('common.watchLater')}
                 </button>
                 {channel && (
                   <button
                     onClick={() => openInVlc(channel)}
-                    title="Open in VLC"
+                    title={t('common.openInVlc')}
                     className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-body transition-all active:scale-95 ring-1 bg-white/8 ring-white/15 text-neutral-300 hover:bg-white/12"
                   >
                     <span className="w-2.5 h-2.5 rounded-sm bg-[#ff8800]" />
@@ -158,7 +157,7 @@ export function MovieDetailModal({ channel, tmdbMeta, isWatchLater, onClose, onP
               {/* Director */}
               {tmdbMeta?.director && (
                 <p className="text-caption text-neutral-500 mb-5">
-                  <span className="text-neutral-400 font-medium">Director: </span>{tmdbMeta.director}
+                  <span className="text-neutral-400 font-medium">{t('modal.director')} </span>{tmdbMeta.director}
                 </p>
               )}
 
@@ -167,7 +166,7 @@ export function MovieDetailModal({ channel, tmdbMeta, isWatchLater, onClose, onP
                 <div className="mb-6">
                   <div className="flex items-center gap-1.5 mb-3">
                     <Users size={13} className="text-neutral-500" />
-                    <span className="text-caption font-medium text-neutral-400 uppercase tracking-wider">Cast</span>
+                    <span className="text-caption font-medium text-neutral-400 uppercase tracking-wider">{t('modal.cast')}</span>
                   </div>
                   <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1">
                     {tmdbMeta.cast.map((member) => (

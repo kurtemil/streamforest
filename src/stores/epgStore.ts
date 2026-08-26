@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { EpgProgram } from '@/types'
 import { fetchAndParseEpg, epgUrlFromM3u, normalizeChannelName } from '@/services/epg'
 import { saveEpgPrograms, loadEpgFromDB, saveEpgChannelNames, loadEpgChannelNames } from '@/services/db'
+import { t } from '@/lib/i18n'
 
 const LAST_FETCHED_KEY = 'sf_epg_fetched'
 const EPG_URL_KEY      = 'sf_epg_url'
@@ -96,16 +97,16 @@ export const useEpgStore = create<EpgState>((set, get) => ({
     if (!url) {
       set({
         status: 'error',
-        error: 'No EPG URL — enter it in Settings → TV Guide.',
+        error: t('epg.errNoUrl'),
       })
       return
     }
-    set({ status: 'loading', error: null, progress: 'Connecting…' })
+    set({ status: 'loading', error: null, progress: t('epg.connecting') })
     try {
       const { programs: flat, displayNameMap } = await fetchAndParseEpg(url, true, (count) => {
-        set({ progress: `Parsed ${count.toLocaleString()} programs…` })
+        set({ progress: t('epg.parsed', { count }) })
       })
-      set({ progress: 'Saving…' })
+      set({ progress: t('epg.saving') })
       await Promise.all([saveEpgPrograms(flat), saveEpgChannelNames(displayNameMap)])
 
       const map = new Map<string, EpgProgram[]>()
@@ -123,7 +124,7 @@ export const useEpgStore = create<EpgState>((set, get) => ({
       set({
         status: 'error',
         progress: null,
-        error: err instanceof Error ? err.message : 'EPG fetch failed',
+        error: err instanceof Error ? err.message : t('epg.errFetch'),
       })
     }
   },

@@ -36,6 +36,7 @@ import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
 import { backdropUrl, posterUrl } from '@/services/tmdb'
 import { normalizeShowKey } from '@/lib/utils'
 import { openInVlc, openPlaylistInVlc } from '@/lib/vlc'
+import { formatNumber, useT } from '@/lib/i18n'
 
 const RECENT_SHOWS = 40
 
@@ -83,6 +84,7 @@ function SeasonDropdown({
   selected: number
   onChange: (s: number) => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -103,7 +105,7 @@ function SeasonDropdown({
         onClick={() => setOpen(!open)}
         className="flex items-center gap-2 px-4 py-2 bg-white/8 hover:bg-white/12 rounded-lg text-white text-sm font-medium transition-colors"
       >
-        Season {selected}
+        {t('series.season', { number: selected })}
         <ChevronDown size={14} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
@@ -122,7 +124,7 @@ function SeasonDropdown({
               }`}
             >
               {s === selected && <Check size={12} className="shrink-0" />}
-              <span className={s === selected ? '' : 'ml-4'}>Season {s}</span>
+              <span className={s === selected ? '' : 'ml-4'}>{t('series.season', { number: s })}</span>
             </button>
           ))}
         </div>
@@ -142,6 +144,7 @@ function EpisodeRow({
   progress?: { position: number; duration: number; completed: boolean; lastWatched?: number }
   onClick: () => void
 }) {
+  const t = useT()
   const pct =
     progress && progress.duration > 0 ? (progress.position / progress.duration) * 100 : 0
   const epLabel = ep.episode !== undefined ? `E${String(ep.episode).padStart(2, '0')}` : null
@@ -164,7 +167,7 @@ function EpisodeRow({
             <div className="h-full bg-accent-500 rounded-full" style={{ width: `${pct}%` }} />
           </div>
         )}
-        {progress?.completed && <p className="text-xs text-neutral-500 mt-0.5">Watched</p>}
+        {progress?.completed && <p className="text-xs text-neutral-500 mt-0.5">{t('series.watched')}</p>}
       </div>
       {progress && progress.duration > 0 && !progress.completed && (
         <span className="shrink-0 text-xs text-neutral-500">
@@ -179,8 +182,8 @@ function EpisodeRow({
     </button>
       <button
         onClick={() => openInVlc(ep)}
-        title="Open in VLC"
-        aria-label="Open in VLC"
+        title={t('common.openInVlc')}
+        aria-label={t('common.openInVlc')}
         className="absolute top-1/2 -translate-y-1/2 right-3 z-10 flex items-center gap-1 px-2 py-1 rounded-md bg-black/75 hover:bg-black/90 ring-1 ring-white/15 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity"
       >
         <span className="w-2 h-2 rounded-sm bg-[#ff8800]" />
@@ -211,7 +214,9 @@ function ShowCard({
   onClick: () => void
   onWatchLater?: (e: React.MouseEvent) => void
 }) {
+  const t = useT()
   const rating = tmdbMeta && !tmdbMeta.notFound && tmdbMeta.rating > 0 ? tmdbMeta.rating : null
+  const sizeLabel = t('series.seasonsAndEpisodes', { seasons, episodes })
 
   return (
     <button onClick={onClick} className="group text-left w-full">
@@ -233,7 +238,7 @@ function ShowCard({
         {onWatchLater && (
           <button
             onClick={onWatchLater}
-            title={isWatchLater ? 'Remove from Watch Later' : 'Add to Watch Later'}
+            title={isWatchLater ? t('common.removeWatchLater') : t('common.addWatchLater')}
             className={`absolute top-2 left-2 w-7 h-7 rounded-full relative after:absolute after:content-[''] after:-inset-2 backdrop-blur-sm flex items-center justify-center ring-1 transition-all z-10 ${
               isWatchLater
                 ? 'bg-accent-600/90 ring-accent-500/60 opacity-100'
@@ -250,9 +255,7 @@ function ShowCard({
           </div>
         ) : (
           <div className="absolute bottom-0 left-0 right-0 p-2">
-            <p className="text-xs text-neutral-300">
-              {seasons}S · {episodes}ep
-            </p>
+            <p className="text-xs text-neutral-300">{sizeLabel}</p>
           </div>
         )}
       </div>
@@ -267,11 +270,7 @@ function ShowCard({
           {tmdbMeta?.genres?.[0] && (
             <span className="text-caption text-neutral-600 truncate">{tmdbMeta.genres[0]}</span>
           )}
-          {!tmdbMeta && (
-            <span className="text-caption text-neutral-600">
-              {seasons}S · {episodes}ep
-            </span>
-          )}
+          {!tmdbMeta && <span className="text-caption text-neutral-600">{sizeLabel}</span>}
         </div>
       </div>
     </button>
@@ -281,6 +280,7 @@ function ShowCard({
 // ─── Main page ─────────────────────────────────────────────────────────────────
 
 export function SeriesPage() {
+  const t = useT()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { channels } = usePlaylistStore()
@@ -538,7 +538,7 @@ export function SeriesPage() {
             onClick={() => navigate('/series')}
             className="absolute top-4 left-4 flex items-center gap-1.5 text-neutral-300 hover:text-white text-sm transition-colors bg-black/50 backdrop-blur-sm rounded-full px-3 py-1.5 ring-1 ring-white/15"
           >
-            <ChevronRight size={14} className="rotate-180" /> All shows
+            <ChevronRight size={14} className="rotate-180" /> {t('series.allShows')}
           </button>
         </div>
 
@@ -558,7 +558,7 @@ export function SeriesPage() {
                 {showTmdb?.title ?? showData.displayName}
               </h1>
               <div className="flex items-center gap-3 flex-wrap text-caption text-neutral-400">
-                <span>{sortedSeasons.length}S · {totalEps} ep</span>
+                <span>{t('series.seasonsAndEpisodes', { seasons: sortedSeasons.length, episodes: totalEps })}</span>
                 {showTmdb?.year && <span>{showTmdb.year}</span>}
                 {showTmdb?.rating && showTmdb.rating > 0 && (
                   <span className="flex items-center gap-1">
@@ -580,7 +580,7 @@ export function SeriesPage() {
                 className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-100 rounded-lg text-black font-semibold text-body transition-all active:scale-95"
               >
                 <Play size={16} fill="black" />
-                Play
+                {t('common.play')}
               </button>
             )}
             {episodes.length > 0 && (
@@ -589,11 +589,11 @@ export function SeriesPage() {
                   episodes,
                   `${showData.displayName} S${String(autoSeason).padStart(2, '0')}`,
                 )}
-                title={`Open season ${autoSeason} in VLC (${episodes.length} episode${episodes.length === 1 ? '' : 's'})`}
+                title={t('series.vlcSeason', { season: autoSeason, count: episodes.length })}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-body transition-all active:scale-95 ring-1 bg-white/8 ring-white/15 text-neutral-300 hover:bg-white/12"
               >
                 <span className="w-2.5 h-2.5 rounded-sm bg-[#ff8800]" />
-                VLC{episodes.length > 1 ? ` · S${autoSeason}` : ''}
+                VLC{episodes.length > 1 ? ` · ${t('series.seasonShort', { number: autoSeason })}` : ''}
               </button>
             )}
             <button
@@ -605,7 +605,7 @@ export function SeriesPage() {
               }`}
             >
               <Bookmark size={15} fill={isWL ? 'currentColor' : 'none'} />
-              {isWL ? 'Saved' : 'Watch Later'}
+              {isWL ? t('common.saved') : t('common.watchLater')}
             </button>
             <button
               onClick={() => toggleFavorite(selectedShow, 'series')}
@@ -616,7 +616,7 @@ export function SeriesPage() {
               }`}
             >
               <Star size={15} fill={isFav ? 'currentColor' : 'none'} />
-              {isFav ? 'Favorited' : 'Favorite'}
+              {isFav ? t('series.favorited') : t('series.favorite')}
             </button>
           </div>
 
@@ -626,7 +626,7 @@ export function SeriesPage() {
 
           <div className="flex items-center gap-3 mb-4">
             <SeasonDropdown seasons={sortedSeasons} selected={autoSeason} onChange={(s) => setSelectedSeason(s)} />
-            <span className="text-neutral-500 text-sm">{episodes.length} episodes</span>
+            <span className="text-neutral-500 text-sm">{t('series.episodeCount', { count: episodes.length })}</span>
           </div>
 
           <div className="flex flex-col divide-y divide-white/5">
@@ -647,7 +647,7 @@ export function SeriesPage() {
   if (seriesChannels.length === 0) {
     return (
       <div className="p-8">
-        <EmptyState icon={<Tv size={40} />} title="No TV shows yet" description="Download your playlist in Settings to see shows here." />
+        <EmptyState icon={<Tv size={40} />} title={t('series.emptyTitle')} description={t('series.emptyBody')} />
       </div>
     )
   }
@@ -660,13 +660,12 @@ export function SeriesPage() {
           groups={groups}
           selected={showFavs ? '__favs__' : selectedGroup}
           onSelect={(g) => { setShowFavs(false); setSelectedGroup(g); setSearch('') }}
-          browseLabel="Browse"
-          cleanTitle={(t) => t.replace(/^Series:\s*/, '')}
+          cleanTitle={(title) => title.replace(/^Series:\s*/, '')}
           prefixItem={{
             label: (
               <>
                 <Star size={12} fill={showFavs ? 'currentColor' : 'none'} className="shrink-0" />{' '}
-                Favorites
+                {t('common.favorites')}
               </>
             ),
             active: showFavs,
@@ -681,25 +680,25 @@ export function SeriesPage() {
           <div className="px-4 sm:px-6 pb-12">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-5 pb-6">
               <div>
-                <h1 className="text-2xl font-bold text-white">TV Shows</h1>
+                <h1 className="text-2xl font-bold text-white">{t('series.title')}</h1>
                 <p className="text-neutral-500 text-sm mt-0.5">
-                  {allShowNames.length.toLocaleString()} shows
+                  {t('series.count', { count: allShowNames.length })}
                 </p>
               </div>
               <div className="flex items-center gap-3">
                 <button
                   onClick={handleSurprise}
-                  title="Surprise me — pick a random show"
+                  title={t('series.surpriseTitle')}
                   className="flex items-center justify-center gap-1.5 min-h-11 min-w-11 px-3.5 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
                 >
                   <Shuffle size={13} />
-                  <span className="hidden sm:inline">Surprise me</span>
+                  <span className="hidden sm:inline">{t('common.surpriseMe')}</span>
                 </button>
                 <div className="w-full sm:w-52">
                   <SearchBar
                     value={search}
                     onChange={(v) => { setSearch(v); setSelectedGroup(null); setShowFavs(false) }}
-                    placeholder="Search shows…"
+                    placeholder={t('series.searchPlaceholder')}
                   />
                 </div>
               </div>
@@ -708,7 +707,7 @@ export function SeriesPage() {
             <div className="space-y-10">
               {continueWatchingSeries.length > 0 && (
                 <section>
-                  <SectionHeader title="Continue Watching" />
+                  <SectionHeader title={t('common.continueWatching')} />
                   <ScrollableRow>
                     {continueWatchingSeries.map(({ channel, progress, showKey }) => (
                       <div key={channel.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
@@ -734,7 +733,7 @@ export function SeriesPage() {
               )}
 
               <section>
-                <SectionHeader title="Recently Added" />
+                <SectionHeader title={t('common.recentlyAdded')} />
                 <ScrollableRow>
                   {allShowNames.slice(0, 20).map((name) => {
                     const data = showMap.get(name)!
@@ -824,28 +823,30 @@ export function SeriesPage() {
               <div className="flex items-center justify-between sm:justify-start gap-3">
                 <h1 className="text-xl font-bold text-white truncate">
                   {search.trim()
-                    ? `Results for "${search}"`
+                    ? t('common.resultsFor', { query: search })
                     : showFavs
-                    ? 'Favorites'
+                    ? t('common.favorites')
                     : selectedGroup !== null
                     ? selectedGroup.replace(/^Series:\s*/, '')
-                    : 'Recently Added'}
+                    : t('common.recentlyAdded')}
                 </h1>
-                <p className="text-neutral-500 text-sm shrink-0">{visibleShowNames.length} shows</p>
+                <p className="text-neutral-500 text-sm shrink-0">
+                  {t('series.count', { count: visibleShowNames.length })}
+                </p>
                 <button
                   onClick={handleSurprise}
-                  title="Surprise me — pick a random show"
+                  title={t('series.surpriseTitle')}
                   className="flex items-center justify-center gap-1.5 min-h-11 min-w-11 px-3.5 py-2.5 rounded-lg bg-white/5 hover:bg-accent-600/20 hover:text-accent-400 text-neutral-500 text-xs font-medium transition-colors shrink-0"
                 >
                   <Shuffle size={13} />
-                  <span className="hidden sm:inline">Surprise me</span>
+                  <span className="hidden sm:inline">{t('common.surpriseMe')}</span>
                 </button>
               </div>
               <div className="sm:w-52">
                 <SearchBar
                   value={search}
                   onChange={(v) => { setSearch(v); setSelectedGroup(null); setShowFavs(false) }}
-                  placeholder="Search shows…"
+                  placeholder={t('series.searchPlaceholder')}
                 />
               </div>
             </div>
@@ -853,8 +854,8 @@ export function SeriesPage() {
             {visibleShowNames.length === 0 ? (
               <EmptyState
                 icon={<Tv size={36} />}
-                title="No results"
-                description={showFavs ? 'No favorites yet.' : 'Try a different search.'}
+                title={t('common.noResults')}
+                description={showFavs ? t('series.noFavorites') : t('common.tryAnotherSearch')}
               />
             ) : (
               <>
@@ -880,8 +881,10 @@ export function SeriesPage() {
                 <div ref={gridSentinel} className="h-1" />
                 {gridCount < visibleShowNames.length && (
                   <p className="text-center text-xs text-neutral-600 pb-8">
-                    Showing {Math.min(gridCount, visibleShowNames.length).toLocaleString()} of{' '}
-                    {visibleShowNames.length.toLocaleString()}
+                    {t('common.showingOf', {
+                      shown: formatNumber(Math.min(gridCount, visibleShowNames.length)),
+                      total: formatNumber(visibleShowNames.length),
+                    })}
                   </p>
                 )}
               </>

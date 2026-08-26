@@ -11,8 +11,10 @@ import { pushWatchLater, deleteRemoteWatchLater } from '@/services/sync'
 import { MovieCard } from '@/components/movies/MovieCard'
 import { EmptyState } from '@/components/ui/EmptyState'
 import type { Channel, WatchLater } from '@/types'
+import { useT } from '@/lib/i18n'
 
 export function WatchLaterPage() {
+  const t = useT()
   const navigate = useNavigate()
   const { channels } = usePlaylistStore()
   const { play } = usePlayerStore()
@@ -76,8 +78,8 @@ export function WatchLaterPage() {
       <div className="p-8">
         <EmptyState
           icon={<Bookmark size={40} />}
-          title="Nothing saved yet"
-          description="Bookmark movies and TV shows to find them here later."
+          title={t('library.emptyWatchLaterTitle')}
+          description={t('library.emptyWatchLaterBody')}
         />
       </div>
     )
@@ -86,15 +88,15 @@ export function WatchLaterPage() {
   return (
     <div className="p-6 pb-12">
       <div className="flex items-center justify-between mb-8">
-        <h1 className="text-2xl font-bold text-white">Watch Later</h1>
-        <p className="text-neutral-500 text-sm">{totalCount} {totalCount === 1 ? 'title' : 'titles'}</p>
+        <h1 className="text-2xl font-bold text-white">{t('common.watchLater')}</h1>
+        <p className="text-neutral-500 text-sm">{t('movies.count', { count: totalCount })}</p>
       </div>
 
       {movies.length > 0 && (
         <section className="mb-10">
           <div className="flex items-center gap-2 mb-4">
             <Film size={16} className="text-neutral-400" />
-            <h2 className="text-base font-semibold text-white">Movies</h2>
+            <h2 className="text-base font-semibold text-white">{t('common.movies')}</h2>
             <span className="text-xs text-neutral-600 ml-1">{movies.length}</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -115,7 +117,7 @@ export function WatchLaterPage() {
         <section className="mb-10">
           <div className="flex items-center gap-2 mb-4">
             <Tv size={16} className="text-neutral-400" />
-            <h2 className="text-base font-semibold text-white">TV Shows</h2>
+            <h2 className="text-base font-semibold text-white">{t('common.tvShows')}</h2>
             <span className="text-xs text-neutral-600 ml-1">{shows.length}</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
