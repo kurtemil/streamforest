@@ -1,18 +1,25 @@
 #!/bin/bash
 # Registers a `vlc://` URL handler on macOS so StreamForest's "Open in VLC"
-# button launches VLC directly (no .m3u download step).
+# buttons launch VLC directly instead of downloading a .m3u to open by hand.
 #
-# Run once:   bash install-macos.sh
-# Uninstall:  rm -rf "$HOME/Applications/VLC URL Handler.app"
+# Served at /vlc-handler.sh — Settings → VLC hands out the one-line command that
+# pipes it into bash. Also runnable from a clone: bash public/vlc-handler.sh
+#
+# Uninstall: rm -rf "$HOME/Applications/VLC URL Handler.app"
 set -euo pipefail
 
 APP="$HOME/Applications/VLC URL Handler.app"
 PLIST="$APP/Contents/Info.plist"
 
+if [ ! -d "/Applications/VLC.app" ] && [ ! -d "$HOME/Applications/VLC.app" ]; then
+  echo "⚠️  VLC itself was not found in /Applications — install it first: https://www.videolan.org/vlc/"
+fi
+
 rm -rf "$APP"
 mkdir -p "$HOME/Applications"
 
 # A tiny AppleScript app: strips the leading "vlc://" and hands the rest to VLC.
+# The rest is a stream URL for one episode, or a link to a .m3u for a season.
 osacompile -o "$APP" -e 'on open location u
 	set theURL to text 7 thru -1 of u
 	do shell script "open -a VLC " & quoted form of theURL
@@ -30,5 +37,4 @@ LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServic
 "$LSREG" -f "$APP"
 
 echo "✅ Installed: $APP"
-echo "   Test it:   open 'vlc://http://example.com/stream.ts'"
-echo "   (first launch may prompt to allow controlling VLC — click OK)"
+echo "   Go back to StreamForest → Settings → VLC and press Test."

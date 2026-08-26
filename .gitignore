@@ -5,6 +5,11 @@ dist/
 .env.*
 !.env.example
 *.m3u
+# …except the empty one Settings → VLC opens to test the handler. The rule above
+# is there to keep the provider's own playlist — 160 000 entries with the
+# subscription credentials in every URL — out of the repo. This one is four lines
+# of comment and has to ship with the site.
+!public/vlc-test.m3u
 .DS_Store
 .claude/
 plan.txt

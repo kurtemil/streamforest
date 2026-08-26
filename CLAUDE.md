@@ -214,10 +214,10 @@ while actually meaning "the default rows view". It is `browseLabel` / "Browse".
 `src/lib/vlc.ts` owns the "VLC" buttons. Two facts shape everything in it:
 
 1. **Desktop VLC registers no URL scheme.** There is nothing to deeplink to until
-   `tools/vlc-handler/` is installed on that machine — one command, per machine,
-   and the button silently keeps downloading a `.m3u` on any machine that has not
-   had it. A laptop that downloads a file when the phone opens VLC in one tap is
-   not a bug report; it is a machine missing the handler.
+   the handler is installed on that machine — one command, per machine, and the
+   button silently keeps downloading a `.m3u` on any machine that has not had it.
+   A laptop that downloads a file when the phone opens VLC in one tap is not a bug
+   report; it is a machine missing the handler.
 2. **Neither link scheme carries more than one MRL.** `vlc-x-callback://…/stream?url=`
    on the phone and `vlc://` on the desktop both take a single URL.
 
@@ -238,6 +238,36 @@ drift.
 The `.m3u` in the path is load-bearing: VLC decides it was handed a playlist from
 the extension, before any `Content-Type`. The endpoint answers `no-store`,
 because the entries carry the provider's username and password in their URLs.
+
+Confirmed on 2026-08-26: VLC for iOS takes a remote `.m3u` over x-callback and
+plays the season in order. That was the one leg of this that could not be proven
+from a desktop, since WebKit-on-macOS is not the phone and no test can install
+VLC's URL scheme.
+
+### Installing the handler
+
+`public/vlc-handler.sh` (macOS) and `public/vlc-handler.ps1` (Windows) are the
+installers, and they live under `public/` **because the app serves them**:
+Settings → VLC hands out `curl -fsSL <origin>/vlc-handler.sh | bash` and
+`irm <origin>/vlc-handler.ps1 | iex`, with a Copy button and a Test button that
+opens VLC on the empty `public/vlc-test.m3u` and reports whether it answered.
+`src/components/settings/VlcHandlerSection.tsx` is that section.
+
+They used to live in `tools/vlc-handler/`, which is exactly the place a person
+setting up a second computer does not look. One copy, in the place the app links
+to, is the point — do not add a second under `tools/`.
+
+A page cannot install a URL-scheme handler on either OS; that is the privilege
+the scheme registry exists to withhold. One pasted command is the floor, and the
+alternatives are worse: a downloaded `.command` arrives without its exec bit, and
+a downloaded `.app` meets Gatekeeper's "unidentified developer" wall, which is
+more steps and more alarming than the command.
+
+`vlc-handler.ps1` must stay **pure ASCII** — Windows PowerShell 5.1's `irm`
+decodes a charset-less response as ISO-8859-1, so a UTF-8 byte arrives mangled.
+It is also the one file here that has never been run on the OS it targets; its
+registry writes and its embedded `.vbs` are carried over verbatim from the
+`install.cmd` that was.
 
 **Which buttons hand over what:** the show header's VLC button sends the whole
 selected season; the per-episode button on each row sends that one episode. Both

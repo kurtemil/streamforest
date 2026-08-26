@@ -1,0 +1,5 @@
+#EXTM3U
+#PLAYLIST:StreamForest — the vlc:// handler works
+# Settings → VLC → Test points VLC here. It is deliberately an empty playlist:
+# VLC opening at all is the whole answer, and an empty one plays nothing, asks
+# nothing and leaves no window to close.

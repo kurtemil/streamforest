@@ -9,6 +9,7 @@ import { useExclusionsStore, type ContentType } from '@/stores/exclusionsStore'
 import { useProfileStore, getProfile, PROFILES } from '@/stores/profileStore'
 import { useKidRestrictions } from '@/stores/kidRestrictionsStore'
 import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
+import { VlcHandlerSection } from '@/components/settings/VlcHandlerSection'
 
 function formatBytes(bytes: number) {
   if (bytes === 0) return '0 B'
@@ -560,6 +561,9 @@ export function SettingsPage() {
           </div>
         </div>
       </section>
+
+      {/* VLC handover */}
+      <VlcHandlerSection />
 
       {/* Hidden Groups — admin + parent */}
       {channels.length > 0 && (
