@@ -472,10 +472,9 @@ iOS browser uses, Chrome for iPhone included. Projects: `iphone-webkit`,
 `ipad-webkit`, `desktop-webkit`. `e2e/fixtures.ts` seeds a profile and a small
 library into IndexedDB so card-level controls exist to test.
 
-The audits in `e2e/touch-audit.spec.ts` are marked `test.fail()`: they record
-defects that exist today, so the suite stays green while they fail and turns red
-the moment one is fixed — which is the prompt to drop the annotation and let the
-test guard the fix from then on.
+The audits in `e2e/touch-audit.spec.ts` were once marked `test.fail()` to record
+defects that existed at the time. The defects are fixed and the annotation is gone —
+both audits now assert straight, and guard the fix from here on.
 
 *The honest limit:* WebKit-on-desktop is not iOS WebKit. Layout, pointer events and
 CSS agree closely; media playback does not (no ManagedMediaSource, different
@@ -616,19 +615,20 @@ curl -s "https://streamforest.krutofv.se/api/preferences?profileId=_global"
 - Routed through `/transcode?live=1&mode=copy` — cheap remux to fragmented MP4, no re-encode.
 - `-bsf:a aac_adtstoasc` is mandatory for AAC in MPEG-TS → MP4 (ADTS → ASC).
 - `-fflags +genpts+discardcorrupt` for flaky IPTV timestamps.
-- A 20 s first-byte timeout kills ffmpeg before Cloudflare Tunnel's own ~30 s timeout fires — prevents CORS-less 502 reaching the browser.
+- A 20 s first-byte timeout kills ffmpeg before Cloudflare's ~15 s first-byte timeout for proxied origins fires (see the comment in `server.mjs`) — prevents CORS-less 502 reaching the browser.
 
 ---
 
 ## SSH to the server
 
-**Within home network (LAN):** SSH works directly. Find the server's IP from your router admin panel (hostname: probably `prodesk` or similar).
+**Within home network (LAN):** the machine is `192.168.1.111`, hostname `khs`.
 
 ```bash
-ssh <your-username>@<lan-ip>     # e.g. ssh elof@192.168.1.x
+ssh krutofv@192.168.1.111
 ```
 
-**Outside home network:** External SSH is NOT currently configured. Options (pick one):
+**Outside home network:** `tailscaled` already runs on the ProDesk (tailnet address
+`100.102.121.4`), so Tailscale is the way in. The options below are kept for reference:
 
 ### Option A — Tailscale (recommended, 5 min setup)
 ```bash
@@ -651,15 +651,15 @@ Uses the existing Cloudflare infrastructure. Requires:
 
 ## Key architecture facts
 
-- **No HLS for live:** providers serve HLS at `host:port/live/USER/PASS/{id}.m3u8` but that's HTTP → mixed-content blocked on HTTPS. Use the transcode proxy instead.
+- **No *provider* HLS:** providers serve HLS at `host:port/live/USER/PASS/{id}.m3u8` but that's HTTP → mixed-content blocked on HTTPS. Use the transcode proxy instead — which generates HLS of its own (`/hls-start` + `/hls-file/*`), and that is what the iOS live path uses.
 - **VideoPlayer routing:**
   - `type === 'live'` → `liveStreamUrl()` → transcode proxy (copy mode, no probe)
   - `type === 'movie' | 'series'` → `probeMedia()` first, then `transcodeUrl()`
-  - `.m3u8` URLs → HLS.js
+  - `.m3u8` URLs → HLS.js, including the proxy's own generated playlists
 - **Probe before play (VOD only):** needed to detect AC3/DTS audio (→ `mode=transcode`) and enumerate embedded subtitle tracks.
 - **Subtitle extraction:** co-extracted in-process via `pipe:3+` alongside the video transcode. Falls back to a standalone ffmpeg run if the transcode finishes first. Cached on disk under `SUB_CACHE_DIR`.
 - **Profiles:** 4 profiles (Elof/Jossan/Vera/Noah). Watch progress synced to D1 via `/api/progress`. Local IndexedDB is the primary store; D1 is cross-device sync.
-- **Continue Watching bug:** items may not appear after watching — suspected stale closure on `profileId` in VideoPlayer save-on-close. Not yet fixed.
+- **Continue Watching:** `handleClose` reads `useProfileStore.getState().activeProfileId` fresh on close, so the stale-closure bug once suspected here cannot occur as described. If items still fail to appear, the cause is elsewhere and unmeasured.
 
 ---
 
