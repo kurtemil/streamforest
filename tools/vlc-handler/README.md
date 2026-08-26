@@ -31,7 +31,11 @@ Uninstall: `reg delete "HKCU\Software\Classes\vlc" /f`
 
 ## How it works
 
-The button navigates to `vlc://<raw-stream-url>`. The handler strips the
-`vlc://` prefix and runs `vlc <raw-stream-url>`, so VLC plays the original
-provider stream directly — MPEG-TS, MKV, AC3/DTS, embedded subs — bypassing the
-transcode proxy entirely.
+The button navigates to `vlc://<url>`. The handler strips the `vlc://` prefix and
+runs `vlc <url>`, so VLC plays the original provider stream directly — MPEG-TS,
+MKV, AC3/DTS, embedded subs — bypassing the transcode proxy entirely.
+
+For a whole season the `<url>` is not a stream but StreamForest's own
+`/api/playlist/<show>.m3u?d=…`, which answers with the season as a playlist. VLC
+fetches it and plays the episodes in order. Same handler, nothing extra to
+install.

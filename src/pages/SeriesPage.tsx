@@ -35,7 +35,7 @@ import { useTmdbEnrich } from '@/hooks/useTmdbEnrich'
 import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
 import { backdropUrl, posterUrl } from '@/services/tmdb'
 import { normalizeShowKey } from '@/lib/utils'
-import { openInVlc } from '@/lib/vlc'
+import { openInVlc, openPlaylistInVlc } from '@/lib/vlc'
 
 const RECENT_SHOWS = 40
 
@@ -583,14 +583,17 @@ export function SeriesPage() {
                 Play
               </button>
             )}
-            {episodes[0] && (
+            {episodes.length > 0 && (
               <button
-                onClick={() => openInVlc(episodes[0])}
-                title="Open in VLC"
+                onClick={() => openPlaylistInVlc(
+                  episodes,
+                  `${showData.displayName} S${String(autoSeason).padStart(2, '0')}`,
+                )}
+                title={`Open season ${autoSeason} in VLC (${episodes.length} episode${episodes.length === 1 ? '' : 's'})`}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-body transition-all active:scale-95 ring-1 bg-white/8 ring-white/15 text-neutral-300 hover:bg-white/12"
               >
                 <span className="w-2.5 h-2.5 rounded-sm bg-[#ff8800]" />
-                VLC
+                VLC{episodes.length > 1 ? ` · S${autoSeason}` : ''}
               </button>
             )}
             <button

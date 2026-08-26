@@ -209,6 +209,43 @@ while actually meaning "the default rows view". It is `browseLabel` / "Browse".
 
 ---
 
+## Handing playback to VLC
+
+`src/lib/vlc.ts` owns the "VLC" buttons. Two facts shape everything in it:
+
+1. **Desktop VLC registers no URL scheme.** There is nothing to deeplink to until
+   `tools/vlc-handler/` is installed on that machine — one command, per machine,
+   and the button silently keeps downloading a `.m3u` on any machine that has not
+   had it. A laptop that downloads a file when the phone opens VLC in one tap is
+   not a bug report; it is a machine missing the handler.
+2. **Neither link scheme carries more than one MRL.** `vlc-x-callback://…/stream?url=`
+   on the phone and `vlc://` on the desktop both take a single URL.
+
+So a season is handed over as a *link to a playlist*: `/api/playlist/<name>.m3u?d=<token>`,
+which VLC fetches and plays in order. The token carries the entries themselves —
+`src/lib/vlcPlaylist.ts` encodes them, `functions/api/playlist/[name].ts` decodes
+them — so there is no stored playlist to expire and no cleanup to forget. The
+common URL prefix is lifted out before encoding, which is what keeps a normal
+season under the 6000-character cap in `vlc.ts`; over it, the button gives up on
+deeplinking and downloads the file, which carries the same playlist.
+
+That shared file is imported by the Function through a **relative** path, not
+`@/`: functions are bundled separately and the alias does not exist there. It
+must stay dependency-free for the same reason. `src/lib/vlcPlaylist.test.ts` is
+where the two halves are checked against each other — nothing else fails if they
+drift.
+
+The `.m3u` in the path is load-bearing: VLC decides it was handed a playlist from
+the extension, before any `Content-Type`. The endpoint answers `no-store`,
+because the entries carry the provider's username and password in their URLs.
+
+**Which buttons hand over what:** the show header's VLC button sends the whole
+selected season; the per-episode button on each row sends that one episode. Both
+are wanted — the header one is "put this season on", the row one is "this episode
+misbehaves in the web player".
+
+---
+
 ## Diagnostics and tests
 
 Nobody debugs this app on the phone it is watched on, so four tools stand in for

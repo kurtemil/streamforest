@@ -8,9 +8,15 @@
 //   • macOS / Windows — desktop VLC registers NO url scheme by default. After a
 //     one-time install of the `vlc://` handler (see tools/vlc-handler/), the link
 //     opens VLC directly. If no handler is registered, we detect that the page
-//     never lost focus and fall back to downloading a one-line `.m3u` playlist
-//     (VLC's default file association) for the user to open manually.
+//     never lost focus and fall back to downloading a `.m3u` playlist (VLC's
+//     default file association) for the user to open manually.
+//
+// A whole season goes over the same two links. Neither scheme takes more than
+// one URL, so the link points at `/api/playlist/<name>.m3u?d=…` — an endpoint
+// that reconstructs the playlist from the token and serves it. VLC opens the
+// remote .m3u as a playlist and plays the season in order.
 import type { Channel } from '@/types'
+import { buildM3u, encodePlaylist, type PlaylistItem } from './vlcPlaylist'
 
 const IS_IOS = typeof navigator !== 'undefined' && (
   /iPhone|iPad|iPod/.test(navigator.userAgent) ||
@@ -18,6 +24,12 @@ const IS_IOS = typeof navigator !== 'undefined' && (
 )
 const IS_ANDROID = typeof navigator !== 'undefined' && /Android/.test(navigator.userAgent)
 const IS_MOBILE = IS_IOS || IS_ANDROID
+
+// The token carries the season's URLs, so the link grows with the season. Past
+// this we stop trying to deeplink and hand over the file instead: proxies and
+// servers start truncating long request lines well before the browser does, and
+// a silently cut token would reach VLC as a broken playlist.
+const MAX_DEEPLINK_URL = 6000
 
 // Human-friendly label for the playlist entry / VLC "now playing".
 export function vlcTitle(channel: Channel): string {
@@ -42,14 +54,26 @@ function xCallbackLink(streamUrl: string): string {
   return `vlc-x-callback://x-callback-url/stream?${params.toString()}`
 }
 
-// One-line M3U the OS will hand to VLC (its default .m3u handler).
-function downloadM3u(channel: Channel): void {
-  const body = `#EXTM3U\n#EXTINF:-1,${vlcTitle(channel)}\n${channel.url}\n`
-  const blob = new Blob([body], { type: 'audio/x-mpegurl' })
+function fileName(name: string): string {
+  return name.replace(/[^\w.-]+/g, '_').slice(0, 80) || 'stream'
+}
+
+/** The `/api/playlist` link VLC can fetch, or null if it came out too long. */
+function playlistUrl(items: PlaylistItem[], name: string): string | null {
+  // The `.m3u` extension is load-bearing: it is how VLC decides it was handed a
+  // playlist rather than a stream, before any Content-Type is looked at.
+  const url = `${location.origin}/api/playlist/${encodeURIComponent(fileName(name))}.m3u`
+    + `?d=${encodePlaylist(items)}`
+  return url.length > MAX_DEEPLINK_URL ? null : url
+}
+
+// The M3U the OS will hand to VLC (its default .m3u handler).
+function downloadM3u(items: PlaylistItem[], name: string): void {
+  const blob = new Blob([buildM3u(items)], { type: 'audio/x-mpegurl' })
   const href = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = href
-  a.download = `${vlcTitle(channel).replace(/[^\w.-]+/g, '_').slice(0, 80) || 'stream'}.m3u`
+  a.download = `${fileName(name)}.m3u`
   document.body.appendChild(a)
   a.click()
   a.remove()
@@ -57,23 +81,33 @@ function downloadM3u(channel: Channel): void {
   setTimeout(() => URL.revokeObjectURL(href), 10_000)
 }
 
-// Desktop: navigate to vlc://<stream-url>. If a handler is registered the OS
-// switches to VLC (the page loses focus); if not, nothing happens, so after a
-// short grace period with the page still focused we fall back to the .m3u file.
-function openDesktop(channel: Channel): void {
+// Desktop: navigate to vlc://<url>. If a handler is registered the OS switches
+// to VLC (the page loses focus); if not, nothing happens, so after a short grace
+// period with the page still focused we fall back to the .m3u file.
+function openDesktop(target: string, fallback: () => void): void {
   let switched = false
   const onBlur = () => { switched = true }
   const onHide = () => { if (document.hidden) switched = true }
   window.addEventListener('blur', onBlur, { once: true })
   document.addEventListener('visibilitychange', onHide)
 
-  location.href = `vlc://${channel.url}`
+  location.href = `vlc://${target}`
 
   window.setTimeout(() => {
     window.removeEventListener('blur', onBlur)
     document.removeEventListener('visibilitychange', onHide)
-    if (!switched) downloadM3u(channel)
+    if (!switched) fallback()
   }, 1200)
+}
+
+// `target` is what VLC should open — a stream URL for one item, the playlist
+// endpoint for several. `items`/`name` are only for the download fallback.
+function handOver(target: string, items: PlaylistItem[], name: string): void {
+  if (IS_MOBILE) {
+    location.href = xCallbackLink(target)
+    return
+  }
+  openDesktop(target, () => downloadM3u(items, name))
 }
 
 /**
@@ -82,9 +116,27 @@ function openDesktop(channel: Channel): void {
  * back to a .m3u download if none is installed.
  */
 export function openInVlc(channel: Channel): void {
-  if (IS_MOBILE) {
-    location.href = xCallbackLink(channel.url)
+  const title = vlcTitle(channel)
+  handOver(channel.url, [{ title, url: channel.url }], title)
+}
+
+/**
+ * Open several items in VLC as one ordered playlist — a whole season, so it
+ * plays on into the next episode instead of stopping after the first.
+ */
+export function openPlaylistInVlc(channels: Channel[], name: string): void {
+  if (channels.length === 0) return
+  if (channels.length === 1) {
+    openInVlc(channels[0])
     return
   }
-  openDesktop(channel)
+  const items = channels.map((c) => ({ title: vlcTitle(c), url: c.url }))
+  const hosted = playlistUrl(items, name)
+  // No link short enough to survive the trip: the file is the only route left,
+  // and it carries the same playlist.
+  if (!hosted) {
+    downloadM3u(items, name)
+    return
+  }
+  handOver(hosted, items, name)
 }
