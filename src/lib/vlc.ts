@@ -95,39 +95,91 @@ function downloadM3u(items: PlaylistItem[], name: string): void {
   setTimeout(() => URL.revokeObjectURL(href), 10_000)
 }
 
+// How long a click waits for VLC before giving up and downloading the file.
+const FALLBACK_MS = 1200
+// How long we keep watching before *recording* an answer. A cold VLC can take
+// several seconds to come up, and a verdict this computer then acts on for a
+// week must not be decided in the first second and a bit.
+const VERDICT_MS = 6000
+
+const HANDLER_KEY = 'sf-vlc-handler'
+const VERDICT_TTL = 7 * 24 * 60 * 60 * 1000
+
+export type VlcHandler = 'installed' | 'missing' | 'unknown'
+
+/** What this computer was last seen to do — Settings reports it, and a click
+ *  skips the dead wait when the answer is already known to be no. */
+export function vlcHandler(): VlcHandler {
+  try {
+    const raw = localStorage.getItem(HANDLER_KEY)
+    if (!raw) return 'unknown'
+    const { state, at } = JSON.parse(raw) as { state: string; at: number }
+    // "Installed" cannot become wrong by itself. "Missing" can — the handler may
+    // have been installed since — and nothing would ever try again, so it lapses.
+    if (state === 'missing' && Date.now() - at > VERDICT_TTL) return 'unknown'
+    return state === 'installed' || state === 'missing' ? state : 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
+function rememberHandler(installed: boolean): void {
+  try {
+    localStorage.setItem(HANDLER_KEY, JSON.stringify({
+      state: installed ? 'installed' : 'missing',
+      at: Date.now(),
+    }))
+  } catch {
+    // Private mode, or storage full. The wait comes back; nothing breaks.
+  }
+}
+
 // Navigate to vlc://<url> and answer whether the OS switched away to VLC. With
 // a handler registered the page loses focus; with none, nothing happens at all —
 // which is the only signal a page gets, since an unhandled scheme throws nothing.
-function switchToVlc(target: string): Promise<boolean> {
+//
+// The answer the caller acts on and the answer we record are taken at different
+// times on purpose: the click cannot wait six seconds to start downloading, and
+// the record cannot afford to call a slow-launching VLC missing.
+function switchToVlc(target: string, decideMs: number): Promise<boolean> {
   return new Promise((resolve) => {
     let switched = false
     const onBlur = () => { switched = true }
     const onHide = () => { if (document.hidden) switched = true }
-    window.addEventListener('blur', onBlur, { once: true })
+    window.addEventListener('blur', onBlur)
     document.addEventListener('visibilitychange', onHide)
 
     location.href = `vlc://${target}`
 
+    window.setTimeout(() => resolve(switched), decideMs)
     window.setTimeout(() => {
       window.removeEventListener('blur', onBlur)
       document.removeEventListener('visibilitychange', onHide)
-      resolve(switched)
-    }, 1200)
+      rememberHandler(switched)
+    }, Math.max(decideMs, VERDICT_MS))
   })
 }
 
 // Desktop: try the handler, fall back to the .m3u file if it is not installed.
 function openDesktop(target: string, fallback: () => void): void {
-  void switchToVlc(target).then((switched) => { if (!switched) fallback() })
+  // A computer already known to have no handler should not spend a second and a
+  // bit failing at it on every single click — that pause is most of what makes
+  // the download route feel broken rather than merely different.
+  if (vlcHandler() === 'missing') {
+    fallback()
+    return
+  }
+  void switchToVlc(target, FALLBACK_MS).then((switched) => { if (!switched) fallback() })
 }
 
 /**
  * Settings → VLC's Test button. Opens VLC on a deliberately empty playlist and
  * reports whether the handler answered, so "is this computer set up?" has an
- * answer that does not involve starting a film to find out.
+ * answer that does not involve starting a film to find out. Takes the full
+ * verdict window, since its whole job is to be right.
  */
 export function probeVlcHandler(): Promise<boolean> {
-  return switchToVlc(`${location.origin}/vlc-test.m3u`)
+  return switchToVlc(`${location.origin}/vlc-test.m3u`, VERDICT_MS)
 }
 
 // `target` is what VLC should open — a stream URL for one item, the playlist

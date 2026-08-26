@@ -244,24 +244,47 @@ plays the season in order. That was the one leg of this that could not be proven
 from a desktop, since WebKit-on-macOS is not the phone and no test can install
 VLC's URL scheme.
 
-### Installing the handler
+### Settings → VLC, and the order its two routes are in
 
-`public/vlc-handler.sh` (macOS) and `public/vlc-handler.ps1` (Windows) are the
-installers, and they live under `public/` **because the app serves them**:
-Settings → VLC hands out `curl -fsSL <origin>/vlc-handler.sh | bash` and
-`irm <origin>/vlc-handler.ps1 | iex`, with a Copy button and a Test button that
-opens VLC on the empty `public/vlc-test.m3u` and reports whether it answered.
-`src/components/settings/VlcHandlerSection.tsx` is that section.
+`src/components/settings/VlcHandlerSection.tsx`. **The route that needs no
+install comes first, and it must stay first:** tell the browser to always open
+`.m3u` files, and the download step becomes invisible — one click, ending in VLC,
+with nothing installed and no terminal. Every browser has that toggle, none of
+them in the same place, so the section detects which one is asking and prints
+only its steps.
 
-They used to live in `tools/vlc-handler/`, which is exactly the place a person
-setting up a second computer does not look. One copy, in the place the app links
-to, is the point — do not add a second under `tools/`.
+The `vlc://` handler is the second route, folded behind a disclosure, because all
+it buys is skipping the download itself. A page cannot install a URL-scheme
+handler on either OS — that is the privilege the scheme registry exists to
+withhold — so it costs one pasted command, and the alternatives are worse rather
+than better: a downloaded `.command` arrives without its exec bit, and a
+downloaded `.app` meets Gatekeeper's "unidentified developer" wall.
 
-A page cannot install a URL-scheme handler on either OS; that is the privilege
-the scheme registry exists to withhold. One pasted command is the floor, and the
-alternatives are worse: a downloaded `.command` arrives without its exec bit, and
-a downloaded `.app` meets Gatekeeper's "unidentified developer" wall, which is
-more steps and more alarming than the command.
+This section led with the command in its first version, which is how you end up
+telling someone to open a terminal to fix a two-click annoyance. If it ever grows
+a third route, weigh it the same way: how much does it ask of the person.
+
+`public/vlc-handler.sh` and `public/vlc-handler.ps1` are the installers, under
+`public/` **because the app serves them** — that is what makes the one-liners
+one-liners. They used to live in `tools/vlc-handler/`, which is exactly where a
+person setting up a second computer does not look. One copy, in the place the app
+links to — do not add a second under `tools/`.
+
+### The remembered verdict
+
+`vlcHandler()` in `src/lib/vlc.ts` records what this computer was last seen to do,
+in `localStorage`, and a click on a computer known to have no handler goes
+straight to the download. That pause — a second and a bit of nothing, on every
+click — was most of what made the download route feel broken rather than merely
+different.
+
+The answer a click acts on and the answer we record are taken at **different
+times on purpose**: `FALLBACK_MS` (1.2 s) is all a click can wait before
+downloading, but a cold VLC can take several seconds to come up, and recording
+"missing" that early would file a working computer as broken. `VERDICT_MS` (6 s)
+is what the record waits for. A "missing" verdict also lapses after a week, since
+nothing would otherwise ever try again after the handler was installed; Settings'
+Test button overwrites it immediately.
 
 `vlc-handler.ps1` must stay **pure ASCII** — Windows PowerShell 5.1's `irm`
 decodes a charset-less response as ISO-8859-1, so a UTF-8 byte arrives mangled.
