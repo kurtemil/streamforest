@@ -222,6 +222,19 @@ while actually meaning "the default rows view". It is `browseLabel` / "Browse".
    report; it is a machine missing the handler.
 2. **Neither link scheme carries more than one MRL.** `vlc-x-callback://…/stream?url=`
    on the phone and `vlc://` on the desktop both take a single URL.
+3. **A colon cannot travel inside a `vlc://` link as itself.** The browser parses
+   the link before dispatching it, reads the inner `https:` as a host with an
+   empty port, and serializes the colon away — the handler receives
+   `vlc://https//…` and VLC gets a string that is no longer a URL. Found on
+   2026-08-27, after a day in the field where the Test button passed (it measures
+   focus loss, and the handler app *did* launch) while every real click did
+   nothing — and downloaded nothing, because the launching handler stole focus,
+   which is exactly the "VLC opened" signal that suppresses the fallback.
+   `vlcSchemeLink()` therefore sends every colon as `%3A` and **both installers
+   decode it back** — that pair is a contract, and `src/lib/vlc.test.ts` pins the
+   page's half against Node's URL parser (the same WHATWG parser browsers run).
+   A handler installed before 2026-08-27 predates the contract and must be
+   reinstalled; the installers are idempotent, so it is the same one-liner again.
 
 So a season is handed over as a *link to a playlist*: `/api/playlist/<name>.m3u?d=<token>`,
 which VLC fetches and plays in order. The token carries the entries themselves —

@@ -134,6 +134,16 @@ function rememberHandler(installed: boolean): void {
   }
 }
 
+// The vlc:// link that reaches the OS. A colon cannot travel as itself: the
+// browser parses `vlc://https://…` before dispatching it, reads `https:` as a
+// host with an empty port, and serializes the colon away — the handler receives
+// `vlc://https//…` and hands VLC a string that is no longer a URL. Sent as %3A
+// the colon survives the parser byte for byte (there is a unit test proving
+// both halves of that), and both installers decode it back before calling VLC.
+export function vlcSchemeLink(target: string): string {
+  return `vlc://${target.replace(/:/g, '%3A')}`
+}
+
 // Navigate to vlc://<url> and answer whether the OS switched away to VLC. With
 // a handler registered the page loses focus; with none, nothing happens at all —
 // which is the only signal a page gets, since an unhandled scheme throws nothing.
@@ -149,7 +159,7 @@ function switchToVlc(target: string, decideMs: number): Promise<boolean> {
     window.addEventListener('blur', onBlur)
     document.addEventListener('visibilitychange', onHide)
 
-    location.href = `vlc://${target}`
+    location.href = vlcSchemeLink(target)
 
     window.setTimeout(() => resolve(switched), decideMs)
     window.setTimeout(() => {

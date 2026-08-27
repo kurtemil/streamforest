@@ -18,10 +18,24 @@ fi
 rm -rf "$APP"
 mkdir -p "$HOME/Applications"
 
-# A tiny AppleScript app: strips the leading "vlc://" and hands the rest to VLC.
-# The rest is a stream URL for one episode, or a link to a .m3u for a season.
+# A tiny AppleScript app: strips the leading "vlc://", decodes the colons and
+# hands the rest to VLC. The rest is a stream URL for one episode, or a link to
+# a .m3u for a season.
+#
+# The page sends every colon as %3A — a literal one does not survive the trip:
+# the browser parses `vlc://https://…` before dispatching, reads `https:` as a
+# host with an empty port, and serializes the colon away. See vlcSchemeLink()
+# in src/lib/vlc.ts, the other half of this contract. The starts-with repairs
+# cover a still-open tab running the page from before that contract existed.
 osacompile -o "$APP" -e 'on open location u
 	set theURL to text 7 thru -1 of u
+	set text item delimiters to "%3A"
+	set theParts to text items of theURL
+	set text item delimiters to ":"
+	set theURL to theParts as text
+	set text item delimiters to ""
+	if theURL starts with "https//" then set theURL to "https://" & text 8 thru -1 of theURL
+	if theURL starts with "http//" then set theURL to "http://" & text 7 thru -1 of theURL
 	do shell script "open -a VLC " & quoted form of theURL
 end open location'
 

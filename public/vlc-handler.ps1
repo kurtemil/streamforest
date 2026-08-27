@@ -25,6 +25,15 @@ Dim url, vlc, fso, sh
 url = WScript.Arguments(0)
 url = Replace(url, "vlc://", "", 1, 1)   ' drop the scheme prefix (first match only)
 
+' The page sends every colon as %3A - a literal one does not survive the trip:
+' the browser parses vlc://https://... before dispatching, reads https: as a
+' host with an empty port, and serializes the colon away. See vlcSchemeLink()
+' in src/lib/vlc.ts, the other half of this contract. The Left() repairs cover
+' a still-open tab running the page from before that contract existed.
+url = Replace(url, "%3A", ":")
+If Left(url, 7) = "https//" Then url = "https://" & Mid(url, 8)
+If Left(url, 6) = "http//" Then url = "http://" & Mid(url, 7)
+
 vlc = "C:\Program Files\VideoLAN\VLC\vlc.exe"
 Set fso = CreateObject("Scripting.FileSystemObject")
 If Not fso.FileExists(vlc) Then vlc = "C:\Program Files (x86)\VideoLAN\VLC\vlc.exe"
