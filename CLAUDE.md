@@ -680,5 +680,9 @@ Uses the existing Cloudflare infrastructure. Requires:
 
 - Pages project: `streamforest`
 - D1 database: `streamforest-profiles` (`1b607c87-bab2-485b-94c8-5722f9f8f9a6`)
-- Tunnel: `streamforest-transcode` (`629a0479-9537-40ad-94ad-af55706dc9cf`)
+- Tunnel: `hemservern` (`629a0479-9537-40ad-94ad-af55706dc9cf`) — hette
+  `streamforest-transcode` till 2026-09-15. Namnet byttes för att tunneln bär sex värdnamn och
+  bara ett är StreamForests: Skafferiet, Snilles API och TTS ligger på samma. Allt pekar på
+  UUID:t, så bytet rörde varken DNS eller ingress. Värdnamnet
+  `7878bd57-streamforest-transcode.krutofv.se` heter fortfarande så.
 - Domain: `krutofv.se`
