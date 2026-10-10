@@ -626,7 +626,7 @@ DNS-only A record, and everything uses that name:
 **The provider has several IPs, and the home server fails over between them.**
 Settings → Playlist source has four IP fields, in order of preference. They are
 stored in D1 (`_global/provider_ips`) and served at `GET /api/provider`.
-`transcode-proxy/provider.mjs` reads that list every minute and asks the IP in use
+`transcode-proxy/provider.mjs` reads that list every ten minutes and asks the IP in use
 for any HTTP answer. When none comes, it tries the others in order, and the first
 that answers becomes active:
 
@@ -635,7 +635,8 @@ that answers becomes active:
 - it repoints the DNS record, so the playlist download and VLC follow within the
   60 s TTL.
 
-A failed probe triggers a check at once instead of waiting for the minute. It does
+A failed probe triggers a check at once. That is what makes the fail-over fast, so the
+ten-minute round is only a backstop: one small request, never all four addresses. It does
 not move back when an earlier IP recovers, because moving costs a blip. Its state
 is at `GET /provider-status` on the transcode server, and Settings shows it per IP:
 *in use / answers / no answer*. Caches and keys keep using the name, never the IP,

@@ -5,8 +5,10 @@
 // IPs in Settings, in order; Pages stores them and serves them at /api/provider.
 //
 // This runs here because this is the one always-on part that can reach a bare IP
-// (Cloudflare refuses to) and the part that streams everything. Once a minute it
-// asks the active IP for any HTTP answer. When that fails it tries the others in
+// (Cloudflare refuses to) and the part that streams everything. Every ten minutes,
+// and at once when a playback fails, it asks the active IP for any HTTP answer.
+// That is one small request: the others are only tried when the active one fails,
+// and a failed probe already triggers a check, so polling more often buys nothing. When that fails it tries the others in
 // the admin's order, and the first that answers becomes active:
 //   - this server uses it at once, by connecting to the IP instead of the name;
 //   - the DNS record is repointed, so the playlist download and VLC follow within
@@ -14,7 +16,7 @@
 // It does not move back when an earlier IP recovers: moving costs a blip, and
 // staying put on a working server costs nothing.
 
-const CHECK_EVERY_MS = 60_000
+const CHECK_EVERY_MS = 10 * 60_000
 const PROBE_TIMEOUT_MS = 5_000
 
 /**
@@ -122,7 +124,7 @@ export function createProviderFailover(o) {
     },
     stop() { clearInterval(timer) },
     check,
-    /** A connection to the provider failed: look again now rather than in a minute. */
+    /** A connection to the provider failed: look again now rather than at the next round. */
     reportFailure() { check() },
     /** The URL this server should connect to: our name swapped for the active IP. */
     resolve(url) {

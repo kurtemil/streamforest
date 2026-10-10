@@ -29,7 +29,7 @@ export const sv = {
   'sidebar.selectProfile': 'Välj profil',
   'sidebar.privateUse': 'Endast privat bruk',
   'layout.profileSwitch': 'Profil: {name} — byt',
-  'layout.providerDown': 'IPTV-leverantören svarar inte (kontrollerat {time}). Hemservern provar alla adresser varje minut, så raden försvinner av sig själv när någon svarar.',
+  'layout.providerDown': 'IPTV-leverantören svarar inte (kontrollerat {time}). Hemservern provar adresserna var tionde minut och direkt när någon försöker spela, så raden försvinner av sig själv när någon svarar.',
   'layout.chooseProfile': 'Välj profil',
 
   // ── Shared across screens ──────────────────────────────────────────────────
@@ -295,7 +295,7 @@ export const sv = {
   'settings.providerErrDns': 'Cloudflare tog inte emot ändringen. Inget flyttades.',
   'settings.providerErrNetwork': 'Kom inte fram till servern.',
   'settings.providerIps': 'Leverantörens IP-adresser',
-  'settings.providerIpsHint': 'I turordning. Slutar den som används att svara går hemservern över till nästa inom en minut.',
+  'settings.providerIpsHint': 'I turordning. Slutar den som används att svara går hemservern över till nästa: direkt när någon försöker spela, annars inom tio minuter.',
   'settings.providerIpPlaceholder': 'IP {n}',
   'settings.providerIpActive': 'används',
   'settings.providerIpUp': 'svarar',

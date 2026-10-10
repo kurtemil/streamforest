@@ -36,7 +36,7 @@ export const en = {
   'sidebar.selectProfile': 'Select profile',
   'sidebar.privateUse': 'Private use only',
   'layout.profileSwitch': 'Profile: {name} — switch',
-  'layout.providerDown': 'The IPTV provider is not answering (checked {time}). The home server tries every address once a minute, so this goes away by itself once one answers.',
+  'layout.providerDown': 'The IPTV provider is not answering (checked {time}). The home server tries the addresses every ten minutes and as soon as someone presses play, so this goes away by itself once one answers.',
   'layout.chooseProfile': 'Choose profile',
 
   // ── Shared across screens ──────────────────────────────────────────────────
@@ -300,7 +300,7 @@ export const en = {
   'settings.providerErrDns': 'Cloudflare did not accept the change. Nothing was moved.',
   'settings.providerErrNetwork': 'Could not reach the server.',
   'settings.providerIps': 'Provider IP addresses',
-  'settings.providerIpsHint': 'In order. If the one in use stops answering, the home server moves to the next within a minute.',
+  'settings.providerIpsHint': 'In order. If the one in use stops answering, the home server moves to the next: at once when someone presses play, otherwise within ten minutes.',
   'settings.providerIpPlaceholder': 'IP {n}',
   'settings.providerIpActive': 'in use',
   'settings.providerIpUp': 'answers',

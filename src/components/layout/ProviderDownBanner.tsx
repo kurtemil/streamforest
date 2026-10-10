@@ -10,9 +10,10 @@ const RECHECK_MS = 5 * 60 * 1000
  *
  * The provider was gone for seventeen days in September and October 2026 before
  * anyone noticed: the app kept showing its cached catalogue, and every title looked
- * playable until it was tapped. The transcode server checks the provider every
- * minute anyway (transcode-proxy/provider.mjs). If its last check of the address in
- * use failed, it has already tried the others, so none of them answers.
+ * playable until it was tapped. The transcode server checks the provider every ten
+ * minutes and on every failed playback (transcode-proxy/provider.mjs). If its last
+ * check of the address in use failed, it has already tried the others, so none of
+ * them answers.
  *
  * It says nothing unless the server reports exactly that. An unreachable home
  * server, an offline phone and a server that has not checked yet all look alike

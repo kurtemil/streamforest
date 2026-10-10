@@ -17,7 +17,7 @@ Node HTTP service that fetches an upstream stream URL, pipes it through ffmpeg a
 
 `url` must be on an allowed host: `iptv.krutofv.se` always, plus anything in `ALLOWED_HOSTS` (comma-separated).
 
-**Provider fail-over** (`provider.mjs`): reads the IP list from `PROVIDER_CONFIG_URL` (default `https://streamforest.krutofv.se/api/provider`) every minute, keeps the first IP that answers, connects to it directly and repoints `iptv.krutofv.se` when `CF_DNS_TOKEN` is set. Tests: `node --test transcode-proxy/provider.test.mjs`.
+**Provider fail-over** (`provider.mjs`): reads the IP list from `PROVIDER_CONFIG_URL` (default `https://streamforest.krutofv.se/api/provider`) every ten minutes (and at once after a failed probe), keeps the first IP that answers, connects to it directly and repoints `iptv.krutofv.se` when `CF_DNS_TOKEN` is set. Tests: `node --test transcode-proxy/provider.test.mjs`.
 
 ## Run locally
 
