@@ -720,6 +720,13 @@ deploy that should use it. Without it, Settings says the move is switched off.
 itself is down: `<ip>` moves the record, `--m3u` moves `m3u_url`. It reads the same
 key as `CF_DNS_TOKEN` from the environment, `.env.local` or `../hemma/.env`.
 
+**Never download the full playlist from the home server by hand.** On 2026-10-10,
+two `get.php` downloads (60 MB each) a few minutes apart, made to compare group
+names, were followed by the provider blocking the home IP on all four servers. The
+account stayed active, as `/proxy` from Cloudflare showed. Everything that
+streams comes from the home IP, so that is the one address that must never look
+like a scraper. Read groups from a device's IndexedDB, or through `/proxy`.
+
 The symptom of a dead provider is "playback is broken" everywhere at once, which
 reads as a player bug and is not one. The transcode server logs it daily:
 `[epg] refresh error` instead of `[epg] cached` at 07:00 UTC.
