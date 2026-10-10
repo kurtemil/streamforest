@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { Film, Play } from 'lucide-react'
 import { ScrollableRow, SectionHeader } from '@/components/ui/MediaRow'
-import { posterUrl, type HomeItem } from '@/services/jellyfin'
+import { posterUrl, watchLocalNetworkPermission, type HomeItem } from '@/services/jellyfin'
 import { useHomeLibraryStore } from '@/stores/homeLibraryStore'
 import { getProfile, useProfileStore } from '@/stores/profileStore'
 import { useT } from '@/lib/i18n'
@@ -21,14 +21,26 @@ export function HomeRail() {
 
   useEffect(() => {
     if (!profile) return
-    load(profile.id, profile.name)
+    const reload = () => load(profile.id, profile.name)
+    reload()
     // Coming back to the app may mean coming home, or having watched in Swiftfin.
-    const onVisible = () => { if (document.visibilityState === 'visible') load(profile.id, profile.name) }
+    const onVisible = () => { if (document.visibilityState === 'visible') reload() }
     document.addEventListener('visibilitychange', onVisible)
-    return () => document.removeEventListener('visibilitychange', onVisible)
+    // Answering the browser's home-network question, now or later in its settings.
+    let unwatch = () => {}
+    let alive = true
+    watchLocalNetworkPermission(reload).then((u) => { if (alive) unwatch = u; else u() })
+    return () => {
+      alive = false
+      document.removeEventListener('visibilitychange', onVisible)
+      unwatch()
+    }
   }, [profile, load])
 
   if (status === 'unknown') return null
+  if (status === 'blocked') {
+    return <p className="text-caption text-neutral-500">{t('home.homeBlocked')}</p>
+  }
   if (status === 'unreachable') {
     return <p className="text-caption text-neutral-500">{t('home.homeUnreachable')}</p>
   }

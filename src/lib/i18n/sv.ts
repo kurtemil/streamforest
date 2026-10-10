@@ -86,6 +86,7 @@ export const sv = {
   'home.recentMovies': 'Nyligen tillagda filmer',
   'home.homeLibrary': 'Hemma',
   'home.homeUnreachable': 'Hemmabiblioteket nås hemma, eller borta med Tailscale påslaget.',
+  'home.homeBlocked': 'Webbläsaren har nekats åtkomst till hemnätet, så hemmabiblioteket kan inte visas. Tillåt ”lokalt nätverk” för den här sidan i webbläsarens webbplatsinställningar.',
   'home.playFailed': 'Filmen gick inte att starta.',
   'home.recentShows': 'Nyligen tillagda serier',
   'home.becauseYouWatched': 'För att du såg {title}',

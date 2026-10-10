@@ -245,6 +245,14 @@ from Caddy on the server, via a DNS-01 challenge.
   stopped on close. That is what lets Swiftfin and this app resume each other.
   Jellyfin ignores positions under 5 % of the runtime, so a quick test leaves no
   resume point; that is its rule, not a bug.
+- **Desktop Chrome and Edge ask once** before a public site may reach a home address
+  (Local Network Access, Chrome 142+). The permission was named
+  `local-network-access`, and since 145 `local-network`. While the question is
+  open, the reachability check waits up to a minute instead of three seconds. A
+  "no" shows its own line saying what to allow, because "reachable at home" would
+  be false at home. The row reloads when the answer changes. Safari does not ask.
+  Playwright denies the question unless it is given
+  `grantPermissions(['local-network-access'])`. A localhost dev server never asks.
 - **Unreachable means one line, not cards.** Away without Tailscale, the row
   becomes "Hemmabiblioteket nås hemma, eller borta med Tailscale". A profile
   switch clears the row before loading, so one profile's list never shows under

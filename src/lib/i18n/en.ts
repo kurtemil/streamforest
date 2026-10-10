@@ -93,6 +93,7 @@ export const en = {
   'home.recentMovies': 'Recently Added Movies',
   'home.homeLibrary': 'Home library',
   'home.homeUnreachable': 'The home library is reachable at home, or away with Tailscale on.',
+  'home.homeBlocked': 'This browser was refused access to the home network, so the home library cannot show. Allow “local network” for this site in the browser’s site settings.',
   'home.playFailed': 'This film could not be started.',
   'home.recentShows': 'Recently Added TV Shows',
   'home.becauseYouWatched': 'Because you watched {title}',

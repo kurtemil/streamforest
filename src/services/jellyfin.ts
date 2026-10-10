@@ -90,10 +90,42 @@ async function call<T>(path: string, opts: { method?: string; body?: unknown; to
   return (text ? JSON.parse(text) : undefined) as T
 }
 
-/** Whether the server answers from here: home network, or tailnet with Tailscale on. */
-export async function isReachable(): Promise<boolean> {
+/**
+ * Chrome and Edge (142+) ask once before a public site may reach a device on the
+ * home network, and the server's name resolves to a home address. The permission
+ * was called `local-network-access`, and since Chrome 145 `local-network`. Safari
+ * does not ask (yet); there the query throws and this says 'unsupported'.
+ */
+export type LocalNetworkPermission = 'granted' | 'prompt' | 'denied' | 'unsupported'
+
+async function queryLocalNetwork(): Promise<PermissionStatus | null> {
+  if (typeof navigator === 'undefined' || !navigator.permissions?.query) return null
+  for (const name of ['local-network-access', 'local-network']) {
+    try { return await navigator.permissions.query({ name: name as PermissionName }) } catch { /* try the next name */ }
+  }
+  return null
+}
+
+export async function localNetworkPermission(): Promise<LocalNetworkPermission> {
+  return (await queryLocalNetwork())?.state ?? 'unsupported'
+}
+
+/** Calls `onChange` when the user answers the browser's question, or changes it later. */
+export async function watchLocalNetworkPermission(onChange: () => void): Promise<() => void> {
+  const status = await queryLocalNetwork()
+  if (!status) return () => {}
+  status.addEventListener('change', onChange)
+  return () => status.removeEventListener('change', onChange)
+}
+
+/**
+ * Whether the server answers from here: home network, or tailnet with Tailscale on.
+ * While the browser is still asking for permission the first request waits on the
+ * user, so it gets a minute rather than the usual three seconds.
+ */
+export async function isReachable(waitForUser = false): Promise<boolean> {
   try {
-    await call('/System/Info/Public', { timeoutMs: 3000 })
+    await call('/System/Info/Public', { timeoutMs: waitForUser ? 60_000 : 3000 })
     return true
   } catch {
     return false

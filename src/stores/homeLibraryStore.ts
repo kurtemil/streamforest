@@ -1,16 +1,18 @@
 import { create } from 'zustand'
 import {
-  forgetSession, getSession, isAuthError, isReachable, listItems,
+  forgetSession, getSession, isAuthError, isReachable, listItems, localNetworkPermission,
   type HomeItem, type JellyfinSession,
 } from '@/services/jellyfin'
 
 /**
  * - `unknown`: not asked yet, or asking. Nothing is shown.
+ * - `blocked`: this browser was told no when it asked about the home network.
+ *   Saying "unreachable" then would be wrong at home, so it says what to change.
  * - `unreachable`: the server did not answer from here (away without Tailscale).
  *   One quiet line says so; no cards that look playable and then fail.
  * - `ready`: `items` is what this profile may see. It can be empty.
  */
-export type HomeStatus = 'unknown' | 'unreachable' | 'ready'
+export type HomeStatus = 'unknown' | 'blocked' | 'unreachable' | 'ready'
 
 interface HomeLibraryState {
   status: HomeStatus
@@ -52,7 +54,12 @@ export const useHomeLibraryStore = create<HomeLibraryState>((set, get) => ({
     if (get().profileId !== profileId) {
       set({ status: 'unknown', profileId, userName, session: null, items: [], playing: null })
     }
-    if (!(await isReachable())) {
+    const permission = await localNetworkPermission()
+    if (permission === 'denied') {
+      if (get().profileId === profileId) set({ status: 'blocked', items: [] })
+      return
+    }
+    if (!(await isReachable(permission === 'prompt'))) {
       if (get().profileId === profileId) set({ status: 'unreachable', items: [] })
       return
     }
