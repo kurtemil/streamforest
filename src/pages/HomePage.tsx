@@ -7,6 +7,7 @@ import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useProfileStore } from '@/stores/profileStore'
 import { isVisible, useActiveExclusions } from '@/hooks/useActiveExclusions'
+import { HomeRail } from '@/components/home/HomeRail'
 import { db, clearProgress, addToWatchLater, removeFromWatchLater, getRecentlyAddedIds, getDismissedRecKeys } from '@/services/db'
 import { deleteRemoteProgress, pushWatchLater, deleteRemoteWatchLater } from '@/services/sync'
 import { MovieCard } from '@/components/movies/MovieCard'
@@ -321,6 +322,7 @@ export function HomePage() {
   if (!m3uUrl || channels.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-6 p-8">
+        <div className="w-full max-w-5xl"><HomeRail /></div>
         <div className="w-16 h-16 rounded-2xl bg-accent-600/20 flex items-center justify-center">
           <svg viewBox="0 0 24 24" fill="none" className="w-8 h-8">
             <path d="M5 3l14 9-14 9V3z" fill="#16a34a" />
@@ -381,6 +383,8 @@ export function HomePage() {
       )}
 
       <div className="px-4 sm:px-6 pb-12 pt-6 space-y-8 sm:space-y-10">
+        <HomeRail />
+
         {/* Recently Added Movies */}
         {recentMovies.length > 0 && (
           <section>

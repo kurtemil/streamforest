@@ -214,6 +214,51 @@ while actually meaning "the default rows view". It is `browseLabel` / "Browse".
 
 ---
 
+## The home library (Jellyfin)
+
+Added 2026-10-11. The films on the home server's disks appear as a "Hemma" row on
+Home, from Jellyfin at `https://jellyfin.krutofv.se` (`VITE_JELLYFIN_URL` overrides
+it). That name resolves to the server's LAN address in public DNS (grey cloud), so
+traffic never touches Cloudflare. Away from home it is reached over Tailscale,
+where the server advertises its own address as a /32 route. The certificate comes
+from Caddy on the server, via a DNS-01 challenge.
+
+- **Browser only.** `src/services/jellyfin.ts` talks to the server from the page.
+  No Function can reach it, and none needs to. iOS Safari blocks http from an
+  https page (fetch and `<video>` alike), which is the whole reason for the HTTPS
+  name.
+- **Profiles sign in as the Jellyfin user of the same name, without a password.**
+  The session is kept per profile per device. A 401 drops it and signs in once
+  more. Jellyfin decides what each user may see, so the kids' limits live
+  there, not here.
+- **The Authorization header must be ASCII.** `Device="Webbläsare"` reached Caddy
+  as a Latin-1 byte, HTTP/2 answered 400 without CORS headers, and the browser
+  reported a CORS error. The test in `jellyfin.test.ts` holds the line.
+- **`HomePlayer`, not `VideoPlayer`.** Jellyfin already serves what a browser
+  can play: the file itself for H.264/AAC MP4, otherwise HLS transcoded on the
+  server. None of VideoPlayer's proxy machinery applies, and none of it should be
+  at risk from this. Use the `TranscodingUrl` from `PlaybackInfo` as given (12.x
+  hides the HLS routes from its API description). It carries `ApiKey=` because
+  native HLS cannot send headers. Edge and Safari play it natively, other
+  browsers through hls.js.
+- **Watch state is Jellyfin's.** Start, progress every 10 s and on pause, and
+  stopped on close. That is what lets Swiftfin and this app resume each other.
+  Jellyfin ignores positions under 5 % of the runtime, so a quick test leaves no
+  resume point; that is its rule, not a bug.
+- **Unreachable means one line, not cards.** Away without Tailscale, the row
+  becomes "Hemmabiblioteket nås hemma, eller borta med Tailscale". A profile
+  switch clears the row before loading, so one profile's list never shows under
+  another.
+
+Verified 2026-10-11 against the real server in Edge:
+- an XviD film starts in about 1.5 s and seeks 20 minutes in 6 s;
+- closing saves the position (1208 s), the card moves first with a progress bar,
+  and reopening resumes at 1208.6 s;
+- a kid profile sees only its allowlist.
+
+The plan for one card per film across both sources, with kids' rules shared,
+lives outside this public repo.
+
 ## Handing playback to VLC
 
 `src/lib/vlc.ts` owns the "VLC" buttons. Two facts shape everything in it:

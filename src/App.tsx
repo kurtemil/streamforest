@@ -13,6 +13,7 @@ const SettingsPage = lazy(() => import('@/pages/SettingsPage').then(m => ({ defa
 const LibraryPage = lazy(() => import('@/pages/LibraryPage').then(m => ({ default: m.LibraryPage })))
 const FeedbackPage = lazy(() => import('@/pages/FeedbackPage').then(m => ({ default: m.FeedbackPage })))
 import { VideoPlayer } from '@/components/player/VideoPlayer'
+import { HomePlayer } from '@/components/player/HomePlayer'
 import { ProfilePicker } from '@/components/ProfilePicker'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { useProfileStore } from '@/stores/profileStore'
@@ -86,6 +87,7 @@ export default function App() {
         </Suspense>
       </Layout>
       <VideoPlayer />
+      <HomePlayer />
       {(!activeProfileId || showPicker) && (
         <ProfilePicker forced={!activeProfileId} />
       )}

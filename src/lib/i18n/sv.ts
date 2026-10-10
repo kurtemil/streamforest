@@ -84,6 +84,9 @@ export const sv = {
     'Börja med att lägga till adressen till din M3U-spellista i Inställningar och hämta dina kanaler.',
   'home.openSettings': 'Öppna inställningar',
   'home.recentMovies': 'Nyligen tillagda filmer',
+  'home.homeLibrary': 'Hemma',
+  'home.homeUnreachable': 'Hemmabiblioteket nås hemma, eller borta med Tailscale påslaget.',
+  'home.playFailed': 'Filmen gick inte att starta.',
   'home.recentShows': 'Nyligen tillagda serier',
   'home.becauseYouWatched': 'För att du såg {title}',
 
