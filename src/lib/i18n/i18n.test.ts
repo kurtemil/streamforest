@@ -54,6 +54,7 @@ describe('catalogs', () => {
       'nav.feedback',
       'nav.liveShort',        // "Live"
       'series.seasonShort',   // S01E02 notation is not translated anywhere
+      'settings.providerIpPlaceholder', // "IP {n}"
     ])
     const untranslated = Object.keys(en).filter(
       (k) => !allowed.has(k) && (sv as Record<string, string>)[k] === (en as Record<string, string>)[k],

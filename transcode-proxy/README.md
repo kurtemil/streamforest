@@ -6,6 +6,7 @@ Node HTTP service that fetches an upstream stream URL, pipes it through ffmpeg a
 
 - `GET /transcode?url=<encoded>&start=<seconds>` → streams `video/mp4`
 - `GET /health` → `ok`
+- `GET /provider-status` → which provider IP is in use and what the last checks found (`provider.mjs`; Settings shows it)
 - `GET /probe` → container/audio/subtitle info, used before VOD playback
 - `GET /keyframe` → still frame for scrubbing previews
 - `GET /subtitle` → extracted embedded subtitle track
@@ -14,7 +15,9 @@ Node HTTP service that fetches an upstream stream URL, pipes it through ffmpeg a
 - `GET /hls-start` and `GET /hls-file/*` → generated HLS, used by the iOS live path
 - `POST /clientlog` → client-side log sink, read by `npm run logs`
 
-`url` must be on an allowed host (`ALLOWED_HOSTS`, comma-separated, default `iptvworld.xyz`).
+`url` must be on an allowed host: `iptv.krutofv.se` always, plus anything in `ALLOWED_HOSTS` (comma-separated).
+
+**Provider fail-over** (`provider.mjs`): reads the IP list from `PROVIDER_CONFIG_URL` (default `https://streamforest.krutofv.se/api/provider`) every minute, keeps the first IP that answers, connects to it directly and repoints `iptv.krutofv.se` when `CF_DNS_TOKEN` is set. Tests: `node --test transcode-proxy/provider.test.mjs`.
 
 ## Run locally
 

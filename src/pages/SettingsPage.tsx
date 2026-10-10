@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Settings, RefreshCw, Trash2, Check, AlertCircle, Download, Database, ChevronDown, EyeOff, Shield, Users, Tv, ImageOff, Play, Languages, MessageSquarePlus } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
@@ -13,6 +13,42 @@ import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import { VlcHandlerSection } from '@/components/settings/VlcHandlerSection'
 import { LanguageSwitch } from '@/components/ui/LanguageSwitch'
 import { formatDateTime, formatNumber, useT, type MessageKey } from '@/lib/i18n'
+import { needsProviderMove, PROVIDER_HOST } from '@/lib/provider'
+import { getProviderStatus, type ProviderStatus } from '@/lib/transcode'
+import type { ProviderMove } from '@/stores/playlistStore'
+
+/** Server refusal codes from /api/provider, as message keys. */
+const PROVIDER_ERRORS: Record<string, MessageKey> = {
+  pin: 'settings.providerErrPin',
+  locked: 'settings.providerErrLocked',
+  noToken: 'settings.providerErrNoToken',
+  badUrl: 'settings.providerErrBadUrl',
+  https: 'settings.providerErrHttps',
+  noAddress: 'settings.providerErrNoAddress',
+  privateAddress: 'settings.providerErrPrivate',
+  dnsFailed: 'settings.providerErrDns',
+  network: 'settings.providerErrNetwork',
+  badIp: 'settings.providerErrBadIp',
+  noIps: 'settings.providerErrNoIps',
+  tooManyIps: 'settings.providerErrTooManyIps',
+}
+
+/** What /api/provider says is stored: the record's target and the IP list. */
+interface ProviderConfig {
+  configured: boolean
+  target: string | null
+  ips: string[]
+}
+
+const IP_SLOTS = 4
+
+function toSlots(ips: string[]): string[] {
+  return Array.from({ length: IP_SLOTS }, (_, i) => ips[i] ?? '')
+}
+
+function cleanIps(slots: string[]): string[] {
+  return slots.map((s) => s.trim()).filter(Boolean)
+}
 
 function formatBytes(bytes: number) {
   if (bytes === 0) return '0 B'
@@ -252,7 +288,7 @@ function EpgSection({ m3uUrl }: { m3uUrl: string }) {
 
 export function SettingsPage() {
   const t = useT()
-  const { m3uUrl, setM3uUrl, refresh, fetching, progress, error, loadFromDB, channels } = usePlaylistStore()
+  const { m3uUrl, setM3uUrl, moveProvider, refresh, fetching, progress, error, loadFromDB, channels } = usePlaylistStore()
   const activeProfileId = useProfileStore((s) => s.activeProfileId)
   const role = getProfile(activeProfileId)?.role ?? 'kid'
 
@@ -293,10 +329,75 @@ export function SettingsPage() {
   const [tmdbCleared, setTmdbCleared] = useState<number | null>(null)
   const meta = useLiveQuery(() => getPlaylistMeta())
 
+  const [pinInput, setPinInput] = useState('')
+  const [providerConfig, setProviderConfig] = useState<ProviderConfig | null>(null)
+  const [providerStatus, setProviderStatus] = useState<ProviderStatus | null>(null)
+  const [ipSlots, setIpSlots] = useState<string[]>(toSlots([]))
+  const [providerNote, setProviderNote] = useState<string[]>([])
+  const savedIps = providerConfig?.ips ?? []
+  const ipsChanged = cleanIps(ipSlots).join() !== savedIps.join()
+  // Anything that moves the provider is checked against the admin PIN server side.
+  const needsPin = needsProviderMove(urlInput) || ipsChanged
+
+  // The stored IPs and where iptv.krutofv.se points (Pages), and which IP the home
+  // server actually uses and what its checks found (transcode server).
+  useEffect(() => {
+    if (!isAdmin) return
+    let alive = true
+    fetch('/api/provider')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((c: ProviderConfig | null) => {
+        if (!alive || !c) return
+        setProviderConfig(c)
+        setIpSlots(toSlots(c.ips ?? []))
+      })
+      .catch(() => { /* offline: say nothing rather than guess */ })
+    getProviderStatus().then((s) => { if (alive) setProviderStatus(s) })
+    return () => { alive = false }
+  }, [isAdmin])
+
+  // Saves the IP list and a URL that names the provider (server side, PIN checked
+  // there). A URL already on our name with an unchanged list is an ordinary save.
+  const moveTo = async (next: string): Promise<boolean> => {
+    const r: ProviderMove = await moveProvider(next, cleanIps(ipSlots), pinInput)
+    if (!r.ok) {
+      const key = r.code ? PROVIDER_ERRORS[r.code] : undefined
+      const detail = r.detail ?? ''
+      setSaveError(key ? t(key, { host: detail, ip: detail, max: detail }) : t('settings.saveFailed'))
+      return false
+    }
+    setPinInput('')
+    if (r.m3uUrl) setUrlInput(r.m3uUrl)
+    if (r.ips) setIpSlots(toSlots(r.ips))
+    setProviderConfig({ configured: true, target: r.target ?? null, ips: r.ips ?? [] })
+    // Give the home server a moment to pick up the new list before asking it.
+    setTimeout(() => getProviderStatus().then(setProviderStatus), 5000)
+    const lines: string[] = []
+    if (r.target) {
+      lines.push(t('settings.providerMoved', { host: PROVIDER_HOST, target: r.target }))
+    }
+    if (r.check?.answers) {
+      lines.push(r.check.status && r.check.expires
+        ? t('settings.providerAnswers', { status: r.check.status, expires: r.check.expires })
+        : t('settings.providerAnswersShort'))
+      refresh()
+    } else {
+      lines.push(t('settings.providerNoAnswer'))
+    }
+    setProviderNote(lines)
+    return true
+  }
+
   const handleSave = async () => {
     setSaveError(null)
+    setProviderNote([])
+    const next = urlInput.trim()
     try {
-      await setM3uUrl(urlInput.trim())
+      if (needsPin) {
+        if (!(await moveTo(next))) return
+      } else {
+        await setM3uUrl(next)
+      }
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e) {
@@ -387,7 +488,70 @@ export function SettingsPage() {
                 className="w-full bg-white/5 border border-white/8 rounded-lg min-h-11 px-3 py-2.5 text-base can-hover:text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-accent-600/60 transition-colors font-mono"
               />
               <p className="text-xs text-neutral-600 mt-1.5">{t('settings.m3uPrivate')}</p>
+              {providerConfig && (
+                <p className="text-xs text-neutral-500 mt-1 font-mono">
+                  {!providerConfig.configured
+                    ? t('settings.providerNotConfigured')
+                    : providerConfig.target
+                      ? t('settings.providerNow', { host: PROVIDER_HOST, target: providerConfig.target })
+                      : null}
+                </p>
+              )}
             </div>
+            <div>
+              <label className="block text-sm text-neutral-300 mb-2">{t('settings.providerIps')}</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {ipSlots.map((value, i) => {
+                  const ip = value.trim()
+                  const check = ip ? providerStatus?.checks[ip] : undefined
+                  // Only what the home server has actually seen; nothing when it is unreachable.
+                  const state: MessageKey | null = !ip || !providerStatus ? null
+                    : providerStatus.active === ip ? 'settings.providerIpActive'
+                    : check ? (check.ok ? 'settings.providerIpUp' : 'settings.providerIpDown')
+                    : 'settings.providerIpUnchecked'
+                  const tone = state === 'settings.providerIpActive' ? 'bg-green-400'
+                    : state === 'settings.providerIpDown' ? 'bg-red-400' : 'bg-neutral-500'
+                  return (
+                    <div key={i} className="flex items-center gap-2 min-w-0">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        autoComplete="off"
+                        value={value}
+                        onChange={(e) => setIpSlots((s) => s.map((v, j) => (j === i ? e.target.value : v)))}
+                        placeholder={t('settings.providerIpPlaceholder', { n: i + 1 })}
+                        className="w-40 shrink-0 bg-white/5 border border-white/8 rounded-lg min-h-11 px-3 py-2.5 text-base can-hover:text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-accent-600/60 transition-colors font-mono"
+                      />
+                      {state && (
+                        <span
+                          className="flex items-center gap-1.5 text-xs text-neutral-400 truncate"
+                          title={check ? formatDateTime(check.at) : undefined}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${tone}`} />
+                          {t(state)}
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+              <p className="text-xs text-neutral-600 mt-1.5">{t('settings.providerIpsHint')}</p>
+            </div>
+            {needsPin && (
+              <div>
+                <label className="block text-sm text-neutral-300 mb-2">{t('settings.providerPin')}</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  maxLength={4}
+                  value={pinInput}
+                  onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ''))}
+                  className="w-28 bg-white/5 border border-white/8 rounded-lg min-h-11 px-3 py-2.5 text-base can-hover:text-sm text-white tracking-[0.4em] focus:outline-none focus:border-accent-600/60 transition-colors font-mono"
+                />
+                <p className="text-xs text-neutral-600 mt-1.5">{t('settings.providerPinHint')}</p>
+              </div>
+            )}
             <button
               onClick={handleSave}
               className="flex items-center gap-2 min-h-11 px-4 py-2.5 rounded-lg bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors w-fit"
@@ -399,6 +563,11 @@ export function SettingsPage() {
               <div className="flex items-start gap-2 text-sm text-red-400 bg-red-500/10 rounded-lg p-3">
                 <AlertCircle size={15} className="shrink-0 mt-0.5" />
                 <p>{saveError}</p>
+              </div>
+            )}
+            {providerNote.length > 0 && (
+              <div className="flex flex-col gap-1 text-sm text-neutral-300 bg-white/[0.04] rounded-lg p-3">
+                {providerNote.map((line) => <p key={line}>{line}</p>)}
               </div>
             )}
           </div>

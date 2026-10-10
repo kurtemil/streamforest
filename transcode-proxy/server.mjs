@@ -5,12 +5,26 @@ import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
+import { createProviderFailover } from './provider.mjs'
 
 const PORT = Number(process.env.PORT) || 8787
-const ALLOWED_HOSTS = (process.env.ALLOWED_HOSTS || 'iptvworld.xyz')
+// iptv.krutofv.se is our DNS-only name for the provider's IP (src/lib/provider.ts),
+// so it is always allowed and ALLOWED_HOSTS only has to name extras.
+const PROVIDER_HOST = 'iptv.krutofv.se'
+const ALLOWED_HOSTS = [PROVIDER_HOST, ...(process.env.ALLOWED_HOSTS || '')
   .split(',')
   .map((s) => s.trim())
-  .filter(Boolean)
+  .filter(Boolean)]
+
+// The provider has several IPs; provider.mjs keeps the one that answers. Every
+// connection to the provider goes through provider.resolve(), which swaps our name
+// for that IP, so a dead server is left behind at once rather than after the TTL.
+const provider = createProviderFailover({
+  host: PROVIDER_HOST,
+  configUrl: process.env.PROVIDER_CONFIG_URL || 'https://streamforest.krutofv.se/api/provider',
+  zoneId: process.env.CF_ZONE_ID || 'e6588d30dac73e39ada17f6eddc943e3',
+  token: process.env.CF_DNS_TOKEN,
+})
 const FFMPEG_PATH = process.env.FFMPEG_PATH || 'ffmpeg'
 const FFPROBE_PATH = process.env.FFPROBE_PATH || FFMPEG_PATH.replace(/ffmpeg(\.exe)?$/i, (m, ext) => 'ffprobe' + (ext ?? ''))
 const H264_ENCODER = process.env.H264_ENCODER || 'libx264'
@@ -230,7 +244,7 @@ function handleTranscode(reqUrl, res) {
   if (H264_ENCODER === 'h264_vaapi' && mode === 'transcode') {
     args.push('-vaapi_device', VAAPI_DEVICE)
   }
-  args.push('-i', target,
+  args.push('-i', provider.resolve(target),
     '-map', '0:v:0',
     '-map', audioIdx !== null ? `0:${audioIdx}` : '0:a:0?',
   )
@@ -440,7 +454,7 @@ function handleProbe(reqUrl, res) {
     '-loglevel', 'error',
     '-show_entries', 'format=duration,start_time:stream=index,codec_type,codec_name,channels:stream_tags=language,title',
     '-of', 'json',
-    target,
+    provider.resolve(target),
   ]
   const ff = spawn(FFPROBE_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] })
   let out = ''
@@ -463,6 +477,8 @@ function handleProbe(reqUrl, res) {
   ff.on('exit', (code) => {
     clearTimeout(probeTimeout)
     if (code !== 0) {
+      // Every playback starts with a probe, so a dead provider shows up here first.
+      provider.reportFailure()
       res.writeHead(502, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: err || `ffprobe exit ${code}` }))
       return
     }
@@ -534,7 +550,7 @@ function handleKeyframe(reqUrl, res) {
     '-show_entries', 'packet=pts_time,flags',
     '-read_intervals', `${lookback.toFixed(3)}%${(start + 0.5).toFixed(3)}`,
     '-of', 'json',
-    target,
+    provider.resolve(target),
   ]
 
   const ff = spawn(FFPROBE_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] })
@@ -680,7 +696,7 @@ function startStandaloneSubtitle(target, index, vstart, seekTo, seekBucket, cach
   if (seekTo > 0) args.push('-ss', String(seekTo))
   if (vstart > 0) args.push('-itsoffset', String(-vstart))
   args.push(
-    '-i', target,
+    '-i', provider.resolve(target),
     '-copyts',
     '-map', `0:${index}`,
     '-c:s', 'webvtt',
@@ -773,7 +789,7 @@ async function fetchAndCacheEpg(target, cacheKey) {
   const { xml: cacheFile, meta: metaFile } = epgCachePaths(cacheKey)
   const tmpFile = `${cacheFile}.tmp`
   process.stderr.write(`[epg] fetching ${target}\n`)
-  const upstream = await fetch(target, { headers: { 'User-Agent': 'StreamForest/1.0' } })
+  const upstream = await fetch(provider.resolve(target), { headers: { 'User-Agent': 'StreamForest/1.0' } })
   if (!upstream.ok) throw new Error(`upstream ${upstream.status}`)
   const writer = fs.createWriteStream(tmpFile)
   const reader = upstream.body.getReader()
@@ -926,7 +942,7 @@ function handleHlsStart(reqUrl, res) {
   if (live) args.push('-fflags', '+genpts+discardcorrupt')
   if (!live && start > 0) args.push('-ss', String(mode === 'transcode' ? Math.max(0, start - 5) : start))
   if (mode === 'transcode' && H264_ENCODER === 'h264_vaapi') args.push('-vaapi_device', VAAPI_DEVICE)
-  args.push('-i', target, '-map', '0:v:0', '-map', audioIdx !== null ? `0:${audioIdx}` : '0:a:0?')
+  args.push('-i', provider.resolve(target), '-map', '0:v:0', '-map', audioIdx !== null ? `0:${audioIdx}` : '0:a:0?')
   if (!live && start > 0 && mode === 'transcode') args.push('-ss', String(start))
 
   if (mode === 'copy') {
@@ -1229,6 +1245,13 @@ const server = http.createServer((req, res) => {
     return
   }
 
+  // Which provider IP is in use and what the last checks found — Settings shows it.
+  if (reqUrl.pathname === '/provider-status') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+      .end(JSON.stringify(provider.status()))
+    return
+  }
+
   if (reqUrl.pathname === '/transcode') {
     handleTranscode(reqUrl, res)
     return
@@ -1290,4 +1313,6 @@ server.listen(PORT, () => {
   console.log(`[transcode-proxy] allowed hosts: ${ALLOWED_HOSTS.join(', ')}`)
   console.log(`[transcode-proxy] ffmpeg: ${FFMPEG_PATH}`)
   console.log(`[transcode-proxy] ffprobe: ${FFPROBE_PATH}`)
+  console.log(`[transcode-proxy] provider fail-over: ${process.env.CF_DNS_TOKEN ? 'on' : 'on, but DNS is not moved (no CF_DNS_TOKEN)'}`)
+  provider.start()
 })

@@ -41,6 +41,26 @@ function proxyBase(): string | null {
   return base.replace(/\/+$/, '')
 }
 
+export interface ProviderStatus {
+  active: string | null
+  ips: string[]
+  checks: Record<string, { ok: boolean; at: number; ms: number }>
+  lastSwitch: { from: string | null; to: string; at: number; dns: boolean } | null
+  dnsConfigured: boolean
+}
+
+/** Which provider IP the home server uses, and what its last checks found. */
+export async function getProviderStatus(): Promise<ProviderStatus | null> {
+  const base = proxyBase()
+  if (!base) return null
+  try {
+    const res = await fetch(`${base}/provider-status`, { cache: 'no-store', signal: AbortSignal.timeout(8000) })
+    return res.ok ? ((await res.json()) as ProviderStatus) : null
+  } catch {
+    return null
+  }
+}
+
 export function isTranscodeProxyConfigured(): boolean {
   return proxyBase() !== null
 }

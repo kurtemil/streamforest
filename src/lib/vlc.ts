@@ -18,6 +18,13 @@
 // remote .m3u as a playlist and plays the season in order.
 import type { Channel } from '@/types'
 import { buildM3u, encodePlaylist, type PlaylistItem } from './vlcPlaylist'
+import { toPlaylistHost } from './provider'
+import { usePlaylistStore } from '@/stores/playlistStore'
+
+/** The stream URL VLC should open: on the playlist's host, not a dead panel domain. */
+function streamUrl(channel: Channel): string {
+  return toPlaylistHost(channel.url, usePlaylistStore.getState().m3uUrl)
+}
 
 const IS_IOS = typeof navigator !== 'undefined' && (
   /iPhone|iPad|iPod/.test(navigator.userAgent) ||
@@ -209,7 +216,8 @@ function handOver(target: string, items: PlaylistItem[], name: string): void {
  */
 export function openInVlc(channel: Channel): void {
   const title = vlcTitle(channel)
-  handOver(channel.url, [{ title, url: channel.url }], title)
+  const url = streamUrl(channel)
+  handOver(url, [{ title, url }], title)
 }
 
 /**
@@ -222,7 +230,7 @@ export function openPlaylistInVlc(channels: Channel[], name: string): void {
     openInVlc(channels[0])
     return
   }
-  const items = channels.map((c) => ({ title: vlcTitle(c), url: c.url }))
+  const items = channels.map((c) => ({ title: vlcTitle(c), url: streamUrl(c) }))
   const hosted = playlistUrl(items, name)
   // No link short enough to survive the trip: the file is the only route left,
   // and it carries the same playlist.

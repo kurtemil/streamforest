@@ -13,9 +13,24 @@ interface PlaylistState {
   m3uUrl: string
 
   setM3uUrl: (url: string) => Promise<void>
+  /** Saves the provider's IPs (in order) and the playlist URL on iptv.krutofv.se. */
+  moveProvider: (url: string, ips: string[], pin: string) => Promise<ProviderMove>
   syncM3uUrlFromRemote: () => Promise<void>
   loadFromDB: () => Promise<void>
   refresh: () => Promise<void>
+}
+
+export interface ProviderMove {
+  ok: boolean
+  /** Translation key suffix for a refusal: 'pin', 'locked', 'privateAddress', … */
+  code?: string
+  detail?: string
+  /** The IP iptv.krutofv.se points at after the save. */
+  target?: string | null
+  /** The stored list, in order — the pasted URL's own IP first if it was not listed. */
+  ips?: string[]
+  m3uUrl?: string
+  check?: { answers: boolean; status?: string; expires?: string }
 }
 
 const STORAGE_KEY = 'sf_m3u_url'
@@ -26,7 +41,8 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
   fetching: false,
   progress: null,
   error: null,
-  m3uUrl: localStorage.getItem(STORAGE_KEY) ?? '',
+  // Guarded so modules that read the URL (player, VLC hand-off) load in tests too.
+  m3uUrl: (typeof localStorage !== 'undefined' && localStorage.getItem(STORAGE_KEY)) || '',
 
   async setM3uUrl(url) {
     localStorage.setItem(STORAGE_KEY, url)
@@ -45,6 +61,26 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
     if (!res.ok) {
       throw new Error(`Could not save the URL — server returned ${res.status}. It will be lost on the next launch.`)
     }
+  },
+
+  async moveProvider(url, ips, pin) {
+    let result: ProviderMove
+    try {
+      const res = await fetch('/api/provider', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, ips, pin }),
+      })
+      result = (await res.json()) as ProviderMove
+    } catch {
+      return { ok: false, code: 'network' }
+    }
+    // The server has already written m3u_url to D1; only this device needs telling.
+    if (result.ok && result.m3uUrl) {
+      localStorage.setItem(STORAGE_KEY, result.m3uUrl)
+      set({ m3uUrl: result.m3uUrl })
+    }
+    return result
   },
 
   async syncM3uUrlFromRemote() {

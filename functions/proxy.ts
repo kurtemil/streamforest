@@ -19,14 +19,16 @@ interface Env {
 // anyone and returned it with CORS wide open — an open relay on this account's
 // quota. The transcode server has had the equivalent since it was written.
 //
-// The provider migrates (iptvworld.xyz → nsclient.xyz), so this is overridable.
-// Use the hostname, never the bare IP: Cloudflare refuses to fetch a raw address
-// from a Worker at all, answering "error code: 1003" before the request leaves.
-const DEFAULT_ALLOWED_HOSTS = ['nsclient.xyz']
+// The provider's own domains die (iptvworld.xyz, then nsclient.xyz), so it is
+// reached through our name for its IP — src/lib/provider.ts explains why. That
+// name is always allowed; PROXY_ALLOWED_HOSTS can add others but no longer has to
+// change when the provider moves. Never the bare IP: Cloudflare refuses to fetch a
+// raw address from a Worker at all, answering "error code: 1003".
+const PROVIDER_HOST = 'iptv.krutofv.se' // keep in step with src/lib/provider.ts
 
 function hostAllowed(env: Env, url: URL): boolean {
   const configured = (env.PROXY_ALLOWED_HOSTS ?? '').split(',').map(h => h.trim()).filter(Boolean)
-  const allowed = configured.length > 0 ? configured : DEFAULT_ALLOWED_HOSTS
+  const allowed = [PROVIDER_HOST, ...configured]
   return allowed.some(h => url.hostname === h || url.hostname.endsWith('.' + h))
 }
 

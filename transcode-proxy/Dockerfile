@@ -28,7 +28,7 @@ RUN sed -i 's/^Components: main$/Components: main non-free non-free-firmware/' \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY package.json server.mjs ./
+COPY package.json server.mjs provider.mjs ./
 
 ENV PORT=8787
 EXPOSE 8787

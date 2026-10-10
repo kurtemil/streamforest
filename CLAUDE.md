@@ -591,37 +591,81 @@ ssh 192.168.1.111 'docker logs transcode-proxy 2>&1 | grep "\[vaapi\]"'
 | `VAAPI_DEVICE` | `/dev/dri/renderD128` | |
 | `VAAPI_QP` | `23` | Quality target — `-global_quality` under QVBR, `-qp` if the driver refuses |
 | `VAAPI_RC` | (unset = `auto`) | `qvbr` or `cqp` to skip the boot probe |
-| `ALLOWED_HOSTS` | `nsclient.xyz,45.12.1.27` | Comma-separated allowlist — **the provider moves** |
+| `ALLOWED_HOSTS` | `iptv.krutofv.se,nsclient.xyz,45.12.1.27` | Extra hosts. `iptv.krutofv.se` is always allowed by the code |
+| `CF_DNS_TOKEN` | (secret, `~/services/transcode-proxy.env`) | Lets the fail-over repoint `iptv.krutofv.se`. Unset = it still switches its own connections, but not DNS |
+| `PROVIDER_CONFIG_URL` | `https://streamforest.krutofv.se/api/provider` | Where the fail-over reads the IP list |
 | `CLIENT_LOG_TOKEN` | (secret) | Required for `GET /clientlog`; unset = reads refused |
 | `FFMPEG_PATH` | `ffmpeg` | |
 
-**When "nothing plays", check the provider host first.** The IPTV provider
-migrates: `iptvworld.xyz` → `nsclient.xyz` so far, and also answers on the bare
-IP `45.12.1.27`.
+**When "nothing plays", check the provider first: `node tools/provider.mjs`.**
+It prints the DNS answer, whether the port is open, and the account's status.
 
-**Always configure the hostname, never the IP.** Cloudflare Workers refuse to
-fetch a raw address — the request never leaves, and the caller gets a Cloudflare
-403 with body `error code: 1003` that reads exactly like a provider rejection.
-The home server has no such restriction, so its allowlist can carry both.
+**The provider is reached through `iptv.krutofv.se`, our name for its IP.** Its own
+domains die: `iptvworld.xyz`, then `nsclient.xyz`, which lost its A record on
+2026-09-23 and took the whole catalogue down unnoticed for over two weeks. The IP
+is the stable part, but Cloudflare Workers refuse to fetch a raw address: the
+request never leaves, and the caller gets a 403 with body `error code: 1003` that
+reads exactly like a provider rejection. So the IP gets a name in our zone, a
+DNS-only A record, and everything uses that name:
 
-Three places go stale independently and each fails silently:
+- `m3u_url` in D1 (`user_preferences`, profile `_global`) points at
+  `iptv.krutofv.se:<port>`. The EPG URL is derived from it (`src/services/epg.ts`).
+- `functions/proxy.ts` and `transcode-proxy/server.mjs` always allow
+  `iptv.krutofv.se`. `PROXY_ALLOWED_HOSTS` and `ALLOWED_HOSTS` only add extras.
+- The stream URLs *inside* the playlist carry whatever domain the provider's panel
+  was configured with, which can be dead. `src/lib/provider.ts` recognises them by
+  the account credentials in their path and points them at the playlist's host. It
+  does this on the way out, in `playerStore.play()` and the VLC hand-off, so a
+  catalogue stored before a move plays without a refresh. Only the host name
+  changes: the panel serves the playlist on one port and names another for
+  streams, and the stream's port is the one to keep.
 
-1. `ALLOWED_HOSTS` on the server — a mismatch returns `403 Host not allowed`
-   before ffmpeg is ever spawned. On 2026-08-17 this named a domain that no
-   longer resolved in DNS, so every VOD and live request through the proxy was
-   rejected outright.
-2. `m3u_url` in D1 (`user_preferences`, profile `_global`) — a dead host means
-   the playlist can never refresh, so the app quietly serves whatever IndexedDB
-   still holds, with stream URLs pointing at the old host.
-3. `PROXY_ALLOWED_HOSTS` (Pages variable, read by `functions/proxy.ts`) — a
-   mismatch returns 403 before the download starts.
+**The provider has several IPs, and the home server fails over between them.**
+Settings → Playlist source has four IP fields, in order of preference. They are
+stored in D1 (`_global/provider_ips`) and served at `GET /api/provider`.
+`transcode-proxy/provider.mjs` reads that list every minute and asks the IP in use
+for any HTTP answer. When none comes, it tries the others in order, and the first
+that answers becomes active:
 
-The symptom in every case is "playback is broken", which reads as a player bug and
-is not one. Check with:
-```bash
-ssh <server> 'docker exec transcode-proxy sh -c "getent hosts <host>"'
-curl -s "https://streamforest.krutofv.se/api/preferences?profileId=_global"
-```
+- this server uses it at once: `provider.resolve()` swaps our name for the IP at
+  every place it connects to the provider (ffmpeg/ffprobe inputs, the EPG fetch);
+- it repoints the DNS record, so the playlist download and VLC follow within the
+  60 s TTL.
+
+A failed probe triggers a check at once instead of waiting for the minute. It does
+not move back when an earlier IP recovers, because moving costs a blip. Its state
+is at `GET /provider-status` on the transcode server, and Settings shows it per IP:
+*in use / answers / no answer*. Caches and keys keep using the name, never the IP,
+so the EPG cache does not split per server.
+
+**When the provider moves, it is done in the app.** The admin pastes the new
+playlist URL and/or edits the IP list in Settings → Playlist source. Any change to
+either asks for the admin PIN and posts to `functions/api/provider.ts`, which:
+
+- checks the PIN of profile `elof` server-side. Five wrong in an hour lock it for
+  the hour (`provider_attempts` in D1);
+- resolves a domain to its IPv4 once, and **refuses anything that is not a public
+  address**. Whatever the record points at becomes an allowed host for the
+  transcode server, so it must never be aimed into the home network;
+- stores up to four IPs in order. An IP from the pasted URL goes first if it is not
+  listed. Each must be a public IPv4;
+- points the A record at the first, **unless it already points at a listed IP**,
+  because the fail-over may have put it there. Then it stores `m3u_url` on our name;
+- asks `player_api.php` whether the account answers, and reports it. A failing
+  check does not undo the move.
+
+It needs the Pages secret `CF_DNS_TOKEN`: Cloudflare's "Edit zone DNS" template,
+limited to krutofv.se. The zone id is in the code, because that template cannot
+list zones. Secrets reach a deployment only when it is built, so set it before the
+deploy that should use it. Without it, Settings says the move is switched off.
+
+`node tools/provider.mjs` is the status check and the fallback when the app
+itself is down: `<ip>` moves the record, `--m3u` moves `m3u_url`. It reads the same
+key as `CF_DNS_TOKEN` from the environment, `.env.local` or `../hemma/.env`.
+
+The symptom of a dead provider is "playback is broken" everywhere at once, which
+reads as a player bug and is not one. The transcode server logs it daily:
+`[epg] refresh error` instead of `[epg] cached` at 07:00 UTC.
 
 **Live TV specifics:**
 - Live channels are MPEG-TS over HTTP (Xtream Codes). Browsers can't play raw MPEG-TS.
