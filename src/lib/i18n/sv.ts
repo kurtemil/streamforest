@@ -29,6 +29,7 @@ export const sv = {
   'sidebar.selectProfile': 'Välj profil',
   'sidebar.privateUse': 'Endast privat bruk',
   'layout.profileSwitch': 'Profil: {name} — byt',
+  'layout.providerDown': 'IPTV-leverantören svarar inte (kontrollerat {time}). Hemservern provar alla adresser varje minut, så raden försvinner av sig själv när någon svarar.',
   'layout.chooseProfile': 'Välj profil',
 
   // ── Shared across screens ──────────────────────────────────────────────────

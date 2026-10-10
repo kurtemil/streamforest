@@ -191,7 +191,10 @@ playlist sat in the row all year, which is how it was noticed.
 The app keeps its own history now: `channelSeen` (Dexie v8), a table that
 survives the import that clears `channels`, holding the first time each id was
 stored. `markSeen` stamps ids it has not seen and deletes ids the provider
-dropped, so a removed-and-restored title reads as new again.
+dropped, so a removed-and-restored title reads as new again. It runs in
+`finishPlaylistSave`, the one function every import ends in. Until 2026-10-10 it
+lived only in `saveChannels()`, which nothing called, so the row was empty in
+production from the day it was built.
 
 `pickRecentlyAdded` in `src/lib/recentlyAdded.ts` decides what that history may
 claim, and both of its rules exist to let the row say nothing:

@@ -6,20 +6,13 @@ import { useSearchStore } from '@/stores/searchStore'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
 import { normalizeShowKey } from '@/lib/utils'
-import type { Channel } from '@/types'
+import { useActiveExclusions } from '@/hooks/useActiveExclusions'
+import { searchCatalogue, type SearchResult } from '@/lib/search'
 import { useT } from '@/lib/i18n'
 
 const STORAGE_KEY = 'sf_recent_searches'
 const MAX_RECENT = 8
 const MAX_PER_GROUP = 5
-
-interface SearchResult {
-  id: string
-  title: string
-  subtitle: string
-  type: 'movie' | 'series' | 'live'
-  channel: Channel
-}
 
 function loadRecent(): string[] {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') } catch { return [] }
@@ -34,16 +27,15 @@ function removeRecent(q: string) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(loadRecent().filter((s) => s !== q)))
 }
 
-function match(haystack: string, needle: string): boolean {
-  return haystack.toLowerCase().includes(needle.toLowerCase())
-}
-
 export function CommandPalette() {
   const t = useT()
   const { open, setOpen } = useSearchStore()
   const { channels } = usePlaylistStore()
   const { play } = usePlayerStore()
   const navigate = useNavigate()
+  // Search reaches every page, and plays straight from the result — so it must hide
+  // exactly what the pages hide, or a kid's restrictions are one keystroke deep.
+  const excluded = useActiveExclusions()
 
   const [query, setQuery] = useState('')
   const [selectedIdx, setSelectedIdx] = useState(0)
@@ -59,40 +51,10 @@ export function CommandPalette() {
     }
   }, [open])
 
-  const { movies, series, live } = useMemo((): { movies: SearchResult[]; series: SearchResult[]; live: SearchResult[] } => {
-    if (!query.trim()) return { movies: [], series: [], live: [] }
-    const q = query.trim()
-    const movies: SearchResult[] = []
-    const series: SearchResult[] = []
-    const live: SearchResult[] = []
-    const showSeen = new Set<string>()
-
-    for (const ch of channels) {
-      if (ch.type === 'movie') {
-        if (movies.length < MAX_PER_GROUP) {
-          const title = ch.movieTitle ?? ch.name
-          if (match(title, q)) {
-            movies.push({ id: ch.id, title, subtitle: ch.year ? String(ch.year) : t('search.kindMovie'), type: 'movie', channel: ch })
-          }
-        }
-      } else if (ch.type === 'series' && ch.showName) {
-        if (series.length < MAX_PER_GROUP) {
-          const key = normalizeShowKey(ch.showName)
-          if (!showSeen.has(key) && match(ch.showName, q)) {
-            showSeen.add(key)
-            series.push({ id: key, title: ch.showName, subtitle: t('search.kindShow'), type: 'series', channel: ch })
-          }
-        }
-      } else if (ch.type === 'live') {
-        if (live.length < MAX_PER_GROUP && match(ch.name, q)) {
-          live.push({ id: ch.id, title: ch.name, subtitle: ch.groupTitle, type: 'live', channel: ch })
-        }
-      }
-      if (movies.length >= MAX_PER_GROUP && series.length >= MAX_PER_GROUP && live.length >= MAX_PER_GROUP) break
-    }
-
-    return { movies, series, live }
-  }, [channels, query, t])
+  const { movies, series, live } = useMemo(
+    () => searchCatalogue(channels, query, excluded, { movie: t('search.kindMovie'), show: t('search.kindShow') }, MAX_PER_GROUP),
+    [channels, query, t, excluded],
+  )
 
   const allResults = useMemo(() => [...movies, ...series, ...live], [movies, series, live])
   const totalCount = allResults.length

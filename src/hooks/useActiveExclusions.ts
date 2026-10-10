@@ -5,19 +5,28 @@ import { kidRestrictionsStore } from '@/stores/kidRestrictionsStore'
 
 type Excluded = Record<ContentType, Set<string>>
 
+/** Whether the active profile may see this item. Every list that reaches a kid goes through this. */
+export function isVisible(ch: { type: ContentType; groupTitle: string }, excluded: Excluded): boolean {
+  return !excluded[ch.type]?.has(ch.groupTitle)
+}
+
 export function useActiveExclusions(): Excluded {
   const byProfile = useExclusionsStore((s) => s.byProfile)
   const activeProfileId = useProfileStore((s) => s.activeProfileId)
   // Re-render when kid restrictions change
-  useSyncExternalStore(kidRestrictionsStore.subscribe, kidRestrictionsStore.getSnapshot)
+  const kidSnapshot = useSyncExternalStore(kidRestrictionsStore.subscribe, kidRestrictionsStore.getSnapshot)
 
   const profile = getProfile(activeProfileId)
   const profileExclusions = useMemo(
     () => rawToExcluded(byProfile[activeProfileId ?? '']),
     [byProfile, activeProfileId],
   )
+  const isKid = profile?.role === 'kid'
 
-  if (profile?.role === 'kid' && activeProfileId) {
+  // Memoised so callers can depend on it: search scans the whole catalogue whenever
+  // this changes identity, and a fresh object per render made that every keystroke.
+  return useMemo(() => {
+    if (!isKid || !activeProfileId) return profileExclusions
     // Kids can't change their own exclusions; apply parent-set restrictions on top
     const kid = kidRestrictionsStore.getExcluded(activeProfileId)
     return {
@@ -25,7 +34,5 @@ export function useActiveExclusions(): Excluded {
       series: new Set([...profileExclusions.series, ...kid.series]),
       live:   new Set([...profileExclusions.live,   ...kid.live]),
     }
-  }
-
-  return profileExclusions
+  }, [isKid, activeProfileId, profileExclusions, kidSnapshot])
 }

@@ -36,6 +36,7 @@ export const en = {
   'sidebar.selectProfile': 'Select profile',
   'sidebar.privateUse': 'Private use only',
   'layout.profileSwitch': 'Profile: {name} — switch',
+  'layout.providerDown': 'The IPTV provider is not answering (checked {time}). The home server tries every address once a minute, so this goes away by itself once one answers.',
   'layout.chooseProfile': 'Choose profile',
 
   // ── Shared across screens ──────────────────────────────────────────────────

@@ -6,7 +6,7 @@ import { Settings } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useProfileStore } from '@/stores/profileStore'
-import { useActiveExclusions } from '@/hooks/useActiveExclusions'
+import { isVisible, useActiveExclusions } from '@/hooks/useActiveExclusions'
 import { db, clearProgress, addToWatchLater, removeFromWatchLater, getRecentlyAddedIds, getDismissedRecKeys } from '@/services/db'
 import { deleteRemoteProgress, pushWatchLater, deleteRemoteWatchLater } from '@/services/sync'
 import { MovieCard } from '@/components/movies/MovieCard'
@@ -66,7 +66,9 @@ export function HomePage() {
 
   const continueWatching = useMemo(() => {
     if (!recentProgress || !channels.length) return []
-    const chanById = new Map(channels.map((c) => [c.id, c]))
+    // Built from what the profile may see: a title from a group hidden from this
+    // profile does not come back through "continue watching".
+    const chanById = new Map(channels.filter((c) => isVisible(c, excluded)).map((c) => [c.id, c]))
     return recentProgress
       .filter((p) => !p.completed && p.position > 10)
       .map((p) => ({ progress: p, channel: chanById.get(p.channelId) }))
@@ -74,7 +76,7 @@ export function HomePage() {
         (x): x is { progress: WatchProgress; channel: Channel } => x.channel !== undefined,
       )
       .slice(0, 12)
-  }, [recentProgress, channels])
+  }, [recentProgress, channels, excluded])
 
   const watchLaterEntries = useLiveQuery(async () => {
     if (!activeProfileId) return []
@@ -188,7 +190,7 @@ export function HomePage() {
   // "Because you watched X"
   const recommendations = useMemo(() => {
     if (!recentProgress?.length || !channels.length) return null
-    const chanById = new Map(channels.map((c) => [c.id, c]))
+    const chanById = new Map(channels.filter((c) => isVisible(c, excluded)).map((c) => [c.id, c]))
 
     const watchedChannels = recentProgress
       .filter((p) => p.completed || (p.duration > 0 && p.position / p.duration > 0.5))
@@ -231,7 +233,7 @@ export function HomePage() {
     const shuffled = [...candidates].sort(() => Math.random() - 0.5).slice(0, 16)
     const title = source.movieTitle ?? source.showName ?? source.name
     return { title, sourceKey, items: shuffled }
-  }, [recentProgress, channels, movies, series, dismissedRecKeys])
+  }, [recentProgress, channels, movies, series, dismissedRecKeys, excluded])
 
   const enrichTargets = useMemo(
     () => [

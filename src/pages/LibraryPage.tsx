@@ -11,6 +11,7 @@ import { pushWatchLater, deleteRemoteWatchLater, deleteRemoteProgress } from '@/
 import { MovieCard } from '@/components/movies/MovieCard'
 import { EmptyState } from '@/components/ui/EmptyState'
 import type { Channel, WatchProgress } from '@/types'
+import { isVisible, useActiveExclusions } from '@/hooks/useActiveExclusions'
 import { titleCollator, useLocale, useT, type MessageKey } from '@/lib/i18n'
 
 type Tab = 'continue' | 'watchlater' | 'history' | 'favorites'
@@ -48,18 +49,24 @@ export function LibraryPage() {
   const [sort, setSort] = useState<SortKey>('recent')
 
   // ── shared lookups ──────────────────────────────────────────────────────────
-  const chanById = useMemo(() => new Map(channels.map((c) => [c.id, c])), [channels])
+  // Every list here joins through these two maps, so building them from what the
+  // profile may see is what keeps a kid's history and favourites inside its limits.
+  const excluded = useActiveExclusions()
+  const chanById = useMemo(
+    () => new Map(channels.filter((c) => isVisible(c, excluded)).map((c) => [c.id, c])),
+    [channels, excluded],
+  )
 
   const showRepMap = useMemo(() => {
     const map = new Map<string, Channel>()
     for (const ch of channels) {
-      if (ch.type === 'series' && ch.showName) {
+      if (ch.type === 'series' && ch.showName && isVisible(ch, excluded)) {
         const key = normalizeShowKey(ch.showName)
         if (!map.has(key)) map.set(key, ch)
       }
     }
     return map
-  }, [channels])
+  }, [channels, excluded])
 
   // ── DB queries ──────────────────────────────────────────────────────────────
   const watchLaterEntries = useLiveQuery(async () => {

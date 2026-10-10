@@ -168,6 +168,11 @@ export async function startPlaylistSave(): Promise<void> {
 
 /** Record what was stored. Written last, so a half-finished import is visible as one. */
 export async function finishPlaylistSave(channels: Channel[], url: string): Promise<void> {
+  // Every import ends here, so this is where ids get their first-seen stamp. It
+  // used to live only in saveChannels(), which nothing called: the real import
+  // path never stamped anything, and "Recently Added" stayed empty in production
+  // from the day it was built (found 2026-10-09).
+  await markSeen(channels)
   let movieCount = 0
   let seriesCount = 0
   let liveCount = 0
@@ -247,7 +252,6 @@ export async function saveChannels(
     await db.channels.bulkPut(channels.slice(i, i + SAVE_CHUNK))
     onProgress?.(Math.min(99, Math.round(((i + SAVE_CHUNK) / channels.length) * 100)))
   }
-  await markSeen(channels)
   await finishPlaylistSave(channels, url)
   onProgress?.(100)
 }

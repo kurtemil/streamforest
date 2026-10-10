@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar'
 import { BottomNav } from './BottomNav'
 import { CommandPalette } from '@/components/search/CommandPalette'
 import { InstallPrompt } from '@/components/ui/InstallPrompt'
+import { ProviderDownBanner } from './ProviderDownBanner'
 import { useSearchStore } from '@/stores/searchStore'
 import { PROFILES, useProfileStore } from '@/stores/profileStore'
 import { useT } from '@/lib/i18n'
@@ -46,6 +47,7 @@ export function Layout({ children }: { children: ReactNode }) {
         ref={mainRef}
         className="flex-1 overflow-y-auto min-w-0 pt-safe px-safe pb-[calc(4rem+env(safe-area-inset-bottom,0px))] md:pb-0"
       >
+        <ProviderDownBanner />
         {children}
       </main>
       {/* Profile switching exists only in the sidebar on desktop, which is hidden
