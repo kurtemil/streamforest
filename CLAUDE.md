@@ -268,6 +268,30 @@ Verified 2026-10-11 against the real server in Edge:
 The plan for one card per film across both sources, with kids' rules shared,
 lives outside this public repo.
 
+## Feedback-box suggestions, October 2026
+
+All five from 2026-09-11 were built and ticked off on 2026-10-11:
+
+- **Continue Watching opens a show's overview** instead of playing; the
+  overview's button reads "Fortsätt S2 · E3" when an episode is in progress.
+- **Mark watched / unwatched** for a film (detail sheet), an episode, a season or
+  a whole show (`src/services/watched.ts`). `/api/progress` takes lists (PUT an
+  array, DELETE with `{ channelIds }`), batched 200 per request with D1 `batch`.
+- **Covers.** Two faults. `withEnglishFallback` read `translations.find`, but TMDB
+  sends `{ translations: { translations: [...] } }`. Every title without a
+  Swedish overview threw, and `useTmdbEnrich` never released the slot of a lookup
+  that threw. After three such titles nothing more got artwork, which is why most
+  English shows had none while Swedish ones (and those in the proxy's shared
+  cache) did. Also, grids enriched only the first 200 of a group; they now
+  enrich what is rendered plus 40.
+- **Popular right now** on Home: TMDB's weekly trending films and shows that are
+  in the catalogue (`PopularRails`). A rail with fewer than four titles is not
+  shown.
+- **Genres** on Movies and Series: chips from TMDB. A genre shows TMDB's most
+  popular titles in it that are here, and says so; the catalogue has no genres,
+  so it is not "all comedies". Matching is by title and year:
+  `src/lib/catalogMatch.ts`, with lists cached 12 h per language.
+
 ## Handing playback to VLC
 
 `src/lib/vlc.ts` owns the "VLC" buttons. Two facts shape everything in it:
