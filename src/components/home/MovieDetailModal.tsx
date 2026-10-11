@@ -1,6 +1,10 @@
 import { useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Play, Bookmark, Star, Clock, Users } from 'lucide-react'
+import { X, Play, Bookmark, Star, Clock, Users, Check } from 'lucide-react'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from '@/services/db'
+import { markWatched } from '@/services/watched'
+import { useProfileStore } from '@/stores/profileStore'
 import type { Channel, TmdbMeta } from '@/types'
 import { backdropUrl, posterUrl, profileUrl } from '@/services/tmdb'
 import { openInVlc } from '@/lib/vlc'
@@ -17,6 +21,13 @@ interface Props {
 
 export function MovieDetailModal({ channel, tmdbMeta, isWatchLater, onClose, onPlay, onWatchLater }: Props) {
   const t = useT()
+  // Watched by hand: read and written here, so every page that opens this gets it.
+  const activeProfileId = useProfileStore((s) => s.activeProfileId)
+  const progress = useLiveQuery(
+    () => (channel && activeProfileId ? db.watchProgress.get(`${activeProfileId}:${channel.id}`) : undefined),
+    [channel?.id, activeProfileId],
+  )
+  const watched = Boolean(progress?.completed)
   const locale = useLocale()
   const open = channel !== null
 
@@ -118,7 +129,7 @@ export function MovieDetailModal({ channel, tmdbMeta, isWatchLater, onClose, onP
               </div>
 
               {/* CTAs */}
-              <div className="flex gap-3 mb-6">
+              <div className="flex flex-wrap gap-3 mb-6">
                 <button
                   onClick={onPlay}
                   className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-100 rounded-lg text-black font-semibold text-body transition-all active:scale-95"
@@ -137,6 +148,20 @@ export function MovieDetailModal({ channel, tmdbMeta, isWatchLater, onClose, onP
                   <Bookmark size={15} fill={isWatchLater ? 'currentColor' : 'none'} />
                   {isWatchLater ? t('common.saved') : t('common.watchLater')}
                 </button>
+                {channel?.type === 'movie' && activeProfileId && (
+                  <button
+                    onClick={() => void markWatched(activeProfileId, [channel.id], !watched)}
+                    aria-pressed={watched}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-body transition-all active:scale-95 ring-1 ${
+                      watched
+                        ? 'bg-accent-600/20 ring-accent-600/40 text-accent-400'
+                        : 'bg-white/8 ring-white/15 text-neutral-300 hover:bg-white/12'
+                    }`}
+                  >
+                    <Check size={15} />
+                    {watched ? t('common.markUnwatched') : t('common.markWatched')}
+                  </button>
+                )}
                 {channel && (
                   <button
                     onClick={() => openInVlc(channel)}

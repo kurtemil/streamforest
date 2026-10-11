@@ -27,6 +27,8 @@ import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
 import { formatNumber, useT } from '@/lib/i18n'
 
 const ENRICH_LIMIT = 200
+/** Grid rows enriched beyond the ones rendered, so artwork is there on arrival. */
+const ENRICH_AHEAD = 40
 const cleanGroup = (t: string) => t.replace(/^VOD:\s*/, '')
 
 export function MoviesPage() {
@@ -143,7 +145,11 @@ export function MoviesPage() {
     return Object.fromEntries(rows.map((r) => [r.channelId, r]))
   }, [activeProfileId])
 
-  // Enrich first N movies in row mode (covers all rows + gives TMDB genre data)
+  const { count, sentinelRef, reset } = useInfiniteScroll(filtered.length)
+
+  // Enrich first N movies in row mode (covers all rows + gives TMDB genre data).
+  // In the grid, enrich what is on screen plus the next rows: a fixed first-N window
+  // meant nothing past it ever got artwork, however far one scrolled.
   const enrichTargets = useMemo(() => {
     if (isRowMode) {
       const seen = new Set<string>()
@@ -157,8 +163,8 @@ export function MoviesPage() {
       }
       return result
     }
-    return filtered.slice(0, ENRICH_LIMIT)
-  }, [isRowMode, continueWatchingMovies, movies, filtered])
+    return filtered.slice(0, count + ENRICH_AHEAD)
+  }, [isRowMode, continueWatchingMovies, movies, filtered, count])
 
   const tmdbMap = useTmdbEnrich(enrichTargets)
 
@@ -262,7 +268,6 @@ export function MoviesPage() {
     }
   }
 
-  const { count, sentinelRef, reset } = useInfiniteScroll(filtered.length)
   useEffect(() => {
     reset()
     document.querySelector('main')?.scrollTo({ top: 0 })

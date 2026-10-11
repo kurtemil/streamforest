@@ -284,6 +284,27 @@ export async function saveProgress(
   return entry
 }
 
+/**
+ * Mark titles watched or not by hand: a film, an episode, a season or a whole show.
+ * Watched keeps the real duration where one is known, so progress reads full;
+ * not watched removes the rows, which is what "never started" looks like.
+ */
+export async function setWatched(profileId: string, channelIds: string[], watched: boolean): Promise<WatchProgress[]> {
+  if (!channelIds.length) return []
+  if (!watched) {
+    await clearProgressMany(profileId, channelIds)
+    return []
+  }
+  const existing = await db.watchProgress.bulkGet(channelIds.map((id) => `${profileId}:${id}`))
+  const now = Date.now()
+  const entries: WatchProgress[] = channelIds.map((channelId, i) => {
+    const duration = existing[i]?.duration && existing[i]!.duration > 0 ? existing[i]!.duration : 1
+    return { id: `${profileId}:${channelId}`, profileId, channelId, position: duration, duration, lastWatched: now, completed: true }
+  })
+  await db.watchProgress.bulkPut(entries)
+  return entries
+}
+
 export async function clearProgress(profileId: string, channelId: string) {
   await db.watchProgress.delete(`${profileId}:${channelId}`)
 }

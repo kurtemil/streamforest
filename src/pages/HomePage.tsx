@@ -460,12 +460,13 @@ export function HomePage() {
                       progress={progress}
                       tmdbMeta={tmdbMap.get(tmdbKey)}
                       onClick={() => {
-                        if (channel.type === 'movie')
-                          navigate(`/movies?playing=${channel.id}`)
-                        else if (channel.type === 'series')
-                          navigate(
-                            `/series?show=${encodeURIComponent(normalizeShowKey(channel.showName ?? channel.name))}&playing=${channel.id}`,
-                          )
+                        // A series opens its overview, which offers "continue S2 · E3"
+                        // there: playing straight away skipped the choice of episode.
+                        if (channel.type === 'series') {
+                          navigate(`/series?show=${encodeURIComponent(normalizeShowKey(channel.showName ?? channel.name))}`)
+                          return
+                        }
+                        if (channel.type === 'movie') navigate(`/movies?playing=${channel.id}`)
                         play(channel)
                       }}
                       onRemove={() => {

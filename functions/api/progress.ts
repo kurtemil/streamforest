@@ -1,11 +1,15 @@
 interface D1Database {
   prepare(query: string): D1PreparedStatement
+  batch(statements: D1PreparedStatement[]): Promise<unknown>
 }
 interface D1PreparedStatement {
   bind(...values: unknown[]): D1PreparedStatement
   run(): Promise<unknown>
   all(): Promise<{ results: Record<string, unknown>[] }>
 }
+/** Upper bound for one request, so a single call stays well inside D1's limits. */
+const MAX_BATCH = 200
+
 interface Env {
   DB: D1Database
 }
@@ -66,11 +70,15 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
     }
 
     if (request.method === 'PUT') {
-      const body = await request.json() as {
+      // One entry, or a list: marking a whole show as watched writes every episode
+      // at once, and one request per episode would be hundreds of them.
+      type Entry = {
         profileId: string; channelId: string; position: number
         duration: number; lastWatched: number; completed: boolean
       }
-      await env.DB.prepare(`
+      const body = await request.json() as Entry | Entry[]
+      const entries = (Array.isArray(body) ? body : [body]).slice(0, MAX_BATCH)
+      const upsert = env.DB.prepare(`
         INSERT INTO watch_progress (profile_id, channel_id, position, duration, last_watched, completed)
         VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT (profile_id, channel_id) DO UPDATE SET
@@ -79,22 +87,23 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
           last_watched = excluded.last_watched,
           completed    = excluded.completed
         WHERE excluded.last_watched >= watch_progress.last_watched
-      `).bind(
-        body.profileId, body.channelId,
-        body.position, body.duration,
-        body.lastWatched, body.completed ? 1 : 0
-      ).run()
+      `)
+      await env.DB.batch(entries.map((e) => upsert.bind(
+        e.profileId, e.channelId, e.position, e.duration, e.lastWatched, e.completed ? 1 : 0,
+      )))
       return new Response('{"ok":true}', { headers: HEADERS })
     }
 
     if (request.method === 'DELETE') {
+      // ?channelId= for one, or a JSON body { channelIds } for many (unmarking a show).
       const profileId = url.searchParams.get('profileId')
-      const channelId = url.searchParams.get('channelId')
-      if (!profileId || !channelId) {
+      const one = url.searchParams.get('channelId')
+      const many = one ? [one] : ((await request.json().catch(() => ({}))) as { channelIds?: string[] }).channelIds ?? []
+      if (!profileId || many.length === 0) {
         return new Response(JSON.stringify({ error: 'Missing params' }), { status: 400, headers: HEADERS })
       }
-      await env.DB.prepare('DELETE FROM watch_progress WHERE profile_id = ? AND channel_id = ?')
-        .bind(profileId, channelId).run()
+      const del = env.DB.prepare('DELETE FROM watch_progress WHERE profile_id = ? AND channel_id = ?')
+      await env.DB.batch(many.slice(0, MAX_BATCH).map((id) => del.bind(profileId, id)))
       return new Response('{"ok":true}', { headers: HEADERS })
     }
 

@@ -36,6 +36,27 @@ export function deleteRemoteProgress(profileId: string, channelId: string): void
   }).catch(() => {})
 }
 
+/** Many entries in batches: one request per 200 instead of one per episode. */
+export async function pushProgressMany(entries: WatchProgress[]): Promise<void> {
+  for (let i = 0; i < entries.length; i += 200) {
+    await fetch(PROGRESS_API, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(entries.slice(i, i + 200)),
+    }).catch(() => {})
+  }
+}
+
+export async function deleteRemoteProgressMany(profileId: string, channelIds: string[]): Promise<void> {
+  for (let i = 0; i < channelIds.length; i += 200) {
+    await fetch(`${PROGRESS_API}?profileId=${encodeURIComponent(profileId)}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channelIds: channelIds.slice(i, i + 200) }),
+    }).catch(() => {})
+  }
+}
+
 // ── Watch Later ────────────────────────────────────────────────────────────────
 
 export async function syncWatchLaterFromRemote(profileId: string): Promise<void> {

@@ -36,6 +36,7 @@ import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
 import { backdropUrl, posterUrl } from '@/services/tmdb'
 import { normalizeShowKey } from '@/lib/utils'
 import { openInVlc, openPlaylistInVlc } from '@/lib/vlc'
+import { markWatched } from '@/services/watched'
 import { formatNumber, useT } from '@/lib/i18n'
 
 const RECENT_SHOWS = 40
@@ -139,10 +140,12 @@ function EpisodeRow({
   ep,
   progress,
   onClick,
+  onToggleWatched,
 }: {
   ep: Channel
   progress?: { position: number; duration: number; completed: boolean; lastWatched?: number }
   onClick: () => void
+  onToggleWatched: () => void
 }) {
   const t = useT()
   const pct =
@@ -153,7 +156,7 @@ function EpisodeRow({
     <div className="relative group">
     <button
       onClick={onClick}
-      className="flex items-center gap-4 w-full text-left py-3 px-2 pr-16 rounded-lg hover:bg-white/5 transition-colors"
+      className="flex items-center gap-4 w-full text-left py-3 px-2 pr-28 rounded-lg hover:bg-white/5 transition-colors"
     >
       <span className="w-8 shrink-0 text-center text-sm font-medium text-neutral-500 group-hover:text-neutral-300 transition-colors">
         {epLabel ?? <Play size={13} className="mx-auto" />}
@@ -180,6 +183,19 @@ function EpisodeRow({
         </div>
       )}
     </button>
+      <button
+        onClick={onToggleWatched}
+        title={progress?.completed ? t('common.markUnwatched') : t('common.markWatched')}
+        aria-label={progress?.completed ? t('common.markUnwatched') : t('common.markWatched')}
+        aria-pressed={Boolean(progress?.completed)}
+        className={`absolute top-1/2 -translate-y-1/2 right-[4.25rem] z-10 w-7 h-7 rounded-md flex items-center justify-center ring-1 transition-opacity ${
+          progress?.completed
+            ? 'bg-accent-600/80 ring-accent-500/50 text-white'
+            : 'bg-black/75 hover:bg-black/90 ring-white/15 text-neutral-300 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100'
+        }`}
+      >
+        <Check size={13} />
+      </button>
       <button
         onClick={() => openInVlc(ep)}
         title={t('common.openInVlc')}
@@ -413,6 +429,8 @@ export function SeriesPage() {
   }, [showMap, isRowMode])
 
   // Enrich shows for row mode (prioritise continue watching, then first N shows)
+  const { count: gridCount, sentinelRef: gridSentinel, reset: resetGrid } = useInfiniteScroll(visibleShowNames.length)
+
   const enrichChannels = useMemo(() => {
     const baseKeys = isRowMode
       ? (() => {
@@ -427,18 +445,20 @@ export function SeriesPage() {
           }
           return result
         })()
-      : [...visibleShowNames]
+      // The grid: what is rendered plus the next rows. A first-200 window meant a
+      // group of 4 900 shows got artwork for 200 and blank cards for the rest.
+      : visibleShowNames.slice(0, gridCount + 40)
     const keys =
       selectedShow && !baseKeys.includes(selectedShow)
         ? [...baseKeys, selectedShow]
         : baseKeys
-    return keys.slice(0, 200).flatMap((key) => {
+    return (isRowMode ? keys.slice(0, 200) : keys).flatMap((key) => {
       const entry = showMap.get(key)
       if (!entry) return []
       const firstSeason = Array.from(entry.seasons.values())[0]
       return firstSeason?.[0] ? [firstSeason[0]] : []
     })
-  }, [isRowMode, continueWatchingSeries, allShowNames, visibleShowNames, showMap, selectedShow])
+  }, [isRowMode, continueWatchingSeries, allShowNames, visibleShowNames, showMap, selectedShow, gridCount])
 
   const tmdbMap = useTmdbEnrich(enrichChannels)
 
@@ -478,21 +498,26 @@ export function SeriesPage() {
     return Array.from(currentShowData.seasons.keys()).sort((a, b) => a - b)
   }, [currentShowData])
 
+  // The episode this profile is in the middle of, if any: where "continue" picks up.
+  const resume = useMemo(() => {
+    if (!currentShowData || !progressRecords) return null
+    const lastRecord = Object.values(progressRecords)
+      .filter((p) => !p.completed && p.position > 10)
+      .sort((a, b) => b.lastWatched - a.lastWatched)[0]
+    if (!lastRecord) return null
+    for (const [season, eps] of currentShowData.seasons.entries()) {
+      const ep = eps.find((e) => e.id === lastRecord.channelId)
+      if (ep) return { season, ep }
+    }
+    return null
+  }, [progressRecords, currentShowData])
+
   const autoSeason = useMemo(() => {
     if (selectedSeason !== null) return selectedSeason
     if (!currentShowData) return 1
-    if (progressRecords && Object.keys(progressRecords).length > 0) {
-      const lastRecord = Object.values(progressRecords)
-        .filter((p) => !p.completed && p.position > 10)
-        .sort((a, b) => b.lastWatched - a.lastWatched)[0]
-      if (lastRecord) {
-        for (const [s, eps] of currentShowData.seasons.entries()) {
-          if (eps.some((e) => e.id === lastRecord.channelId)) return s
-        }
-      }
-    }
+    if (resume) return resume.season
     return sortedSeasons[0] ?? 1
-  }, [selectedSeason, progressRecords, currentShowData, sortedSeasons])
+  }, [selectedSeason, currentShowData, resume, sortedSeasons])
 
   const handleSurprise = useCallback(() => {
     const pool = isRowMode ? allShowNames : visibleShowNames
@@ -501,7 +526,6 @@ export function SeriesPage() {
     navigate(`/series?show=${encodeURIComponent(name)}`)
   }, [isRowMode, allShowNames, visibleShowNames, navigate])
 
-  const { count: gridCount, sentinelRef: gridSentinel, reset: resetGrid } = useInfiniteScroll(visibleShowNames.length)
   useEffect(() => {
     resetGrid()
     document.querySelector('main')?.scrollTo({ top: 0 })
@@ -518,6 +542,13 @@ export function SeriesPage() {
     const totalEps = Array.from(seasons.values()).reduce((a, b) => a + b.length, 0)
     const showTmdb = tmdbMap.get(selectedShow)
     const episodes = seasons.get(autoSeason) ?? []
+    // Mark by hand: an episode, the season shown, or the whole show.
+    const allShowIds = Array.from(seasons.values()).flat().map((e) => e.id)
+    const allDone = (ids: string[]) => ids.length > 0 && ids.every((id) => progressRecords?.[id]?.completed)
+    const setDone = (ids: string[], watched: boolean) => { if (activeProfileId) void markWatched(activeProfileId, ids, watched) }
+    const showDone = allDone(allShowIds)
+    const seasonIds = episodes.map((e) => e.id)
+    const seasonDone = allDone(seasonIds)
     const backdrop = backdropUrl(showTmdb?.backdropPath ?? null, 1280)
     const poster = posterUrl(showTmdb?.posterPath ?? null, 342)
 
@@ -574,15 +605,21 @@ export function SeriesPage() {
           </div>
 
           <div className="flex gap-3 mb-5">
-            {episodes[0] && (
-              <button
-                onClick={() => { navigate(`/series?show=${encodeURIComponent(selectedShow!)}&playing=${episodes[0].id}`); play(episodes[0]) }}
-                className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-100 rounded-lg text-black font-semibold text-body transition-all active:scale-95"
-              >
-                <Play size={16} fill="black" />
-                {t('common.play')}
-              </button>
-            )}
+            {(resume || episodes[0]) && (() => {
+              // Continue the episode in progress; otherwise start the season shown.
+              const target = resume?.ep ?? episodes[0]
+              return (
+                <button
+                  onClick={() => { navigate(`/series?show=${encodeURIComponent(selectedShow!)}&playing=${target.id}`); play(target) }}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-100 rounded-lg text-black font-semibold text-body transition-all active:scale-95"
+                >
+                  <Play size={16} fill="black" />
+                  {resume
+                    ? t('series.resumeEpisode', { season: resume.season, episode: resume.ep.episode ?? '?' })
+                    : t('common.play')}
+                </button>
+              )
+            })()}
             {episodes.length > 0 && (
               <button
                 onClick={() => openPlaylistInVlc(
@@ -618,6 +655,14 @@ export function SeriesPage() {
               <Star size={15} fill={isFav ? 'currentColor' : 'none'} />
               {isFav ? t('series.favorited') : t('series.favorite')}
             </button>
+            <button
+              onClick={() => setDone(allShowIds, !showDone)}
+              aria-pressed={showDone}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-body transition-all active:scale-95 ring-1 bg-white/8 ring-white/15 text-neutral-300 hover:bg-white/12"
+            >
+              <Check size={15} />
+              {showDone ? t('series.markShowUnwatched') : t('series.markShowWatched')}
+            </button>
           </div>
 
           {showTmdb?.overview && (
@@ -627,6 +672,14 @@ export function SeriesPage() {
           <div className="flex items-center gap-3 mb-4">
             <SeasonDropdown seasons={sortedSeasons} selected={autoSeason} onChange={(s) => setSelectedSeason(s)} />
             <span className="text-neutral-500 text-sm">{t('series.episodeCount', { count: episodes.length })}</span>
+            <button
+              onClick={() => setDone(seasonIds, !seasonDone)}
+              aria-pressed={seasonDone}
+              className="ml-auto flex items-center gap-1.5 min-h-11 px-2 text-caption text-neutral-400 hover:text-white transition-colors"
+            >
+              <Check size={13} />
+              {seasonDone ? t('series.markSeasonUnwatched') : t('series.markSeasonWatched')}
+            </button>
           </div>
 
           <div className="flex flex-col divide-y divide-white/5">
@@ -636,6 +689,7 @@ export function SeriesPage() {
                 ep={ep}
                 progress={progressRecords?.[ep.id]}
                 onClick={() => { navigate(`/series?show=${encodeURIComponent(selectedShow!)}&playing=${ep.id}`); play(ep) }}
+                onToggleWatched={() => setDone([ep.id], !progressRecords?.[ep.id]?.completed)}
               />
             ))}
           </div>
