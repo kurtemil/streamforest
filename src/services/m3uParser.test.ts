@@ -237,3 +237,17 @@ describe('createM3UParser', () => {
     expect(parser.push([lines[1]])).toHaveLength(1)
   })
 })
+
+describe('logos', () => {
+  it('keeps https logos and drops http ones, which are the provider’s own servers', () => {
+    const [a, b] = parseM3ULines([
+      '#EXTM3U',
+      '#EXTINF:-1 tvg-logo="https://image.tmdb.org/t/p/w300/x.jpg" group-title="VOD: A",Paul (2011)',
+      'http://h/movie/u/p/1.mkv',
+      '#EXTINF:-1 tvg-logo="http://Ptv.is:2095/images/y.jpg" group-title="VOD: A",Troy (2004)',
+      'http://h/movie/u/p/2.mkv',
+    ])
+    expect(a.logo).toBe('https://image.tmdb.org/t/p/w300/x.jpg')
+    expect(b.logo).toBe('')
+  })
+})

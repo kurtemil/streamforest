@@ -1,4 +1,5 @@
 import type { Channel, ContentType } from '@/types'
+import { safeImageUrl } from '@/lib/images'
 
 interface SeriesPattern {
   re: RegExp
@@ -177,7 +178,8 @@ export function createM3UParser() {
 /** One EXTINF line plus its URL, or null for the rows that are only headings. */
 function buildChannel(metaLine: string, url: string, sortIndex: number): Channel | null {
   const name = displayName(metaLine)
-  const logo = attr(metaLine, 'tvg-logo')
+  // https only: an http logo is the provider's own server (src/lib/images.ts).
+  const logo = safeImageUrl(attr(metaLine, 'tvg-logo'))
   const groupTitle = attr(metaLine, 'group-title')
   const tvgId = attr(metaLine, 'tvg-id')
 

@@ -18,6 +18,10 @@
 
 const CHECK_EVERY_MS = 10 * 60_000
 const PROBE_TIMEOUT_MS = 5_000
+// When nothing answers (a block on the home IP looks exactly like that), knocking
+// on all four every round is more of what got the address blocked. Then only the
+// active one is tried each round, and the rest at most this often.
+const FULL_SCAN_WHEN_DOWN_MS = 30 * 60_000
 
 /**
  * @param {object} o
@@ -41,6 +45,8 @@ export function createProviderFailover(o) {
   /** @type {Record<string, { ok: boolean, at: number, ms: number }>} */
   const checks = {}
   let running = null
+  let allDownSince = null
+  let lastFullScan = 0
   let timer = null
 
   async function loadConfig() {
@@ -93,7 +99,9 @@ export function createProviderFailover(o) {
   async function checkOnce() {
     await loadConfig()
     if (ips.length === 0) return
-    if (active && ips.includes(active) && (await alive(active))) return
+    if (active && ips.includes(active) && (await alive(active))) { allDownSince = null; return }
+    if (allDownSince !== null && now() - lastFullScan < FULL_SCAN_WHEN_DOWN_MS) return
+    lastFullScan = now()
 
     for (const ip of ips) {
       if (ip === active) continue
@@ -102,11 +110,13 @@ export function createProviderFailover(o) {
         active = ip
         let dns = false
         try { dns = await pointDns(ip) } catch { dns = false }
+        allDownSince = null
         lastSwitch = { from, to: ip, at: now(), dns }
         log(`[provider] ${from ?? '—'} did not answer; switched to ${ip}${dns ? '' : ' (DNS NOT moved)'}`)
         return
       }
     }
+    allDownSince ??= now()
     log(`[provider] no address answers: ${ips.join(', ')}`)
   }
 
@@ -139,7 +149,7 @@ export function createProviderFailover(o) {
       }
     },
     status() {
-      return { host: o.host, port, active, lastSwitch, ips, checks, dnsConfigured: Boolean(o.token) }
+      return { host: o.host, port, active, lastSwitch, ips, checks, allDownSince, dnsConfigured: Boolean(o.token) }
     },
   }
 }

@@ -27,7 +27,7 @@ function world({ ips, target, up }) {
     host: HOST, configUrl: 'https://pages.test/api/provider', zoneId: 'z', token: 't',
     fetchImpl, log: (l) => log.push(l),
   })
-  return { failover, dns, config, log }
+  return { failover, dns, config, log, fetch: fetchImpl }
 }
 
 test('a working active address is left alone', async () => {
@@ -89,4 +89,22 @@ test('overlapping triggers share one check', async () => {
   const w = world({ ips: ['1.1.1.1', '2.2.2.2'], target: '1.1.1.1', up: new Set(['2.2.2.2']) })
   await Promise.all([w.failover.check(), w.failover.check(), w.failover.reportFailure()])
   assert.equal(w.dns.length, 1)
+})
+
+test('while nothing answers it tries only the active address, and all four at most every 30 minutes', async () => {
+  let t = 1_000_000
+  const tried = []
+  const w = world({ ips: ['1.1.1.1', '2.2.2.2', '3.3.3.3'], target: '1.1.1.1', up: new Set() })
+  const failover = createProviderFailover({
+    host: HOST, configUrl: 'https://pages.test/api/provider', zoneId: 'z', token: 't', now: () => t, log: () => {},
+    fetchImpl: async (url, init) => { const u = String(url); if (u.startsWith('http://')) tried.push(new URL(u).hostname); return w.fetch(url, init) },
+  })
+  await failover.check()
+  assert.deepEqual(tried, ['1.1.1.1', '2.2.2.2', '3.3.3.3'])
+  tried.length = 0; t += 10 * 60_000
+  await failover.check()
+  assert.deepEqual(tried, ['1.1.1.1'], 'ten minutes later: only the active one')
+  tried.length = 0; t += 25 * 60_000
+  await failover.check()
+  assert.deepEqual(tried, ['1.1.1.1', '2.2.2.2', '3.3.3.3'], 'past thirty minutes: all of them again')
 })

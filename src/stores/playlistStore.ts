@@ -3,6 +3,7 @@ import { fetchAndStorePlaylist, type FetchProgress } from '@/services/fetcher'
 import { db, getPlaylistMeta } from '@/services/db'
 import type { Channel } from '@/types'
 import { t } from '@/lib/i18n'
+import { safeImageUrl } from '@/lib/images'
 
 interface PlaylistState {
   channels: Channel[]
@@ -131,6 +132,13 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
     // order on import and is unique.
     const channels = await db.channels.toArray()
     channels.sort((a, b) => (a.sortIndex ?? 0) - (b.sortIndex ?? 0))
+    // A catalogue stored before http logos were dropped at import still has them;
+    // clear them here, or every poster grid keeps knocking on the provider's
+    // servers from the home IP (src/lib/images.ts).
+    for (let i = 0; i < channels.length; i++) {
+      const logo = channels[i].logo
+      if (logo && !logo.startsWith('https://')) channels[i] = { ...channels[i], logo: safeImageUrl(logo) }
+    }
     set({ channels, loaded: true })
 
   },
