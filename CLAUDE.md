@@ -217,7 +217,8 @@ while actually meaning "the default rows view". It is `browseLabel` / "Browse".
 ## The home library (Jellyfin)
 
 Added 2026-10-11. The films on the home server's disks appear as a "Hemma" row on
-Home, from Jellyfin at `https://jellyfin.krutofv.se` (`VITE_JELLYFIN_URL` overrides
+Home, and on their own page `/hemma` (sidebar item, and "see all" from the row),
+grouped by Jellyfin library and searchable, from Jellyfin at `https://jellyfin.krutofv.se` (`VITE_JELLYFIN_URL` overrides
 it). That name resolves to the server's LAN address in public DNS (grey cloud), so
 traffic never touches Cloudflare. Away from home it is reached over Tailscale,
 where the server advertises its own address as a /32 route. The certificate comes

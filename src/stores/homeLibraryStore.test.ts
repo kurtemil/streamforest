@@ -28,6 +28,7 @@ describe('home library store', () => {
     fetchMock = vi.fn(async (url: string) => {
       if (url.endsWith('/System/Info/Public')) return new Response('{}')
       if (url.endsWith('/Users/AuthenticateByName')) return new Response(JSON.stringify({ AccessToken: 't', User: { Id: 'u' } }))
+      if (url.includes('/UserViews')) return new Response(JSON.stringify({ Items: [{ Id: 'lib', Name: 'Filmer', CollectionType: 'movies' }] }))
       return new Response(JSON.stringify({ Items: [{ Id: 'm1', Name: 'Ice Age 4', Type: 'Movie' }] }))
     })
     vi.stubGlobal('fetch', fetchMock)

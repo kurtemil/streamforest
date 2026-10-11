@@ -11,6 +11,7 @@ const SeriesPage = lazy(() => import('@/pages/SeriesPage').then(m => ({ default:
 const LiveTVPage = lazy(() => import('@/pages/LiveTVPage').then(m => ({ default: m.LiveTVPage })))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage').then(m => ({ default: m.SettingsPage })))
 const LibraryPage = lazy(() => import('@/pages/LibraryPage').then(m => ({ default: m.LibraryPage })))
+const HomeLibraryPage = lazy(() => import('@/pages/HomeLibraryPage').then(m => ({ default: m.HomeLibraryPage })))
 const FeedbackPage = lazy(() => import('@/pages/FeedbackPage').then(m => ({ default: m.FeedbackPage })))
 import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { HomePlayer } from '@/components/player/HomePlayer'
@@ -78,6 +79,7 @@ export default function App() {
             <Route path="/series"     element={<PageTransition><SeriesPage /></PageTransition>} />
             <Route path="/live"       element={<PageTransition><LiveTVPage /></PageTransition>} />
             <Route path="/library"    element={<PageTransition><LibraryPage /></PageTransition>} />
+            <Route path="/hemma"      element={<PageTransition><HomeLibraryPage /></PageTransition>} />
             <Route path="/watchlater" element={<Navigate to="/library" replace />} />
             <Route path="/settings"   element={<PageTransition><SettingsPage /></PageTransition>} />
             <Route path="/feedback"   element={<PageTransition><FeedbackPage /></PageTransition>} />

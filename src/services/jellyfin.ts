@@ -30,6 +30,8 @@ export interface HomeItem {
   year?: number
   overview?: string
   kind: 'movie' | 'video'
+  /** The Jellyfin library it lives in, as named there: "Filmer", "Fotboll". */
+  library: string
   durationSec: number
   positionSec: number
   played: boolean
@@ -173,25 +175,43 @@ interface RawItem {
   UserData?: { PlaybackPositionTicks?: number; Played?: boolean; LastPlayedDate?: string }
 }
 
-/** Everything this profile may see, newest first. Jellyfin applies the kids' allowlist. */
+/**
+ * Everything this profile may see, newest first, each with the library it is in.
+ * Jellyfin applies the kids' allowlist. Libraries are read one by one because an
+ * item's own parent is its folder, not its library; collections and series
+ * libraries are skipped (a series is not a playable item).
+ */
 export async function listItems(session: JellyfinSession): Promise<HomeItem[]> {
-  const q = new URLSearchParams({
-    userId: session.userId,
-    recursive: 'true',
-    includeItemTypes: 'Movie,Video',
-    fields: 'ProviderIds,Overview,DateCreated',
-    enableUserData: 'true',
-    sortBy: 'DateCreated,SortName',
-    sortOrder: 'Descending,Ascending',
-    limit: '500',
-  })
-  const r = await call<{ Items: RawItem[] }>(`/Items?${q}`, { token: session.token })
-  return r.Items.map((i) => ({
+  const views = await call<{ Items: { Id: string; Name: string; CollectionType?: string }[] }>(
+    `/UserViews?userId=${session.userId}`, { token: session.token },
+  )
+  const playable = views.Items.filter((v) => v.CollectionType === 'movies' || v.CollectionType === 'homevideos')
+  const perLibrary = await Promise.all(playable.map(async (view) => {
+    const q = new URLSearchParams({
+      userId: session.userId,
+      parentId: view.Id,
+      recursive: 'true',
+      includeItemTypes: 'Movie,Video',
+      fields: 'ProviderIds,Overview,DateCreated',
+      enableUserData: 'true',
+      sortBy: 'DateCreated,SortName',
+      sortOrder: 'Descending,Ascending',
+      limit: '500',
+    })
+    const r = await call<{ Items: RawItem[] }>(`/Items?${q}`, { token: session.token })
+    return r.Items.map((i) => toHomeItem(i, view.Name))
+  }))
+  return perLibrary.flat()
+}
+
+function toHomeItem(i: RawItem, library: string): HomeItem {
+  return {
     id: i.Id,
     name: i.Name,
     year: i.ProductionYear,
     overview: i.Overview,
     kind: i.Type === 'Movie' ? 'movie' : 'video',
+    library,
     durationSec: (i.RunTimeTicks ?? 0) / TICKS_PER_SECOND,
     positionSec: (i.UserData?.PlaybackPositionTicks ?? 0) / TICKS_PER_SECOND,
     played: i.UserData?.Played ?? false,
@@ -199,7 +219,7 @@ export async function listItems(session: JellyfinSession): Promise<HomeItem[]> {
     imageTag: i.ImageTags?.Primary,
     addedAt: i.DateCreated ? Date.parse(i.DateCreated) : 0,
     tmdbId: i.ProviderIds?.Tmdb,
-  }))
+  }
 }
 
 /** Poster from the server's own cache. Needs no token. */

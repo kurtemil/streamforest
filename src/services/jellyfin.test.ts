@@ -11,7 +11,7 @@ function memoryStorage(): Storage {
 }
 
 const item = (over: Partial<HomeItem> = {}): HomeItem => ({
-  id: 'i1', name: 'Paul', kind: 'movie', durationSec: 6000, positionSec: 0, played: false,
+  id: 'i1', name: 'Paul', kind: 'movie', library: 'Filmer', durationSec: 6000, positionSec: 0, played: false,
   lastPlayedAt: 0, addedAt: 0, ...over,
 })
 
@@ -55,17 +55,27 @@ describe('jellyfin client', () => {
     expect(calls).toHaveLength(1)
   })
 
-  it('maps items, with positions in seconds and the profile’s user', async () => {
-    respond = () => json({ Items: [{
-      Id: 'm1', Name: 'Troja', Type: 'Movie', ProductionYear: 2004, RunTimeTicks: 98_000_000_000,
-      DateCreated: '2026-10-09T07:50:00Z', ImageTags: { Primary: 'abc' }, ProviderIds: { Tmdb: '652' },
-      UserData: { PlaybackPositionTicks: 3_000_000_000, Played: false, LastPlayedDate: '2026-10-10T20:00:00Z' },
-    }, { Id: 'v1', Name: 'Allsvenskan 2012', Type: 'Video' }] })
+  it('maps items per library, with positions in seconds and the profile’s user', async () => {
+    respond = (url) => {
+      if (url.includes('/UserViews')) return json({ Items: [
+        { Id: 'lib-film', Name: 'Filmer', CollectionType: 'movies' },
+        { Id: 'lib-fot', Name: 'Fotboll', CollectionType: 'homevideos' },
+        { Id: 'lib-box', Name: 'Samlingar', CollectionType: 'boxsets' },
+      ] })
+      if (url.includes('parentId=lib-film')) return json({ Items: [{
+        Id: 'm1', Name: 'Troja', Type: 'Movie', ProductionYear: 2004, RunTimeTicks: 98_000_000_000,
+        DateCreated: '2026-10-09T07:50:00Z', ImageTags: { Primary: 'abc' }, ProviderIds: { Tmdb: '652' },
+        UserData: { PlaybackPositionTicks: 3_000_000_000, Played: false, LastPlayedDate: '2026-10-10T20:00:00Z' },
+      }] })
+      if (url.includes('parentId=lib-fot')) return json({ Items: [{ Id: 'v1', Name: 'Allsvenskan 2012', Type: 'Video' }] })
+      throw new Error('unexpected ' + url)
+    }
     const items = await listItems({ token: 'tok', userId: 'u1' })
-    expect(calls[0].url).toContain('userId=u1')
+    expect(calls.every((c) => c.url.includes('userId=u1'))).toBe(true)
+    expect(calls.some((c) => c.url.includes('lib-box'))).toBe(false) // collections are not playable items
     expect(String((calls[0].init.headers as Record<string, string>).Authorization)).toContain('Token="tok"')
-    expect(items[0]).toMatchObject({ id: 'm1', kind: 'movie', durationSec: 9800, positionSec: 300, tmdbId: '652', year: 2004 })
-    expect(items[1]).toMatchObject({ id: 'v1', kind: 'video', positionSec: 0, imageTag: undefined })
+    expect(items[0]).toMatchObject({ id: 'm1', kind: 'movie', library: 'Filmer', durationSec: 9800, positionSec: 300, tmdbId: '652', year: 2004 })
+    expect(items[1]).toMatchObject({ id: 'v1', kind: 'video', library: 'Fotboll', positionSec: 0, imageTag: undefined })
     expect(posterUrl(items[0])).toBe(`${JELLYFIN_URL}/Items/m1/Images/Primary?fillWidth=300&quality=90&tag=abc`)
     expect(posterUrl(items[1])).toBeNull()
   })

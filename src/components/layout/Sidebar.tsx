@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Film, Tv, Radio, Settings, Library, Search, MessageSquarePlus } from 'lucide-react'
+import { Home, Film, Tv, Radio, HardDrive, Settings, Library, Search, MessageSquarePlus } from 'lucide-react'
 import { PROFILES, getProfile, useProfileStore } from '@/stores/profileStore'
 import { useSearchStore } from '@/stores/searchStore'
 import { Logo } from '@/ui'
@@ -10,6 +10,7 @@ const NAV_MAIN = [
   { to: '/movies',   icon: Film,    label: 'nav.movies',  minRole: 'kid' },
   { to: '/series',   icon: Tv,      label: 'nav.tvShows', minRole: 'kid' },
   { to: '/live',     icon: Radio,   label: 'nav.liveTv',  minRole: 'kid' },
+  { to: '/hemma',    icon: HardDrive, label: 'nav.homeLibrary', minRole: 'kid' },
   { to: '/library',  icon: Library, label: 'nav.library', minRole: 'kid' },
 ] as const
 
