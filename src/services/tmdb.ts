@@ -51,6 +51,88 @@ async function tmdbFetch<T>(
   }
 }
 
+// ── Lists: trending and by genre ───────────────────────────────────────────────
+//
+// For rails and filters that are TMDB's idea of a list ("popular this week",
+// "comedies"), matched against the catalogue so that only playable titles show
+// (src/lib/catalogMatch.ts). A list is a ranking, not the catalogue: a genre view
+// built from it says "popular comedies that are here", never "all comedies".
+
+export interface TmdbListItem {
+  tmdbId: number
+  title: string
+  originalTitle: string
+  year: number | null
+  posterPath: string | null
+  backdropPath: string | null
+  rating: number
+  overview: string
+}
+
+const LIST_TTL_MS = 12 * 3600 * 1000
+const LIST_STORAGE_PREFIX = 'sf-tmdb-list:'
+const listMemo = new Map<string, { at: number; items: TmdbListItem[] }>()
+
+function readList(key: string): { at: number; items: TmdbListItem[] } | null {
+  const mem = listMemo.get(key)
+  if (mem) return mem
+  try {
+    const raw = localStorage.getItem(LIST_STORAGE_PREFIX + key)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function writeList(key: string, entry: { at: number; items: TmdbListItem[] }): void {
+  listMemo.set(key, entry)
+  try { localStorage.setItem(LIST_STORAGE_PREFIX + key, JSON.stringify(entry)) } catch { /* full or private: memory still has it */ }
+}
+
+async function tmdbListPages(path: string, locale: Locale, params: Record<string, string>, pages: number): Promise<TmdbListItem[]> {
+  const key = `${path}?${new URLSearchParams(params)}&pages=${pages}@${locale}`
+  const hit = readList(key)
+  if (hit && Date.now() - hit.at < LIST_TTL_MS) return hit.items
+  const items: TmdbListItem[] = []
+  for (let page = 1; page <= pages; page++) {
+    const data = await tmdbFetch<{ results: TmdbSearchResult[]; total_pages?: number }>(path, locale, { ...params, page: String(page) })
+    if (!data?.results?.length) break
+    for (const r of data.results) {
+      items.push({
+        tmdbId: r.id,
+        title: r.title ?? r.name ?? '',
+        originalTitle: r.original_title ?? r.original_name ?? '',
+        year: parseInt((r.release_date ?? r.first_air_date ?? '').slice(0, 4)) || null,
+        posterPath: r.poster_path,
+        backdropPath: r.backdrop_path,
+        rating: Math.round((r.vote_average ?? 0) * 10) / 10,
+        overview: r.overview ?? '',
+      })
+    }
+    if (data.total_pages && page >= data.total_pages) break
+  }
+  // An empty answer (no key, offline) is not cached, so the next visit asks again.
+  if (items.length) writeList(key, { at: Date.now(), items })
+  return items
+}
+
+/** What is popular this week, three pages (~60 titles). */
+export function fetchTrending(kind: 'movie' | 'tv', locale: Locale): Promise<TmdbListItem[]> {
+  return tmdbListPages(`/trending/${kind}/week`, locale, {}, 3)
+}
+
+/** The most popular titles in a genre, ten pages (~200), with enough votes to mean it. */
+export function discoverByGenre(kind: 'movie' | 'tv', genreId: number, locale: Locale): Promise<TmdbListItem[]> {
+  return tmdbListPages(`/discover/${kind}`, locale, {
+    with_genres: String(genreId), sort_by: 'popularity.desc', 'vote_count.gte': '50',
+  }, 10)
+}
+
+export async function fetchGenres(kind: 'movie' | 'tv', locale: Locale): Promise<{ id: number; name: string }[]> {
+  const data = await tmdbFetch<{ genres: { id: number; name: string }[] }>(`/genre/${kind}/list`, locale)
+  return data?.genres ?? []
+}
+
 // ── Raw TMDB response shapes (minimal — only what we use) ──────────────────────
 
 interface TmdbSearchResult {

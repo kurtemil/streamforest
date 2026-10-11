@@ -97,6 +97,8 @@ export const en = {
     'To get started, add your M3U playlist URL in Settings and download your channels.',
   'home.openSettings': 'Open Settings',
   'home.recentMovies': 'Recently Added Movies',
+  'home.popularMovies': 'Popular films right now',
+  'home.popularShows': 'Popular shows right now',
   'home.homeLibrary': 'Home library',
   'home.homeUnreachable': 'The home library is reachable at home, or away with Tailscale on.',
   'home.homeBlocked': 'This browser was refused access to the home network, so the home library cannot show. Allow “local network” for this site in the browser’s site settings.',
@@ -106,6 +108,9 @@ export const en = {
 
   // ── Movies ─────────────────────────────────────────────────────────────────
   'movies.title': 'Movies',
+  'genre.label': 'Genres',
+  'genre.hint': 'The most popular films in this genre on TMDB that are in your catalogue.',
+  'genre.hintShows': 'The most popular shows in this genre on TMDB that are in your catalogue.',
   'movies.count_one': '{count} title',
   'movies.count_other': '{count} titles',
   'movies.searchPlaceholder': 'Search movies…',

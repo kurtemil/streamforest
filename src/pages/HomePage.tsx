@@ -8,6 +8,7 @@ import { usePlayerStore } from '@/stores/playerStore'
 import { useProfileStore } from '@/stores/profileStore'
 import { isVisible, useActiveExclusions } from '@/hooks/useActiveExclusions'
 import { HomeRail } from '@/components/home/HomeRail'
+import { PopularRails } from '@/components/home/PopularRails'
 import { db, clearProgress, addToWatchLater, removeFromWatchLater, getRecentlyAddedIds, getDismissedRecKeys } from '@/services/db'
 import { deleteRemoteProgress, pushWatchLater, deleteRemoteWatchLater } from '@/services/sync'
 import { MovieCard } from '@/components/movies/MovieCard'
@@ -384,6 +385,13 @@ export function HomePage() {
 
       <div className="px-4 sm:px-6 pb-12 pt-6 space-y-8 sm:space-y-10">
         <HomeRail />
+
+        <PopularRails
+          onMovie={(ch, meta) => {
+            setDetailChannel(ch)
+            setDetailTmdb(tmdbMap.get(ch.id) ?? meta)
+          }}
+        />
 
         {/* Recently Added Movies */}
         {recentMovies.length > 0 && (

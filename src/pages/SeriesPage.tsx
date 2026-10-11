@@ -37,7 +37,10 @@ import { backdropUrl, posterUrl } from '@/services/tmdb'
 import { normalizeShowKey } from '@/lib/utils'
 import { openInVlc, openPlaylistInVlc } from '@/lib/vlc'
 import { markWatched } from '@/services/watched'
-import { formatNumber, useT } from '@/lib/i18n'
+import { formatNumber, useLocale, useT } from '@/lib/i18n'
+import { GenreChips, type Genre } from '@/components/ui/GenreChips'
+import { useCatalogShows } from '@/hooks/useCatalogList'
+import { discoverByGenre, fetchGenres } from '@/services/tmdb'
 
 const RECENT_SHOWS = 40
 
@@ -302,6 +305,21 @@ export function SeriesPage() {
   const { channels } = usePlaylistStore()
   const { play } = usePlayerStore()
   const [search, setSearch] = useState('')
+  // Genre filter (feedback-box suggestion): TMDB's most popular shows in a genre
+  // that this catalogue has. The catalogue itself carries no genres.
+  const locale = useLocale()
+  const [genre, setGenre] = useState<Genre | null>(null)
+  const [genres, setGenres] = useState<Genre[]>([])
+  useEffect(() => {
+    let alive = true
+    fetchGenres('tv', locale).then((g) => { if (alive) setGenres(g) })
+    return () => { alive = false }
+  }, [locale])
+  const genreShows = useCatalogShows(
+    genre ? () => discoverByGenre('tv', genre.id, locale) : null,
+    genre ? `tv-genre-${genre.id}@${locale}` : 'none',
+  )
+  const handleGenreSelect = (g: Genre | null) => { setGenre(g); setSelectedGroup(null); setShowFavs(false) }
   const [selectedGroup, setSelectedGroup] = useState<string | null>(
     () => searchParams.get('group'),
   )
@@ -319,7 +337,7 @@ export function SeriesPage() {
   const { activeProfileId } = useProfileStore()
   const { series: excludedSeries } = useActiveExclusions()
 
-  const isRowMode = !search.trim() && selectedGroup === null && !showFavs
+  const isRowMode = !search.trim() && selectedGroup === null && !showFavs && !genre
 
   const watchLaterIds = useLiveQuery(async () => {
     if (!activeProfileId) return new Set<string>()
@@ -380,6 +398,10 @@ export function SeriesPage() {
   const allShowNames = useMemo(() => Array.from(showMap.keys()), [showMap])
 
   const visibleShowNames = useMemo(() => {
+    if (genre) {
+      const q = search.trim() ? normalizeShowKey(search) : ''
+      return genreShows.matches.map((x) => x.showKey).filter((k) => showMap.has(k) && (!q || k.includes(q)))
+    }
     let names = allShowNames
     if (showFavs) names = names.filter((n) => favIds.has(n))
     if (selectedGroup !== null) names = names.filter((n) => showMap.get(n)?.group === selectedGroup)
@@ -389,7 +411,7 @@ export function SeriesPage() {
     }
     if (!showFavs && selectedGroup === null && !search.trim()) return names.slice(0, RECENT_SHOWS)
     return names
-  }, [allShowNames, showFavs, selectedGroup, search, showMap, favIds])
+  }, [allShowNames, showFavs, selectedGroup, search, showMap, favIds, genre, genreShows.matches])
 
   // Continue Watching — one entry per show
   const continueWatchingSeries = useMemo(() => {
@@ -713,7 +735,7 @@ export function SeriesPage() {
         <GroupSidebar
           groups={groups}
           selected={showFavs ? '__favs__' : selectedGroup}
-          onSelect={(g) => { setShowFavs(false); setSelectedGroup(g); setSearch('') }}
+          onSelect={(g) => { setShowFavs(false); setSelectedGroup(g); setSearch(''); setGenre(null) }}
           cleanTitle={(title) => title.replace(/^Series:\s*/, '')}
           prefixItem={{
             label: (
@@ -723,7 +745,7 @@ export function SeriesPage() {
               </>
             ),
             active: showFavs,
-            onClick: () => { setShowFavs(!showFavs); setSelectedGroup(null); setSearch('') },
+            onClick: () => { setShowFavs(!showFavs); setSelectedGroup(null); setSearch(''); setGenre(null) },
           }}
         />
       </div>
@@ -756,6 +778,9 @@ export function SeriesPage() {
                   />
                 </div>
               </div>
+            </div>
+            <div className="-mt-2 mb-6">
+              <GenreChips genres={genres} selected={genre} onSelect={handleGenreSelect} />
             </div>
 
             <div className="space-y-10">
@@ -876,7 +901,9 @@ export function SeriesPage() {
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 mb-4">
               <div className="flex items-center justify-between sm:justify-start gap-3">
                 <h1 className="text-xl font-bold text-white truncate">
-                  {search.trim()
+                  {genre
+                    ? genre.name
+                    : search.trim()
                     ? t('common.resultsFor', { query: search })
                     : showFavs
                     ? t('common.favorites')
@@ -904,8 +931,16 @@ export function SeriesPage() {
                 />
               </div>
             </div>
+            <div className="pb-4 space-y-2">
+              <GenreChips genres={genres} selected={genre} onSelect={handleGenreSelect} />
+              {genre && <p className="text-caption text-neutral-500">{t('genre.hintShows')}</p>}
+            </div>
 
-            {visibleShowNames.length === 0 ? (
+            {genre && genreShows.loading ? (
+              <div className="flex justify-center py-24">
+                <div className="h-8 w-8 rounded-full border-2 border-accent-600 border-t-transparent animate-spin" />
+              </div>
+            ) : visibleShowNames.length === 0 ? (
               <EmptyState
                 icon={<Tv size={36} />}
                 title={t('common.noResults')}

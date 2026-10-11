@@ -24,7 +24,10 @@ import { ScrollableRow, SectionHeader } from '@/components/ui/MediaRow'
 import { ContinueCard } from '@/components/ui/ContinueCard'
 import { useTmdbEnrich } from '@/hooks/useTmdbEnrich'
 import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
-import { formatNumber, useT } from '@/lib/i18n'
+import { formatNumber, useLocale, useT } from '@/lib/i18n'
+import { GenreChips, type Genre } from '@/components/ui/GenreChips'
+import { useCatalogMovies } from '@/hooks/useCatalogList'
+import { discoverByGenre, fetchGenres } from '@/services/tmdb'
 
 const ENRICH_LIMIT = 200
 /** Grid rows enriched beyond the ones rendered, so artwork is there on arrival. */
@@ -38,6 +41,20 @@ export function MoviesPage() {
   const { channels } = usePlaylistStore()
   const { play } = usePlayerStore()
   const [search, setSearch] = useState('')
+  // Genre filter (feedback-box suggestion). TMDB has the genres; the catalogue has
+  // none, so a genre shows TMDB's most popular titles in it that are here.
+  const locale = useLocale()
+  const [genre, setGenre] = useState<Genre | null>(null)
+  const [genres, setGenres] = useState<Genre[]>([])
+  useEffect(() => {
+    let alive = true
+    fetchGenres('movie', locale).then((g) => { if (alive) setGenres(g) })
+    return () => { alive = false }
+  }, [locale])
+  const genreList = useCatalogMovies(
+    genre ? () => discoverByGenre('movie', genre.id, locale) : null,
+    genre ? `movie-genre-${genre.id}@${locale}` : 'none',
+  )
   const [selectedGroup, setSelectedGroup] = useState<string | null>(
     () => searchParams.get('group'),
   )
@@ -54,7 +71,7 @@ export function MoviesPage() {
     [channels, excludedMovies],
   )
 
-  const isRowMode = !search.trim() && selectedGroup === null
+  const isRowMode = !search.trim() && selectedGroup === null && !genre
 
   const didAutoPlay = useRef(false)
   useEffect(() => {
@@ -92,13 +109,18 @@ export function MoviesPage() {
   }, [recentIds, movies])
 
   const filtered = useMemo(() => {
+    if (genre) {
+      const base = genreList.matches.map((x) => x.channel)
+      const q = search.trim().toLowerCase()
+      return q ? base.filter((m) => (m.movieTitle ?? m.name).toLowerCase().includes(q)) : base
+    }
     if (search.trim()) {
       const q = search.toLowerCase()
       return movies.filter((m) => (m.movieTitle ?? m.name).toLowerCase().includes(q))
     }
     if (selectedGroup !== null) return movies.filter((m) => m.groupTitle === selectedGroup)
     return movies.slice(0, 200)
-  }, [movies, selectedGroup, search])
+  }, [movies, selectedGroup, search, genre, genreList.matches])
 
   const recentProgress = useLiveQuery(async () => {
     if (!activeProfileId) return []
@@ -229,6 +251,11 @@ export function MoviesPage() {
   const handleGroupSelect = (g: string | null) => {
     setSelectedGroup(g)
     setSearch('')
+    setGenre(null)
+  }
+  const handleGenreSelect = (g: Genre | null) => {
+    setGenre(g)
+    setSelectedGroup(null)
   }
 
   const [detailChannel, setDetailChannel] = useState<Channel | null>(null)
@@ -322,6 +349,9 @@ export function MoviesPage() {
                     <SearchBar value={search} onChange={setSearch} placeholder={t('movies.searchPlaceholder')} />
                   </div>
                 </div>
+              </div>
+              <div className="-mt-2 mb-6">
+                <GenreChips genres={genres} selected={genre} onSelect={handleGenreSelect} />
               </div>
 
               <div className="space-y-10">
@@ -448,9 +478,11 @@ export function MoviesPage() {
               <div className="px-4 sm:px-6 pt-5 pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3">
                 <div className="flex items-center justify-between sm:justify-start gap-3">
                   <h1 className="text-xl font-bold text-white truncate">
-                    {search.trim()
-                      ? t('common.resultsFor', { query: search })
-                      : cleanGroup(selectedGroup ?? '')}
+                    {genre
+                      ? genre.name
+                      : search.trim()
+                        ? t('common.resultsFor', { query: search })
+                        : cleanGroup(selectedGroup ?? '')}
                   </h1>
                   <p className="text-neutral-500 text-caption shrink-0">
                     {t('movies.count', { count: filtered.length })}
@@ -468,8 +500,16 @@ export function MoviesPage() {
                   <SearchBar value={search} onChange={setSearch} placeholder={t('movies.searchPlaceholder')} />
                 </div>
               </div>
+              <div className="px-4 sm:px-6 pb-4 space-y-2">
+                <GenreChips genres={genres} selected={genre} onSelect={handleGenreSelect} />
+                {genre && <p className="text-caption text-neutral-500">{t('genre.hint')}</p>}
+              </div>
 
-              {filtered.length === 0 ? (
+              {genre && genreList.loading ? (
+                <div className="flex justify-center py-24">
+                  <div className="h-8 w-8 rounded-full border-2 border-accent-600 border-t-transparent animate-spin" />
+                </div>
+              ) : filtered.length === 0 ? (
                 <div className="flex items-center justify-center py-24">
                   <EmptyState
                     icon={<Film size={36} />}

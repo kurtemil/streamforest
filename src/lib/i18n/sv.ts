@@ -90,6 +90,8 @@ export const sv = {
     'Börja med att lägga till adressen till din M3U-spellista i Inställningar och hämta dina kanaler.',
   'home.openSettings': 'Öppna inställningar',
   'home.recentMovies': 'Nyligen tillagda filmer',
+  'home.popularMovies': 'Populära filmer just nu',
+  'home.popularShows': 'Populära serier just nu',
   'home.homeLibrary': 'Hemma',
   'home.homeUnreachable': 'Hemmabiblioteket nås hemma, eller borta med Tailscale påslaget.',
   'home.homeBlocked': 'Webbläsaren har nekats åtkomst till hemnätet, så hemmabiblioteket kan inte visas. Tillåt ”lokalt nätverk” för den här sidan i webbläsarens webbplatsinställningar.',
@@ -99,6 +101,9 @@ export const sv = {
 
   // ── Movies ─────────────────────────────────────────────────────────────────
   'movies.title': 'Filmer',
+  'genre.label': 'Genrer',
+  'genre.hint': 'De mest populära filmerna i genren enligt TMDB som finns i er katalog.',
+  'genre.hintShows': 'De mest populära serierna i genren enligt TMDB som finns i er katalog.',
   'movies.count_one': '{count} titel',
   'movies.count_other': '{count} titlar',
   'movies.searchPlaceholder': 'Sök filmer…',
