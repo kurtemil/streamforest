@@ -9,6 +9,7 @@ import { useProfileStore } from '@/stores/profileStore'
 import { isVisible, useActiveExclusions } from '@/hooks/useActiveExclusions'
 import { HomeRail } from '@/components/home/HomeRail'
 import { PopularRails } from '@/components/home/PopularRails'
+import { useHeroItems } from '@/hooks/useCatalogList'
 import { db, clearProgress, addToWatchLater, removeFromWatchLater, getRecentlyAddedIds, getDismissedRecKeys } from '@/services/db'
 import { deleteRemoteProgress, pushWatchLater, deleteRemoteWatchLater } from '@/services/sync'
 import { MovieCard } from '@/components/movies/MovieCard'
@@ -297,6 +298,11 @@ export function HomePage() {
       .map(([genre, items]) => ({ genre, items: items.slice(0, 20) }))
   }, [recentShows, showGenreRows, tmdbMap])
 
+  // The hero shows what is popular this week and here (useHeroItems). It used to be
+  // built from Recently Added alone, so it vanished whenever that row had nothing
+  // to say, which was always, until 2026-10-11. That list is kept as the fallback
+  // for when TMDB cannot be reached.
+  const popularHero = useHeroItems('both')
   const heroItems = useMemo(() => {
     const candidates: Array<{ channel: Channel; tmdbMeta: TmdbMeta }> = []
     for (const ch of [...recentMovies, ...recentShows]) {
@@ -317,6 +323,7 @@ export function HomePage() {
     }
     return candidates
   }, [recentMovies, recentShows, tmdbMap])
+  const shownHero = popularHero.length > 0 ? popularHero : heroItems
 
   if (!loaded) return null
 
@@ -346,22 +353,25 @@ export function HomePage() {
 
   return (
     <>
-      {heroItems.length > 0 && (
+      {shownHero.length > 0 && (
         <Hero
-          items={heroItems}
+          items={shownHero}
           onPlay={(ch) => {
-            if (ch.type === 'movie') navigate(`/movies?playing=${ch.id}`)
-            else if (ch.type === 'series')
-              navigate(
-                `/series?show=${encodeURIComponent(normalizeShowKey(ch.showName ?? ch.name))}`,
-              )
+            // A show opens its overview, which offers "continue S2 · E3".
+            if (ch.type === 'series') {
+              navigate(`/series?show=${encodeURIComponent(normalizeShowKey(ch.showName ?? ch.name))}`)
+              return
+            }
+            navigate(`/movies?playing=${ch.id}`)
             play(ch)
           }}
           onMoreInfo={(ch) => {
-            const key =
-              ch.type === 'series' && ch.showName ? normalizeShowKey(ch.showName) : ch.id
+            if (ch.type === 'series') {
+              navigate(`/series?show=${encodeURIComponent(normalizeShowKey(ch.showName ?? ch.name))}`)
+              return
+            }
             setDetailChannel(ch)
-            setDetailTmdb(tmdbMap.get(key) ?? null)
+            setDetailTmdb(tmdbMap.get(ch.id) ?? shownHero.find((x) => x.channel.id === ch.id)?.tmdbMeta ?? null)
           }}
           onWatchLater={(ch) => {
             if (!activeProfileId) return

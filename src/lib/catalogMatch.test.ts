@@ -8,7 +8,7 @@ const movie = (id: string, title: string, year: number | undefined, groupTitle =
 const episode = (id: string, showName: string, groupTitle = 'Series'): Channel =>
   ({ id, type: 'series', name: `${showName} - S01E01`, showName, season: 1, episode: 1, groupTitle, url: '', logo: '', sortIndex: 0 }) as Channel
 const item = (title: string, originalTitle: string, year: number | null): TmdbListItem =>
-  ({ tmdbId: 1, title, originalTitle, year, posterPath: null, backdropPath: null, rating: 7, overview: '' })
+  ({ tmdbId: 1, title, originalTitle, year, posterPath: null, backdropPath: null, rating: 7, overview: '', genreIds: [] })
 const all = () => true
 
 describe('titleKey', () => {

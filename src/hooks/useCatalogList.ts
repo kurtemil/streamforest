@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { isVisible, useActiveExclusions } from '@/hooks/useActiveExclusions'
 import { buildMovieIndex, buildShowIndex, matchMovies, matchShows } from '@/lib/catalogMatch'
-import type { TmdbListItem } from '@/services/tmdb'
+import { fetchGenres, fetchTrending, type TmdbListItem } from '@/services/tmdb'
+import { useLocale } from '@/lib/i18n'
 import type { TmdbMeta } from '@/types'
 
 /** A list item dressed as cached metadata, so the ordinary cards can show it. */
@@ -56,4 +57,45 @@ export function useCatalogShows(load: (() => Promise<TmdbListItem[]>) | null, ke
     [items, index, excluded],
   )
   return { matches, loading: Boolean(load) && items === null }
+}
+
+/** At most this many slides: a hero is a few highlights, not a second rail. */
+const HERO_SLIDES = 8
+
+/**
+ * Hero slides from what is popular this week and in the catalogue. Titles with
+ * a landscape backdrop come first, because that is what a hero is made of; genre
+ * names are filled in from TMDB's genre list.
+ */
+export function useHeroItems(kind: 'movie' | 'tv' | 'both') {
+  const locale = useLocale()
+  const wantMovies = kind !== 'tv'
+  const wantShows = kind !== 'movie'
+  const movies = useCatalogMovies(wantMovies ? () => fetchTrending('movie', locale) : null, wantMovies ? `trending-movie@${locale}` : 'none')
+  const shows = useCatalogShows(wantShows ? () => fetchTrending('tv', locale) : null, wantShows ? `trending-tv@${locale}` : 'none')
+  const [genreNames, setGenreNames] = useState<Map<number, string>>(new Map())
+  useEffect(() => {
+    let alive = true
+    Promise.all([fetchGenres('movie', locale), fetchGenres('tv', locale)]).then(([a, b]) => {
+      if (alive) setGenreNames(new Map([...a, ...b].map((g) => [g.id, g.name])))
+    })
+    return () => { alive = false }
+  }, [locale])
+
+  return useMemo(() => {
+    const dress = (item: TmdbListItem, id: string, type: 'movie' | 'tv') => ({
+      ...listItemMeta(item, id, type),
+      genres: item.genreIds.map((g) => genreNames.get(g)).filter((g): g is string => Boolean(g)),
+    })
+    const m = movies.matches.map(({ channel, item }) => ({ channel, tmdbMeta: dress(item, channel.id, 'movie'), showKey: null as string | null }))
+    const s = shows.matches.map(({ channel, showKey, item }) => ({ channel, tmdbMeta: dress(item, showKey, 'tv'), showKey: showKey as string | null }))
+    // Home alternates films and shows; each list keeps TMDB's order.
+    const mixed: typeof m = []
+    for (let i = 0; i < Math.max(m.length, s.length); i++) {
+      if (m[i]) mixed.push(m[i])
+      if (s[i]) mixed.push(s[i])
+    }
+    const withBackdrop = mixed.filter((x) => x.tmdbMeta.backdropPath)
+    return (withBackdrop.length >= 3 ? withBackdrop : mixed).slice(0, HERO_SLIDES)
+  }, [movies.matches, shows.matches, genreNames])
 }

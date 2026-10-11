@@ -43,7 +43,8 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
 
   if (!items.length) return null
 
-  const { channel, tmdbMeta } = items[idx]
+  // The list can shrink under the timer (a profile switch, a catalogue refresh).
+  const { channel, tmdbMeta } = items[idx % items.length]
   const backdrop = backdropUrl(tmdbMeta.backdropPath, 1280)
   // Not every title has a landscape backdrop, and without one the whole hero used
   // to be skipped — so the home screen opened on a bare row heading whenever the

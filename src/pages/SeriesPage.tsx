@@ -39,7 +39,8 @@ import { openInVlc, openPlaylistInVlc } from '@/lib/vlc'
 import { markWatched } from '@/services/watched'
 import { formatNumber, useLocale, useT } from '@/lib/i18n'
 import { GenreChips, type Genre } from '@/components/ui/GenreChips'
-import { useCatalogShows } from '@/hooks/useCatalogList'
+import { useCatalogShows, useHeroItems } from '@/hooks/useCatalogList'
+import { Hero } from '@/components/home/Hero'
 import { discoverByGenre, fetchGenres } from '@/services/tmdb'
 
 const RECENT_SHOWS = 40
@@ -319,6 +320,8 @@ export function SeriesPage() {
     genre ? () => discoverByGenre('tv', genre.id, locale) : null,
     genre ? `tv-genre-${genre.id}@${locale}` : 'none',
   )
+  // What is popular this week and here, at the top of the browse view.
+  const showHero = useHeroItems('tv')
   const handleGenreSelect = (g: Genre | null) => { setGenre(g); setSelectedGroup(null); setShowFavs(false) }
   const [selectedGroup, setSelectedGroup] = useState<string | null>(
     () => searchParams.get('group'),
@@ -345,8 +348,8 @@ export function SeriesPage() {
     return new Set(entries.map((e) => e.contentId))
   }, [activeProfileId])
 
-  const toggleWatchLater = async (e: React.MouseEvent, showKey: string) => {
-    e.stopPropagation()
+  const toggleWatchLater = async (e: React.MouseEvent | undefined, showKey: string) => {
+    e?.stopPropagation()
     if (!activeProfileId) return
     if (watchLaterIds?.has(showKey)) {
       await removeFromWatchLater(activeProfileId, showKey)
@@ -754,6 +757,18 @@ export function SeriesPage() {
         {isRowMode ? (
           // ── Netflix row mode ─────────────────────────────────────────────────
           <div className="px-4 sm:px-6 pb-12">
+            {showHero.length > 0 && (
+              <div className="-mx-4 sm:-mx-6">
+                <Hero
+                  items={showHero}
+                  // A show plays from its overview, which knows where you left off.
+                  onPlay={(ch) => navigate(`/series?show=${encodeURIComponent(normalizeShowKey(ch.showName ?? ch.name))}`)}
+                  onMoreInfo={(ch) => navigate(`/series?show=${encodeURIComponent(normalizeShowKey(ch.showName ?? ch.name))}`)}
+                  onWatchLater={(ch) => { void toggleWatchLater(undefined, normalizeShowKey(ch.showName ?? ch.name)) }}
+                  isWatchLater={(ch) => watchLaterIds?.has(normalizeShowKey(ch.showName ?? ch.name)) ?? false}
+                />
+              </div>
+            )}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-5 pb-6">
               <div>
                 <h1 className="text-2xl font-bold text-white">{t('series.title')}</h1>

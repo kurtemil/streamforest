@@ -26,7 +26,8 @@ import { useTmdbEnrich } from '@/hooks/useTmdbEnrich'
 import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
 import { formatNumber, useLocale, useT } from '@/lib/i18n'
 import { GenreChips, type Genre } from '@/components/ui/GenreChips'
-import { useCatalogMovies } from '@/hooks/useCatalogList'
+import { useCatalogMovies, useHeroItems } from '@/hooks/useCatalogList'
+import { Hero } from '@/components/home/Hero'
 import { discoverByGenre, fetchGenres } from '@/services/tmdb'
 
 const ENRICH_LIMIT = 200
@@ -236,8 +237,8 @@ export function MoviesPage() {
     return new Set(entries.map((e) => e.contentId))
   }, [activeProfileId])
 
-  const toggleWatchLater = async (channelId: string, e: MouseEvent) => {
-    e.stopPropagation()
+  const toggleWatchLater = async (channelId: string, e?: MouseEvent) => {
+    e?.stopPropagation()
     if (!activeProfileId) return
     if (watchLaterSet?.has(channelId)) {
       await removeFromWatchLater(activeProfileId, channelId)
@@ -260,6 +261,9 @@ export function MoviesPage() {
 
   const [detailChannel, setDetailChannel] = useState<Channel | null>(null)
   const [detailTmdb, setDetailTmdb] = useState<TmdbMeta | null>(null)
+
+  // What is popular this week and here, at the top of the browse view.
+  const movieHero = useHeroItems('movie')
 
   const handleOpenDetail = useCallback(
     (m: Channel) => {
@@ -329,6 +333,20 @@ export function MoviesPage() {
           {isRowMode ? (
             // ── Netflix row mode ───────────────────────────────────────────────
             <div className="px-4 sm:px-6 pb-12">
+              {movieHero.length > 0 && (
+                <div className="-mx-4 sm:-mx-6">
+                  <Hero
+                    items={movieHero}
+                    onPlay={(ch) => play(ch)}
+                    onMoreInfo={(ch) => {
+                      setDetailChannel(ch)
+                      setDetailTmdb(tmdbMap.get(ch.id) ?? movieHero.find((x) => x.channel.id === ch.id)?.tmdbMeta ?? null)
+                    }}
+                    onWatchLater={(ch) => { void toggleWatchLater(ch.id) }}
+                    isWatchLater={(ch) => watchLaterSet?.has(ch.id) ?? false}
+                  />
+                </div>
+              )}
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-5 pb-6">
                 <div>
                   <h1 className="text-2xl font-bold text-white">{t('movies.title')}</h1>

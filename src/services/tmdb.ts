@@ -67,10 +67,11 @@ export interface TmdbListItem {
   backdropPath: string | null
   rating: number
   overview: string
+  genreIds: number[]
 }
 
 const LIST_TTL_MS = 12 * 3600 * 1000
-const LIST_STORAGE_PREFIX = 'sf-tmdb-list:'
+const LIST_STORAGE_PREFIX = 'sf-tmdb-list:v2:'
 const listMemo = new Map<string, { at: number; items: TmdbListItem[] }>()
 
 function readList(key: string): { at: number; items: TmdbListItem[] } | null {
@@ -107,6 +108,7 @@ async function tmdbListPages(path: string, locale: Locale, params: Record<string
         backdropPath: r.backdrop_path,
         rating: Math.round((r.vote_average ?? 0) * 10) / 10,
         overview: r.overview ?? '',
+        genreIds: r.genre_ids ?? [],
       })
     }
     if (data.total_pages && page >= data.total_pages) break
@@ -128,9 +130,18 @@ export function discoverByGenre(kind: 'movie' | 'tv', genreId: number, locale: L
   }, 10)
 }
 
-export async function fetchGenres(kind: 'movie' | 'tv', locale: Locale): Promise<{ id: number; name: string }[]> {
-  const data = await tmdbFetch<{ genres: { id: number; name: string }[] }>(`/genre/${kind}/list`, locale)
-  return data?.genres ?? []
+const genreMemo = new Map<string, Promise<{ id: number; name: string }[]>>()
+
+/** The genre list in the app's language, asked once per kind and language. */
+export function fetchGenres(kind: 'movie' | 'tv', locale: Locale): Promise<{ id: number; name: string }[]> {
+  const key = `${kind}@${locale}`
+  let p = genreMemo.get(key)
+  if (!p) {
+    p = tmdbFetch<{ genres: { id: number; name: string }[] }>(`/genre/${kind}/list`, locale).then((d) => d?.genres ?? [])
+    p.then((g) => { if (!g.length) genreMemo.delete(key) })
+    genreMemo.set(key, p)
+  }
+  return p
 }
 
 // ── Raw TMDB response shapes (minimal — only what we use) ──────────────────────
