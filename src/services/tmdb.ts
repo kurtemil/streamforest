@@ -177,7 +177,9 @@ interface TmdbTranslation {
   iso_639_1: string
   data?: { title?: string; name?: string; overview?: string }
 }
-interface TmdbTranslations { translations?: TmdbTranslation[] }
+// TMDB nests the list: append_to_response=translations gives
+// { translations: { translations: [...] } }. Typed as the API sends it.
+interface TmdbTranslations { translations?: { translations?: TmdbTranslation[] } }
 
 /**
  * TMDB does not fall back for text. Ask it for Swedish and a title nobody has
@@ -189,12 +191,16 @@ interface TmdbTranslations { translations?: TmdbTranslation[] }
  * on a phone; the cost is a fatter response, since TMDB will not let you ask
  * for only the translation you want.
  */
-function withEnglishFallback<T extends { overview?: string }>(
+export function withEnglishFallback<T extends { overview?: string }>(
   detail: T & TmdbTranslations,
   localized: { title: string; overview: string },
 ): { title: string; overview: string } {
   if (localized.title && localized.overview) return localized
-  const english = detail.translations?.find((tr) => tr.iso_639_1 === 'en')?.data
+  // This read `detail.translations?.find(...)` on the outer object, which has no
+  // `find`. Every title without a Swedish overview threw, and each throw jammed
+  // one of the enrichment queue's three slots for good. Three such titles and
+  // nothing else in the session got artwork (found 2026-10-11).
+  const english = detail.translations?.translations?.find((tr) => tr.iso_639_1 === 'en')?.data
   return {
     title: localized.title || english?.title || english?.name || '',
     overview: localized.overview || english?.overview || '',

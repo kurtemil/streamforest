@@ -123,7 +123,9 @@ export function useTmdbEnrich(channels: Channel[]): MetaMap {
       running.current++
 
       const startedIn = localeRef.current
-      item.fn().then((result) => {
+      // A lookup that throws must still free its slot: an uncaught one left
+      // `running` at the limit and the queue stalled for the rest of the session.
+      item.fn().catch(() => null).then((result) => {
         running.current--
         if (!mounted.current) return
         // Answer from before a language switch — the map has already been
