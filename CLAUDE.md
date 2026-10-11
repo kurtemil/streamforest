@@ -745,7 +745,23 @@ deploy that should use it. Without it, Settings says the move is switched off.
 itself is down: `<ip>` moves the record, `--m3u` moves `m3u_url`. It reads the same
 key as `CF_DNS_TOKEN` from the environment, `.env.local` or `../hemma/.env`.
 
-**Never download the full playlist from the home server by hand.** On 2026-10-10,
+**Never let the home IP look like a scraper. The provider blocks it on all four
+servers for about four hours, and everything that streams comes from that IP.**
+Two blocks so far, both caused from here:
+
+- **Posters on the provider's own servers.** About 7 000 playlist logos are
+  `http://Ptv.is:2095/images/…`, and `ptv.is` is one of the four streaming
+  servers. On the https page the browser upgrades each one to https, against an
+  http port. The picture can never load, but every attempt reaches the provider
+  as a malformed request. A poster grid makes hundreds in seconds. Since
+  2026-10-11 `safeImageUrl` (`src/lib/images.ts`) drops every non-https logo, at
+  import and when a stored catalogue is loaded.
+- **Automated tests against production from this machine.** Run on the home
+  network, they browse at the home IP. Block the provider's hosts in the test
+  (`context.route(/ptv.is|88.135…/, r => r.abort())`), and do not make fresh
+  browser profiles download the playlist again and again.
+
+**Also: never download the full playlist from the home server by hand.** On 2026-10-10,
 two `get.php` downloads (60 MB each) a few minutes apart, made to compare group
 names, were followed by the provider blocking the home IP on all four servers. The
 account stayed active, as `/proxy` from Cloudflare showed. Everything that
