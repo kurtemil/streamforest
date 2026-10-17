@@ -16,6 +16,7 @@ const FeedbackPage = lazy(() => import('@/pages/FeedbackPage').then(m => ({ defa
 import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { HomePlayer } from '@/components/player/HomePlayer'
 import { MovieDetailModal } from '@/components/home/MovieDetailModal'
+import { VlcReturnPrompt } from '@/components/VlcReturnPrompt'
 import { HomeDetailModal } from '@/components/home/HomeDetailModal'
 import { ProfilePicker } from '@/components/ProfilePicker'
 import { usePlaylistStore } from '@/stores/playlistStore'
@@ -27,6 +28,7 @@ import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import { useEpgStore } from '@/stores/epgStore'
 import { PROFILES } from '@/stores/profileStore'
 import { PageTransition } from '@/ui'
+import { useWatchStateSync } from '@/stores/watchStateStore'
 import { useT } from '@/lib/i18n'
 
 export default function App() {
@@ -35,6 +37,8 @@ export default function App() {
   const { activeProfileId, showPicker } = useProfileStore()
   const location = useLocation()
   const syncEpgUrl = useEpgStore((s) => s.syncEpgUrlFromRemote)
+  // What the profile has seen, for every card at once (stores/watchStateStore.ts).
+  useWatchStateSync()
 
   useEffect(() => {
     loadFromDB()
@@ -50,6 +54,21 @@ export default function App() {
       useExclusionsStore.getState().syncFromRemote(activeProfileId)
       usePlaybackPrefsStore.getState().syncFromRemote(activeProfileId)
     }
+  }, [activeProfileId])
+
+  // Positions written elsewhere (another device, VLC's handler) were only read on
+  // a profile switch, so a film paused on the phone looked unstarted on the laptop
+  // until the app was reloaded. Coming back to the front reads them again.
+  useEffect(() => {
+    if (!activeProfileId) return
+    let last = 0
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || Date.now() - last < 30_000) return
+      last = Date.now()
+      void syncFromRemote(activeProfileId)
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
   }, [activeProfileId])
 
   if (!loaded) {
@@ -94,6 +113,7 @@ export default function App() {
           without starting it. Before the players, which cover them. */}
       <MovieDetailModal />
       <HomeDetailModal />
+      <VlcReturnPrompt />
       <VideoPlayer />
       <HomePlayer />
       {(!activeProfileId || showPicker) && (

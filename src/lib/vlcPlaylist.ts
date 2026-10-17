@@ -16,13 +16,26 @@
 export interface PlaylistItem {
   title: string
   url: string
+  /** Seconds to start at: where the profile left this item. VLC reads it as `start-time`. */
+  start?: number
+  /** Whose position this is when VLC reports back: a channel id, or a Jellyfin item id. */
+  id?: string
 }
 
-/** Wire payload: a common URL prefix lifted out, plus [title, suffix] pairs. */
+/** Wire payload: a common URL prefix lifted out, plus [title, suffix, extra?] entries. */
 interface Payload {
   b: string
-  i: [string, string][]
+  i: ([string, string] | [string, string, { s?: number; k?: string }])[]
 }
+
+/**
+ * Where VLC's position goes, carried beside the playlist as `r=`: a StreamForest
+ * profile (`/api/vlc-report` writes the row), or a Jellyfin user, whose server the
+ * handler on the computer reaches itself, since no Cloudflare Function can.
+ */
+export type ReportTarget =
+  | { k: 'sf'; p: string }
+  | { k: 'jf'; u: string; t: string }
 
 // A provider's episode URLs differ only in the last path segment, so hoisting
 // the shared prefix roughly halves the token — the difference between a season
@@ -58,9 +71,30 @@ export function encodePlaylist(items: PlaylistItem[]): string {
   const base = commonPrefix(items.map((i) => i.url))
   const payload: Payload = {
     b: base,
-    i: items.map((i) => [i.title, i.url.slice(base.length)]),
+    i: items.map((i) => {
+      const extra: { s?: number; k?: string } = {}
+      if (i.start && i.start > 0) extra.s = Math.floor(i.start)
+      if (i.id) extra.k = i.id
+      return Object.keys(extra).length
+        ? [i.title, i.url.slice(base.length), extra]
+        : [i.title, i.url.slice(base.length)]
+    }),
   }
   return toBase64Url(JSON.stringify(payload))
+}
+
+export function encodeReport(target: ReportTarget): string {
+  return toBase64Url(JSON.stringify(target))
+}
+
+/** Reverse of `encodeReport`. Throws on anything it did not produce. */
+export function decodeReport(token: string): ReportTarget {
+  const r = JSON.parse(fromBase64Url(token)) as ReportTarget
+  if (r?.k === 'sf' && typeof r.p === 'string' && r.p) return { k: 'sf', p: r.p }
+  if (r?.k === 'jf' && typeof r.u === 'string' && typeof r.t === 'string' && /^[0-9a-f]+$/i.test(r.u) && /^\w+$/.test(r.t)) {
+    return { k: 'jf', u: r.u, t: r.t }
+  }
+  throw new Error('malformed report target')
 }
 
 /** Reverse of `encodePlaylist`. Throws on anything it did not produce. */
@@ -72,7 +106,7 @@ export function decodePlaylist(token: string): PlaylistItem[] {
   if (payload.i.length === 0 || payload.i.length > 1000) {
     throw new Error('playlist item count out of range')
   }
-  return payload.i.map(([title, suffix]) => {
+  return payload.i.map(([title, suffix, extra]) => {
     if (typeof title !== 'string' || typeof suffix !== 'string') {
       throw new Error('malformed playlist entry')
     }
@@ -80,16 +114,24 @@ export function decodePlaylist(token: string): PlaylistItem[] {
     // The endpoint hands this to a media player on someone's machine, so it
     // only ever emits the two schemes a stream can arrive over.
     if (!/^https?:\/\//i.test(url)) throw new Error('unsupported url scheme')
-    return { title, url }
+    const item: PlaylistItem = { title, url }
+    if (extra && typeof extra.s === 'number' && extra.s > 0) item.start = Math.floor(extra.s)
+    if (extra && typeof extra.k === 'string') item.id = extra.k
+    return item
   })
 }
 
 /** An extended M3U — one `#EXTINF` per entry, which is what makes VLC show titles. */
 export function buildM3u(items: PlaylistItem[]): string {
   const lines = ['#EXTM3U']
-  for (const { title, url } of items) {
+  for (const { title, url, start } of items) {
     // A newline in a title would fabricate a playlist line of its own.
-    lines.push(`#EXTINF:-1,${title.replace(/[\r\n]+/g, ' ').trim()}`, url)
+    lines.push(`#EXTINF:-1,${title.replace(/[\r\n]+/g, ' ').trim()}`)
+    // `start-time` is one of the options VLC marks safe, so it is honoured from a
+    // playlist it fetched. Desktop VLC does; VLC for iOS also resumes a URL it
+    // has played before by itself.
+    if (start && start > 0) lines.push(`#EXTVLCOPT:start-time=${Math.floor(start)}`)
+    lines.push(url)
   }
   return lines.join('\n') + '\n'
 }

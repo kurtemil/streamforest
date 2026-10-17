@@ -15,6 +15,7 @@ import { resumePoint } from '@/lib/progress'
 import { openInVlc } from '@/lib/vlc'
 import { formatRuntime, useLocale, useT } from '@/lib/i18n'
 import { DetailSheet, sheetButton } from '@/components/ui/DetailSheet'
+import { RelatedMovies } from '@/components/home/RelatedRails'
 import type { Channel } from '@/types'
 
 const NONE: Channel[] = []
@@ -29,7 +30,7 @@ export function MovieDetailModal() {
   const t = useT()
   const locale = useLocale()
   const navigate = useNavigate()
-  const { channel, tmdbMeta: given, close } = useDetailStore()
+  const { channel, tmdbMeta: given, close, openMovie } = useDetailStore()
   const play = usePlayerStore((s) => s.play)
   const activeProfileId = useProfileStore((s) => s.activeProfileId)
 
@@ -101,6 +102,9 @@ export function MovieDetailModal() {
       overview={tmdbMeta?.overview}
       director={tmdbMeta?.director}
       cast={tmdbMeta?.cast?.map((m) => ({ name: m.name, character: m.character, image: profileUrl(m.profilePath, 92) }))}
+      after={channel?.type === 'movie' && (
+        <RelatedMovies tmdbId={tmdbMeta?.tmdbId || null} excludeId={channel.id} onOpen={openMovie} />
+      )}
       actions={
         <>
           <button onClick={() => void start(false)} className={sheetButton('primary')}>
@@ -128,7 +132,11 @@ export function MovieDetailModal() {
             </button>
           )}
           {channel && (
-            <button onClick={() => openInVlc(channel)} title={t('common.openInVlc')} className={sheetButton('secondary')}>
+            <button
+              onClick={() => openInVlc(channel, { durationSec: progress?.duration || (tmdbMeta?.runtime ? tmdbMeta.runtime * 60 : null) })}
+              title={t('common.openInVlc')}
+              className={sheetButton('secondary')}
+            >
               <span className="w-2.5 h-2.5 rounded-sm bg-[#ff8800]" />
               VLC
             </button>

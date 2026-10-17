@@ -5,6 +5,8 @@ import { useHomeLibraryStore } from '@/stores/homeLibraryStore'
 import { resumePoint } from '@/lib/progress'
 import { formatRuntime, useLocale, useT } from '@/lib/i18n'
 import { DetailSheet, sheetButton } from '@/components/ui/DetailSheet'
+import { RelatedHome } from '@/components/home/RelatedRails'
+import { openHomeInVlc } from '@/lib/vlc'
 
 /** People change less often than this sheet is opened; one read per film per visit. */
 const detailsCache = new Map<string, HomeDetails>()
@@ -18,7 +20,7 @@ const detailsCache = new Map<string, HomeDetails>()
 export function HomeDetailModal() {
   const t = useT()
   const locale = useLocale()
-  const { detail: item, session, closeDetail, play, markPlayed } = useHomeLibraryStore()
+  const { detail: item, items, session, closeDetail, openDetail, play, markPlayed } = useHomeLibraryStore()
   const [details, setDetails] = useState<HomeDetails | null>(null)
 
   useEffect(() => {
@@ -34,6 +36,9 @@ export function HomeDetailModal() {
   }, [item?.id, session]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const resume = item ? resumePoint(item.positionSec, item.durationSec, item.played) : null
+  const similar = (details?.similar ?? [])
+    .map((id) => items.find((i) => i.id === id))
+    .filter((i): i is NonNullable<typeof i> => Boolean(i))
   const minutes = item && item.durationSec > 0 ? Math.round(item.durationSec / 60) : 0
 
   return (
@@ -56,6 +61,7 @@ export function HomeDetailModal() {
       overview={item?.overview}
       director={details?.director}
       cast={details?.cast}
+      after={<RelatedHome items={similar} onOpen={openDetail} />}
       actions={item && (
         <>
           <button onClick={() => play(item)} className={sheetButton('primary')}>
@@ -76,6 +82,12 @@ export function HomeDetailModal() {
             <Check size={15} />
             {item.played ? t('common.markUnwatched') : t('common.markWatched')}
           </button>
+          {session && (
+            <button onClick={() => openHomeInVlc(item, session)} title={t('common.openInVlc')} className={sheetButton('secondary')}>
+              <span className="w-2.5 h-2.5 rounded-sm bg-[#ff8800]" />
+              VLC
+            </button>
+          )}
         </>
       )}
     />

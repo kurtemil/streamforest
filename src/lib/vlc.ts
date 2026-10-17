@@ -17,9 +17,13 @@
 // that reconstructs the playlist from the token and serves it. VLC opens the
 // remote .m3u as a playlist and plays the season in order.
 import type { Channel } from '@/types'
-import { buildM3u, encodePlaylist, type PlaylistItem } from './vlcPlaylist'
+import { buildM3u, encodePlaylist, encodeReport, type PlaylistItem, type ReportTarget } from './vlcPlaylist'
 import { toPlaylistHost } from './provider'
+import { rememberHandoff, type Handoff } from './vlcHandoff'
 import { usePlaylistStore } from '@/stores/playlistStore'
+import { useProfileStore } from '@/stores/profileStore'
+import { useWatchStateStore } from '@/stores/watchStateStore'
+import { JELLYFIN_URL, locatePart, type HomeItem, type JellyfinSession } from '@/services/jellyfin'
 
 /** The stream URL VLC should open: on the playlist's host, not a dead panel domain. */
 function streamUrl(channel: Channel): string {
@@ -66,12 +70,19 @@ export function vlcTitle(channel: Channel): string {
   return channel.name
 }
 
-// vlc-x-callback://x-callback-url/stream?url=<encoded>&x-success=<encoded return url>
+// vlc-x-callback://x-callback-url/stream?url=<encoded>&x-success=<return url>
 // `stream` is the only path that takes a remote url; plain `vlc://` just rewrites
 // the scheme to http, which would break https sources.
+//
+// x-success opens when the player is closed. VLC 3.7 cuts its value at the second
+// "=" and does not decode it, so the return link carries no query at all, which
+// the page URL it used to be often did. A home-screen app is left without one:
+// iOS opens https links in Safari, never in the installed app, so it would land
+// the viewer in a browser tab instead of back where they were.
 function xCallbackLink(streamUrl: string): string {
   const params = new URLSearchParams({ url: streamUrl })
-  if (typeof location !== 'undefined') params.set('x-success', location.href)
+  const standalone = typeof matchMedia !== 'undefined' && matchMedia('(display-mode: standalone)').matches
+  if (typeof location !== 'undefined' && !standalone) params.set('x-success', `${location.origin}/vlc-done`)
   return `vlc-x-callback://x-callback-url/stream?${params.toString()}`
 }
 
@@ -79,12 +90,18 @@ function fileName(name: string): string {
   return name.replace(/[^\w.-]+/g, '_').slice(0, 80) || 'stream'
 }
 
-/** The `/api/playlist` link VLC can fetch, or null if it came out too long. */
-function playlistUrl(items: PlaylistItem[], name: string): string | null {
+/**
+ * The `/api/playlist` link VLC can fetch, or null if it came out too long. With a
+ * report target, a handler that reports (public/vlc-handler.*) sends VLC's
+ * position back while it plays; `r` rides beside `d` so the handler can tell a
+ * reporting link from a plain one without decoding anything.
+ */
+function playlistUrl(items: PlaylistItem[], name: string, report?: ReportTarget): string | null {
   // The `.m3u` extension is load-bearing: it is how VLC decides it was handed a
   // playlist rather than a stream, before any Content-Type is looked at.
   const url = `${location.origin}/api/playlist/${encodeURIComponent(fileName(name))}.m3u`
     + `?d=${encodePlaylist(items)}`
+    + (report ? `&r=${encodeReport(report)}` : '')
   return url.length > MAX_DEEPLINK_URL ? null : url
 }
 
@@ -209,20 +226,56 @@ function handOver(target: string, items: PlaylistItem[], name: string): void {
   openDesktop(target, () => downloadM3u(items, name))
 }
 
+/** Where the profile left a channel, if it is under way: VLC starts there. */
+function resumeAt(channelId: string): number | undefined {
+  const row = useWatchStateStore.getState().byId.get(channelId)
+  return row && !row.completed && row.position > 10 ? Math.floor(row.position) : undefined
+}
+
+function entry(channel: Channel): PlaylistItem {
+  return { title: vlcTitle(channel), url: streamUrl(channel), id: channel.id, start: resumeAt(channel.id) }
+}
+
+/** Hands a playlist over through the hosted link, or as a file when the link cannot carry it. */
+function handOverList(items: PlaylistItem[], name: string, report: ReportTarget | undefined, handoff: Handoff | null): void {
+  const hosted = playlistUrl(items, name, report)
+  // No link short enough to survive the trip: the file is the only route left,
+  // and it carries the same playlist.
+  if (!hosted) {
+    downloadM3u(items, name)
+    return
+  }
+  if (handoff) rememberHandoff(handoff)
+  handOver(hosted, items, name)
+}
+
 /**
- * Open this channel/movie/episode in VLC.
+ * Open this channel/movie/episode in VLC, where the profile left it.
  * Mobile uses a one-tap deeplink; desktop tries the vlc:// handler and falls
- * back to a .m3u download if none is installed.
+ * back to a .m3u download if none is installed. A handler that reports sends
+ * the position back while VLC plays; otherwise the app asks on return.
  */
-export function openInVlc(channel: Channel): void {
+export function openInVlc(channel: Channel, opts: { durationSec?: number | null } = {}): void {
+  const profileId = useProfileStore.getState().activeProfileId
+  const item = entry(channel)
   const title = vlcTitle(channel)
-  const url = streamUrl(channel)
-  handOver(url, [{ title, url }], title)
+  if (channel.type === 'live') {
+    // Live has no position to keep: the plain stream, as before.
+    handOver(item.url, [{ title, url: item.url }], title)
+    return
+  }
+  const row = useWatchStateStore.getState().byId.get(channel.id)
+  handOverList([item], title, profileId ? { k: 'sf', p: profileId } : undefined, profileId ? {
+    at: Date.now(), kind: 'sf', profileId, title, id: channel.id, start: item.start ?? 0,
+    durationSec: opts.durationSec ?? (row?.duration ? row.duration : null),
+  } : null)
 }
 
 /**
  * Open several items in VLC as one ordered playlist — a whole season, so it
- * plays on into the next episode instead of stopping after the first.
+ * plays on into the next episode instead of stopping after the first. Each
+ * episode starts where it was left. Positions come back from a reporting
+ * handler; a whole season is not asked about on return.
  */
 export function openPlaylistInVlc(channels: Channel[], name: string): void {
   if (channels.length === 0) return
@@ -230,13 +283,29 @@ export function openPlaylistInVlc(channels: Channel[], name: string): void {
     openInVlc(channels[0])
     return
   }
-  const items = channels.map((c) => ({ title: vlcTitle(c), url: streamUrl(c) }))
-  const hosted = playlistUrl(items, name)
-  // No link short enough to survive the trip: the file is the only route left,
-  // and it carries the same playlist.
-  if (!hosted) {
-    downloadM3u(items, name)
-    return
-  }
-  handOver(hosted, items, name)
+  const profileId = useProfileStore.getState().activeProfileId
+  handOverList(channels.map(entry), name, profileId ? { k: 'sf', p: profileId } : undefined, null)
+}
+
+/**
+ * A home-library film in VLC: the file itself, straight from the server, so VLC
+ * gets every audio and subtitle track the file has. A split film goes over as a
+ * playlist of its parts, starting in the part the profile is in. The address is
+ * the same every time (no play session in it), which is what lets VLC for iOS
+ * recognise the film and offer its own resume point too.
+ */
+export function openHomeInVlc(item: HomeItem, session: JellyfinSession): void {
+  const profileId = useProfileStore.getState().activeProfileId
+  const parts = item.parts ?? [{ id: item.id, durationSec: item.durationSec, positionSec: item.positionSec, played: item.played, lastPlayedAt: item.lastPlayedAt }]
+  const start = !item.played && item.positionSec > 10 ? item.positionSec : 0
+  const at = locatePart(parts, start)
+  const items: PlaylistItem[] = parts.map((p, i) => ({
+    title: parts.length > 1 ? `${item.name} (${i + 1}/${parts.length})` : item.name,
+    url: `${JELLYFIN_URL}/Videos/${p.id}/stream?static=true&ApiKey=${session.token}`,
+    id: p.id,
+    start: i === at.index && at.offsetSec > 10 ? Math.floor(at.offsetSec) : undefined,
+  })).slice(at.index)
+  handOverList(items, item.name, { k: 'jf', u: session.userId, t: session.token }, profileId ? {
+    at: Date.now(), kind: 'jf', profileId, title: item.name, id: item.id, start, durationSec: item.durationSec || null,
+  } : null)
 }
