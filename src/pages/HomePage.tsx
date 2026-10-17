@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Link, useNavigate } from 'react-router-dom'
 import { normalizeShowKey } from '@/lib/utils'
@@ -14,7 +14,7 @@ import { db, clearProgress, addToWatchLater, removeFromWatchLater, getRecentlyAd
 import { deleteRemoteProgress, pushWatchLater, deleteRemoteWatchLater } from '@/services/sync'
 import { MovieCard } from '@/components/movies/MovieCard'
 import { Hero } from '@/components/home/Hero'
-import { MovieDetailModal } from '@/components/home/MovieDetailModal'
+import { useDetailStore } from '@/stores/detailStore'
 import { ScrollableRow, SectionHeader } from '@/components/ui/MediaRow'
 import { ContinueCard } from '@/components/ui/ContinueCard'
 import type { Channel, WatchProgress, TmdbMeta } from '@/types'
@@ -28,8 +28,7 @@ export function HomePage() {
   const { play } = usePlayerStore()
   const { activeProfileId } = useProfileStore()
 
-  const [detailChannel, setDetailChannel] = useState<Channel | null>(null)
-  const [detailTmdb, setDetailTmdb] = useState<TmdbMeta | null>(null)
+  const openMovie = useDetailStore((s) => s.openMovie)
 
   const excluded = useActiveExclusions()
   const movies = useMemo(
@@ -370,8 +369,7 @@ export function HomePage() {
               navigate(`/series?show=${encodeURIComponent(normalizeShowKey(ch.showName ?? ch.name))}`)
               return
             }
-            setDetailChannel(ch)
-            setDetailTmdb(tmdbMap.get(ch.id) ?? shownHero.find((x) => x.channel.id === ch.id)?.tmdbMeta ?? null)
+            openMovie(ch, tmdbMap.get(ch.id) ?? shownHero.find((x) => x.channel.id === ch.id)?.tmdbMeta ?? null)
           }}
           onWatchLater={(ch) => {
             if (!activeProfileId) return
@@ -398,8 +396,7 @@ export function HomePage() {
 
         <PopularRails
           onMovie={(ch, meta) => {
-            setDetailChannel(ch)
-            setDetailTmdb(tmdbMap.get(ch.id) ?? meta)
+            openMovie(ch, tmdbMap.get(ch.id) ?? meta)
           }}
         />
 
@@ -416,8 +413,7 @@ export function HomePage() {
                     isWatchLater={watchLaterSet.has(m.id)}
                     tmdbMeta={tmdbMap.get(m.id)}
                     onClick={() => {
-                      setDetailChannel(m)
-                      setDetailTmdb(tmdbMap.get(m.id) ?? null)
+                      openMovie(m, tmdbMap.get(m.id) ?? null)
                     }}
                     onWatchLater={(e) => toggleWatchLater(m.id, 'movie', e)}
                   />
@@ -446,12 +442,9 @@ export function HomePage() {
                       isWatchLater={watchLaterSet.has(showKey)}
                       tmdbMeta={tmdbMap.get(showKey)}
                       episodeLabel={episodeLabel}
-                      onClick={() => {
-                        navigate(
-                          `/series?show=${encodeURIComponent(showKey)}&playing=${ch.id}`,
-                        )
-                        play(ch)
-                      }}
+                      // The show's overview, not the episode: a card is for looking
+                      // at a title, and the overview offers the new episode there.
+                      onClick={() => navigate(`/series?show=${encodeURIComponent(showKey)}`)}
                       onWatchLater={(e) => toggleWatchLater(showKey, 'series', e)}
                     />
                   </div>
@@ -484,7 +477,12 @@ export function HomePage() {
                           navigate(`/series?show=${encodeURIComponent(normalizeShowKey(channel.showName ?? channel.name))}`)
                           return
                         }
-                        if (channel.type === 'movie') navigate(`/movies?playing=${channel.id}`)
+                        // A film opens its sheet, which says "Fortsätt titta" and can
+                        // also start over (feedback box, 2026-10-15).
+                        if (channel.type === 'movie') {
+                          openMovie(channel, tmdbMap.get(tmdbKey) ?? null)
+                          return
+                        }
                         play(channel)
                       }}
                       onRemove={() => {
@@ -527,8 +525,7 @@ export function HomePage() {
                             `/series?show=${encodeURIComponent(normalizeShowKey(ch.showName))}`,
                           )
                         } else {
-                          setDetailChannel(ch)
-                          setDetailTmdb(tmdbMap.get(key) ?? null)
+                          openMovie(ch, tmdbMap.get(key) ?? null)
                         }
                       }}
                       onWatchLater={(e) =>
@@ -558,8 +555,7 @@ export function HomePage() {
                     isWatchLater={watchLaterSet.has(m.id)}
                     tmdbMeta={tmdbMap.get(m.id)}
                     onClick={() => {
-                      setDetailChannel(m)
-                      setDetailTmdb(tmdbMap.get(m.id) ?? null)
+                      openMovie(m, tmdbMap.get(m.id) ?? null)
                     }}
                     onWatchLater={(e) => toggleWatchLater(m.id, 'movie', e)}
                   />
@@ -611,8 +607,7 @@ export function HomePage() {
                     isWatchLater={watchLaterSet.has(m.id)}
                     tmdbMeta={tmdbMap.get(m.id)}
                     onClick={() => {
-                      setDetailChannel(m)
-                      setDetailTmdb(tmdbMap.get(m.id) ?? null)
+                      openMovie(m, tmdbMap.get(m.id) ?? null)
                     }}
                     onWatchLater={(e) => toggleWatchLater(m.id, 'movie', e)}
                   />
@@ -650,49 +645,6 @@ export function HomePage() {
           </section>
         ))}
       </div>
-
-      <MovieDetailModal
-        channel={detailChannel}
-        tmdbMeta={detailTmdb}
-        isWatchLater={
-          detailChannel
-            ? watchLaterSet.has(
-                detailChannel.type === 'series' && detailChannel.showName
-                  ? normalizeShowKey(detailChannel.showName)
-                  : detailChannel.id,
-              )
-            : false
-        }
-        onClose={() => {
-          setDetailChannel(null)
-          setDetailTmdb(null)
-        }}
-        onPlay={() => {
-          if (!detailChannel) return
-          if (detailChannel.type === 'movie') navigate(`/movies?playing=${detailChannel.id}`)
-          else
-            navigate(
-              `/series?show=${encodeURIComponent(normalizeShowKey(detailChannel.showName ?? detailChannel.name))}`,
-            )
-          play(detailChannel)
-          setDetailChannel(null)
-          setDetailTmdb(null)
-        }}
-        onWatchLater={() => {
-          if (!detailChannel || !activeProfileId) return
-          const id =
-            detailChannel.type === 'series' && detailChannel.showName
-              ? normalizeShowKey(detailChannel.showName)
-              : detailChannel.id
-          const kind: 'movie' | 'series' = detailChannel.type === 'series' ? 'series' : 'movie'
-          if (watchLaterSet.has(id)) {
-            removeFromWatchLater(activeProfileId, id)
-            deleteRemoteWatchLater(activeProfileId, id)
-          } else {
-            addToWatchLater(activeProfileId, id, kind).then(pushWatchLater)
-          }
-        }}
-      />
     </>
   )
 }

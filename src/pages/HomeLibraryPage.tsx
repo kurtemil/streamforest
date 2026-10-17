@@ -14,7 +14,7 @@ import { titleCollator, useT } from '@/lib/i18n'
  */
 export function HomeLibraryPage() {
   const t = useT()
-  const { status, items, play } = useHomeLibrary()
+  const { status, items, openDetail } = useHomeLibrary()
   const [search, setSearch] = useState('')
 
   const q = search.trim().toLowerCase()
@@ -69,7 +69,7 @@ export function HomeLibraryPage() {
           <ScrollableRow>
             {started.map((item) => (
               <div key={item.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
-                <HomeCard item={item} onClick={() => play(item)} />
+                <HomeCard item={item} onClick={() => openDetail(item)} />
               </div>
             ))}
           </ScrollableRow>
@@ -83,7 +83,7 @@ export function HomeLibraryPage() {
             <span className="text-caption text-neutral-500">{t('movies.count', { count: list.length })}</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-x-4 gap-y-6">
-            {list.map((item) => <HomeCard key={item.id} item={item} onClick={() => play(item)} />)}
+            {list.map((item) => <HomeCard key={item.id} item={item} onClick={() => openDetail(item)} />)}
           </div>
         </section>
       ))}

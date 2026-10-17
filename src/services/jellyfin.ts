@@ -38,8 +38,20 @@ export interface HomeItem {
   /** When this profile last played it; 0 if never. Orders "continue" first. */
   lastPlayedAt: number
   imageTag?: string
+  backdropTag?: string
   addedAt: number
   tmdbId?: string
+  genres: string[]
+  /** TMDb's average as Jellyfin stores it, 0–10. */
+  rating?: number
+  /** The age limit as written on the film: "SE-11", "PG-13". */
+  ageRating?: string
+}
+
+/** What the detail sheet adds to a list item: the people, fetched when it opens. */
+export interface HomeDetails {
+  director?: string
+  cast: { name: string; character?: string; image: string | null }[]
 }
 
 export interface PlaybackSource {
@@ -153,9 +165,17 @@ export async function getSession(profileId: string, userName: string): Promise<J
   }
 }
 
-/** A token the server has forgotten: drop it so the next getSession signs in afresh. */
-export function forgetSession(profileId: string): void {
-  storage()?.removeItem(sessionKey(profileId))
+/**
+ * A token the server has forgotten: drop it so the next getSession signs in afresh.
+ * Only that token. A newer one saved in the meantime is the one that works.
+ */
+export function forgetSession(profileId: string, token: string): void {
+  const s = storage()
+  const saved = s?.getItem(sessionKey(profileId))
+  try {
+    if (saved && (JSON.parse(saved) as JellyfinSession).token !== token) return
+  } catch { /* unreadable: drop it */ }
+  s?.removeItem(sessionKey(profileId))
 }
 
 export function isAuthError(e: unknown): boolean {
@@ -170,7 +190,11 @@ interface RawItem {
   Overview?: string
   RunTimeTicks?: number
   DateCreated?: string
+  Genres?: string[]
+  CommunityRating?: number
+  OfficialRating?: string
   ImageTags?: { Primary?: string }
+  BackdropImageTags?: string[]
   ProviderIds?: { Tmdb?: string }
   UserData?: { PlaybackPositionTicks?: number; Played?: boolean; LastPlayedDate?: string }
 }
@@ -192,7 +216,7 @@ export async function listItems(session: JellyfinSession): Promise<HomeItem[]> {
       parentId: view.Id,
       recursive: 'true',
       includeItemTypes: 'Movie,Video',
-      fields: 'ProviderIds,Overview,DateCreated',
+      fields: 'ProviderIds,Overview,DateCreated,Genres',
       enableUserData: 'true',
       sortBy: 'DateCreated,SortName',
       sortOrder: 'Descending,Ascending',
@@ -217,15 +241,56 @@ function toHomeItem(i: RawItem, library: string): HomeItem {
     played: i.UserData?.Played ?? false,
     lastPlayedAt: i.UserData?.LastPlayedDate ? Date.parse(i.UserData.LastPlayedDate) : 0,
     imageTag: i.ImageTags?.Primary,
+    backdropTag: i.BackdropImageTags?.[0],
     addedAt: i.DateCreated ? Date.parse(i.DateCreated) : 0,
     tmdbId: i.ProviderIds?.Tmdb,
+    genres: i.Genres ?? [],
+    rating: i.CommunityRating,
+    ageRating: i.OfficialRating,
   }
+}
+
+const CAST_SHOWN = 12
+
+/**
+ * The people in a film, for its detail sheet. Kept out of the list: every film
+ * carries dozens of them, and only the one being looked at needs them.
+ */
+export async function getDetails(session: JellyfinSession, itemId: string): Promise<HomeDetails> {
+  const i = await call<{ People?: { Id: string; Name: string; Role?: string; Type?: string; PrimaryImageTag?: string }[] }>(
+    `/Items/${itemId}?userId=${session.userId}`, { token: session.token },
+  )
+  const people = i.People ?? []
+  return {
+    director: people.filter((p) => p.Type === 'Director').map((p) => p.Name).join(', ') || undefined,
+    cast: people.filter((p) => p.Type === 'Actor').slice(0, CAST_SHOWN).map((p) => ({
+      name: p.Name,
+      character: p.Role || undefined,
+      image: p.PrimaryImageTag ? `${JELLYFIN_URL}/Items/${p.Id}/Images/Primary?fillWidth=92&quality=90&tag=${p.PrimaryImageTag}` : null,
+    })),
+  }
+}
+
+/**
+ * Watched or not, on the server. The same flag Swiftfin shows, so marking a film
+ * here marks it there.
+ */
+export async function setPlayed(session: JellyfinSession, itemId: string, played: boolean): Promise<void> {
+  await call(`/UserPlayedItems/${itemId}?userId=${session.userId}`, {
+    method: played ? 'POST' : 'DELETE', token: session.token,
+  })
 }
 
 /** Poster from the server's own cache. Needs no token. */
 export function posterUrl(item: HomeItem, width = 300): string | null {
   if (!item.imageTag) return null
   return `${JELLYFIN_URL}/Items/${item.id}/Images/Primary?fillWidth=${width}&quality=90&tag=${item.imageTag}`
+}
+
+/** The landscape still behind the detail sheet. Needs no token either. */
+export function backdropUrl(item: HomeItem, width = 1280): string | null {
+  if (!item.backdropTag) return null
+  return `${JELLYFIN_URL}/Items/${item.id}/Images/Backdrop/0?fillWidth=${width}&quality=80&tag=${item.backdropTag}`
 }
 
 // What this app can play without help: H.264/AAC in MP4 straight from the file,

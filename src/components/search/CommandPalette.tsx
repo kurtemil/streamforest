@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useSearchStore } from '@/stores/searchStore'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
+import { useDetailStore } from '@/stores/detailStore'
 import { normalizeShowKey } from '@/lib/utils'
 import { useActiveExclusions } from '@/hooks/useActiveExclusions'
 import { searchCatalogue, type SearchResult } from '@/lib/search'
@@ -32,6 +33,7 @@ export function CommandPalette() {
   const { open, setOpen } = useSearchStore()
   const { channels } = usePlaylistStore()
   const { play } = usePlayerStore()
+  const openMovie = useDetailStore((s) => s.openMovie)
   const navigate = useNavigate()
   // Search reaches every page, and plays straight from the result — so it must hide
   // exactly what the pages hide, or a kid's restrictions are one keystroke deep.
@@ -64,15 +66,16 @@ export function CommandPalette() {
     if (q) { saveRecent(q); setRecentSearches(loadRecent()) }
     setOpen(false)
     if (result.type === 'movie') {
-      play(result.channel)
-      navigate(`/movies?playing=${result.channel.id}`)
+      // The film's sheet, not the player: a search result is for finding a title,
+      // and the sheet offers to play or continue it (feedback box, 2026-10-15).
+      openMovie(result.channel)
     } else if (result.type === 'series') {
       navigate(`/series?show=${encodeURIComponent(normalizeShowKey(result.channel.showName ?? result.channel.name))}`)
     } else {
       play(result.channel)
       navigate('/live')
     }
-  }, [query, play, navigate, setOpen])
+  }, [query, play, navigate, setOpen, openMovie])
 
   useEffect(() => { setSelectedIdx(0) }, [query])
 

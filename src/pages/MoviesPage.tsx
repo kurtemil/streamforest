@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback, type MouseEvent } from 'react'
-import type { Channel, TmdbMeta, WatchProgress } from '@/types'
+import type { Channel, WatchProgress } from '@/types'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { Film, Shuffle } from 'lucide-react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
@@ -16,7 +16,7 @@ import {
 } from '@/services/db'
 import { pushWatchLater, deleteRemoteWatchLater, deleteRemoteProgress } from '@/services/sync'
 import { MovieCard } from '@/components/movies/MovieCard'
-import { MovieDetailModal } from '@/components/home/MovieDetailModal'
+import { useDetailStore } from '@/stores/detailStore'
 import { SearchBar } from '@/components/ui/SearchBar'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { GroupSidebar } from '@/components/ui/GroupSidebar'
@@ -37,7 +37,6 @@ const cleanGroup = (t: string) => t.replace(/^VOD:\s*/, '')
 
 export function MoviesPage() {
   const t = useT()
-  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { channels } = usePlaylistStore()
   const { play } = usePlayerStore()
@@ -259,45 +258,24 @@ export function MoviesPage() {
     setSelectedGroup(null)
   }
 
-  const [detailChannel, setDetailChannel] = useState<Channel | null>(null)
-  const [detailTmdb, setDetailTmdb] = useState<TmdbMeta | null>(null)
+  const openMovie = useDetailStore((s) => s.openMovie)
 
   // What is popular this week and here, at the top of the browse view.
   const movieHero = useHeroItems('movie')
 
   const handleOpenDetail = useCallback(
     (m: Channel) => {
-      setDetailChannel(m)
-      setDetailTmdb(tmdbMap.get(m.id) ?? null)
+      openMovie(m, tmdbMap.get(m.id) ?? null)
     },
-    [tmdbMap],
+    [tmdbMap, openMovie],
   )
 
   const handleSurprise = useCallback(() => {
     const pool = isRowMode ? movies : filtered
     if (!pool.length) return
     const m = pool[Math.floor(Math.random() * pool.length)]
-    setDetailChannel(m)
-    setDetailTmdb(tmdbMap.get(m.id) ?? null)
-  }, [isRowMode, movies, filtered, tmdbMap])
-
-  const handleDetailPlay = () => {
-    if (!detailChannel) return
-    navigate(`/movies?playing=${detailChannel.id}`)
-    play(detailChannel)
-    setDetailChannel(null)
-  }
-
-  const handleDetailWatchLater = async () => {
-    if (!detailChannel || !activeProfileId) return
-    if (watchLaterSet?.has(detailChannel.id)) {
-      await removeFromWatchLater(activeProfileId, detailChannel.id)
-      deleteRemoteWatchLater(activeProfileId, detailChannel.id)
-    } else {
-      const entry = await addToWatchLater(activeProfileId, detailChannel.id, 'movie')
-      pushWatchLater(entry)
-    }
-  }
+    openMovie(m, tmdbMap.get(m.id) ?? null)
+  }, [isRowMode, movies, filtered, tmdbMap, openMovie])
 
   useEffect(() => {
     reset()
@@ -339,8 +317,7 @@ export function MoviesPage() {
                     items={movieHero}
                     onPlay={(ch) => play(ch)}
                     onMoreInfo={(ch) => {
-                      setDetailChannel(ch)
-                      setDetailTmdb(tmdbMap.get(ch.id) ?? movieHero.find((x) => x.channel.id === ch.id)?.tmdbMeta ?? null)
+                      openMovie(ch, tmdbMap.get(ch.id) ?? movieHero.find((x) => x.channel.id === ch.id)?.tmdbMeta ?? null)
                     }}
                     onWatchLater={(ch) => { void toggleWatchLater(ch.id) }}
                     isWatchLater={(ch) => watchLaterSet?.has(ch.id) ?? false}
@@ -383,10 +360,7 @@ export function MoviesPage() {
                             channel={channel}
                             progress={progress}
                             tmdbMeta={tmdbMap.get(channel.id)}
-                            onClick={() => {
-                              navigate(`/movies?playing=${channel.id}`)
-                              play(channel)
-                            }}
+                            onClick={() => handleOpenDetail(channel)}
                             onRemove={() => {
                               if (activeProfileId) {
                                 clearProgress(activeProfileId, channel.id)
@@ -565,15 +539,6 @@ export function MoviesPage() {
           )}
         </div>
       </div>
-
-      <MovieDetailModal
-        channel={detailChannel}
-        tmdbMeta={detailTmdb}
-        isWatchLater={watchLaterSet?.has(detailChannel?.id ?? '') ?? false}
-        onClose={() => setDetailChannel(null)}
-        onPlay={handleDetailPlay}
-        onWatchLater={handleDetailWatchLater}
-      />
     </>
   )
 }

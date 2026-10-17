@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { authHeader, getPlaybackSource, getSession, listItems, posterUrl, reportPlayback, JELLYFIN_URL, type HomeItem } from './jellyfin'
-import { orderForHome } from '@/stores/homeLibraryStore'
+import { authHeader, backdropUrl, forgetSession, getDetails, getPlaybackSource, getSession, listItems, posterUrl, reportPlayback, setPlayed, JELLYFIN_URL, type HomeItem } from './jellyfin'
+import { orderForHome, useHomeLibraryStore } from '@/stores/homeLibraryStore'
 
 function memoryStorage(): Storage {
   const m = new Map<string, string>()
@@ -12,7 +12,7 @@ function memoryStorage(): Storage {
 
 const item = (over: Partial<HomeItem> = {}): HomeItem => ({
   id: 'i1', name: 'Paul', kind: 'movie', library: 'Filmer', durationSec: 6000, positionSec: 0, played: false,
-  lastPlayedAt: 0, addedAt: 0, ...over,
+  lastPlayedAt: 0, addedAt: 0, genres: [], ...over,
 })
 
 describe('orderForHome', () => {
@@ -65,6 +65,7 @@ describe('jellyfin client', () => {
       if (url.includes('parentId=lib-film')) return json({ Items: [{
         Id: 'm1', Name: 'Troja', Type: 'Movie', ProductionYear: 2004, RunTimeTicks: 98_000_000_000,
         DateCreated: '2026-10-09T07:50:00Z', ImageTags: { Primary: 'abc' }, ProviderIds: { Tmdb: '652' },
+        BackdropImageTags: ['bd1'], Genres: ['Action', 'Drama'], CommunityRating: 6.9, OfficialRating: 'SE-15',
         UserData: { PlaybackPositionTicks: 3_000_000_000, Played: false, LastPlayedDate: '2026-10-10T20:00:00Z' },
       }] })
       if (url.includes('parentId=lib-fot')) return json({ Items: [{ Id: 'v1', Name: 'Allsvenskan 2012', Type: 'Video' }] })
@@ -78,6 +79,70 @@ describe('jellyfin client', () => {
     expect(items[1]).toMatchObject({ id: 'v1', kind: 'video', library: 'Fotboll', positionSec: 0, imageTag: undefined })
     expect(posterUrl(items[0])).toBe(`${JELLYFIN_URL}/Items/m1/Images/Primary?fillWidth=300&quality=90&tag=abc`)
     expect(posterUrl(items[1])).toBeNull()
+    // What the detail sheet shows at once, before the people have loaded.
+    expect(items[0]).toMatchObject({ genres: ['Action', 'Drama'], rating: 6.9, ageRating: 'SE-15' })
+    expect(backdropUrl(items[0])).toBe(`${JELLYFIN_URL}/Items/m1/Images/Backdrop/0?fillWidth=1280&quality=80&tag=bd1`)
+    expect(items[1]).toMatchObject({ genres: [], rating: undefined, ageRating: undefined })
+    expect(backdropUrl(items[1])).toBeNull()
+    expect(calls.find((c) => c.url.includes('parentId=lib-film'))!.url).toContain('Genres')
+  })
+
+  it('reads the people for the detail sheet: directors, and up to twelve actors with pictures', async () => {
+    const actors = Array.from({ length: 15 }, (_, n) => ({ Id: `a${n}`, Name: `Actor ${n}`, Role: `Role ${n}`, Type: 'Actor', PrimaryImageTag: n === 1 ? undefined : `t${n}` }))
+    respond = (url) => {
+      expect(url).toBe(`${JELLYFIN_URL}/Items/m1?userId=u1`)
+      return json({ People: [
+        { Id: 'd1', Name: 'Wolfgang Petersen', Type: 'Director' },
+        { Id: 'w1', Name: 'David Benioff', Type: 'Writer' },
+        ...actors,
+      ] })
+    }
+    const d = await getDetails({ token: 'tok', userId: 'u1' }, 'm1')
+    expect(d.director).toBe('Wolfgang Petersen')
+    expect(d.cast).toHaveLength(12)
+    expect(d.cast[0]).toEqual({ name: 'Actor 0', character: 'Role 0', image: `${JELLYFIN_URL}/Items/a0/Images/Primary?fillWidth=92&quality=90&tag=t0` })
+    expect(d.cast[1].image).toBeNull()
+    expect(d.cast.some((c) => c.name === 'David Benioff')).toBe(false)
+  })
+
+  it('marks watched with POST and unwatched with DELETE, as the profile’s user', async () => {
+    respond = () => new Response(null, { status: 200 })
+    await setPlayed({ token: 'tok', userId: 'u1' }, 'm1', true)
+    await setPlayed({ token: 'tok', userId: 'u1' }, 'm1', false)
+    expect(calls.map((c) => [c.init.method, c.url])).toEqual([
+      ['POST', `${JELLYFIN_URL}/UserPlayedItems/m1?userId=u1`],
+      ['DELETE', `${JELLYFIN_URL}/UserPlayedItems/m1?userId=u1`],
+    ])
+  })
+
+  it('forgets only the token the server refused, not a newer one saved meanwhile', async () => {
+    respond = () => json({ AccessToken: 'new', User: { Id: 'u1' } })
+    await getSession('noah', 'Noah')
+    forgetSession('noah', 'old')
+    expect(await getSession('noah', 'Noah')).toEqual({ token: 'new', userId: 'u1' })
+    forgetSession('noah', 'new')
+    respond = () => json({ AccessToken: 'newer', User: { Id: 'u1' } })
+    expect(await getSession('noah', 'Noah')).toEqual({ token: 'newer', userId: 'u1' })
+  })
+
+  it('signs in once when two loads start together, so neither revokes the other', async () => {
+    // Jellyfin revokes a device's token when the same device signs in again. Two
+    // concurrent loads each signed in, and the first one's list came back 401.
+    let tokens = 0
+    respond = (url) => {
+      if (url.includes('/System/Info/Public')) return json({})
+      if (url.includes('/Users/AuthenticateByName')) return json({ AccessToken: `t${++tokens}`, User: { Id: 'u1' } })
+      if (url.includes('/UserViews')) return json({ Items: [{ Id: 'lib', Name: 'Filmer', CollectionType: 'movies' }] })
+      if (url.includes('/Items')) return json({ Items: [{ Id: 'm1', Name: 'Troja', Type: 'Movie' }] })
+      throw new Error('unexpected ' + url)
+    }
+    const { load } = useHomeLibraryStore.getState()
+    await Promise.all([load('jossan', 'Jossan'), load('jossan', 'Jossan')])
+    expect(tokens).toBe(1)
+    const state = useHomeLibraryStore.getState()
+    expect(state.status).toBe('ready')
+    expect(state.session).toEqual({ token: 't1', userId: 'u1' })
+    expect(state.items.map((i) => i.id)).toEqual(['m1'])
   })
 
   it('plays the server’s HLS when it transcodes, and the file when it can be played as is', async () => {

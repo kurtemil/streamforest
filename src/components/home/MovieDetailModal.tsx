@@ -1,226 +1,140 @@
-import { useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { X, Play, Bookmark, Star, Clock, Users, Check } from 'lucide-react'
+import { useCallback, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Play, Bookmark, Check, RotateCcw } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db } from '@/services/db'
+import { db, addToWatchLater, removeFromWatchLater, clearProgress } from '@/services/db'
+import { pushWatchLater, deleteRemoteWatchLater, deleteRemoteProgress } from '@/services/sync'
 import { markWatched } from '@/services/watched'
 import { useProfileStore } from '@/stores/profileStore'
-import type { Channel, TmdbMeta } from '@/types'
+import { usePlayerStore } from '@/stores/playerStore'
+import { useDetailStore } from '@/stores/detailStore'
+import { useTmdbEnrich } from '@/hooks/useTmdbEnrich'
 import { backdropUrl, posterUrl, profileUrl } from '@/services/tmdb'
+import { normalizeShowKey } from '@/lib/utils'
+import { resumePoint } from '@/lib/progress'
 import { openInVlc } from '@/lib/vlc'
 import { formatRuntime, useLocale, useT } from '@/lib/i18n'
+import { DetailSheet, sheetButton } from '@/components/ui/DetailSheet'
+import type { Channel } from '@/types'
 
-interface Props {
-  channel: Channel | null
-  tmdbMeta: TmdbMeta | null
-  isWatchLater: boolean
-  onClose: () => void
-  onPlay: () => void
-  onWatchLater: () => void
-}
+const NONE: Channel[] = []
 
-export function MovieDetailModal({ channel, tmdbMeta, isWatchLater, onClose, onPlay, onWatchLater }: Props) {
+/**
+ * The detail sheet for a film from the provider. Mounted once (App.tsx) and opened
+ * through `useDetailStore` from anywhere, so a film is never one tap from playing
+ * without first being shown. The sheet owns what it offers: watch later, watched,
+ * and continue or start over, read from the profile's own rows.
+ */
+export function MovieDetailModal() {
   const t = useT()
-  // Watched by hand: read and written here, so every page that opens this gets it.
+  const locale = useLocale()
+  const navigate = useNavigate()
+  const { channel, tmdbMeta: given, close } = useDetailStore()
+  const play = usePlayerStore((s) => s.play)
   const activeProfileId = useProfileStore((s) => s.activeProfileId)
+
+  // Search and the library open the sheet with only the channel. The lookup comes
+  // from the cache when the title has been seen before, and from TMDB otherwise.
+  const lookup = useTmdbEnrich(useMemo(() => (channel && !given ? [channel] : NONE), [channel, given]))
+  const tmdbMeta = given ?? (channel ? lookup.get(channel.id) ?? null : null)
+
   const progress = useLiveQuery(
     () => (channel && activeProfileId ? db.watchProgress.get(`${activeProfileId}:${channel.id}`) : undefined),
     [channel?.id, activeProfileId],
   )
   const watched = Boolean(progress?.completed)
-  const locale = useLocale()
-  const open = channel !== null
+  const resume = progress ? resumePoint(progress.position, progress.duration, progress.completed) : null
 
-  // Close on Escape
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [open, onClose])
+  const watchLaterId = channel
+    ? channel.type === 'series' && channel.showName ? normalizeShowKey(channel.showName) : channel.id
+    : null
+  const isWatchLater = useLiveQuery(
+    async () => (activeProfileId && watchLaterId
+      ? (await db.watchLater.get(`${activeProfileId}:${watchLaterId}`)) !== undefined
+      : false),
+    [activeProfileId, watchLaterId],
+  ) ?? false
 
-  // Prevent body scroll while open
-  useEffect(() => {
-    document.body.style.overflow = open ? 'hidden' : ''
-    return () => { document.body.style.overflow = '' }
-  }, [open])
+  const start = useCallback(async (fromStart: boolean) => {
+    if (!channel) return
+    // The player resumes from the saved row, so starting over means not having one.
+    if (fromStart && activeProfileId) {
+      await clearProgress(activeProfileId, channel.id)
+      deleteRemoteProgress(activeProfileId, channel.id)
+    }
+    if (channel.type === 'movie') navigate(`/movies?playing=${channel.id}`)
+    else navigate(`/series?show=${encodeURIComponent(normalizeShowKey(channel.showName ?? channel.name))}`)
+    play(channel)
+    close()
+  }, [channel, activeProfileId, navigate, play, close])
 
-  const backdrop = backdropUrl(tmdbMeta?.backdropPath ?? null, 1280)
-  const poster   = posterUrl(tmdbMeta?.posterPath ?? null, 342)
-  const fallbackPoster = channel?.logo ?? ''
-
-  const runtime = tmdbMeta?.runtime ? formatRuntime(tmdbMeta.runtime, locale) : null
+  const toggleWatchLater = () => {
+    if (!channel || !activeProfileId || !watchLaterId) return
+    if (isWatchLater) {
+      removeFromWatchLater(activeProfileId, watchLaterId)
+      deleteRemoteWatchLater(activeProfileId, watchLaterId)
+    } else {
+      addToWatchLater(activeProfileId, watchLaterId, channel.type === 'series' ? 'series' : 'movie').then(pushWatchLater)
+    }
+  }
 
   const title = tmdbMeta?.title ?? channel?.movieTitle ?? channel?.showName ?? channel?.name ?? ''
 
   return (
-    <AnimatePresence>
-      {open && (
+    <DetailSheet
+      open={channel !== null}
+      onClose={close}
+      title={title}
+      backdrop={backdropUrl(tmdbMeta?.backdropPath ?? null, 1280)}
+      poster={posterUrl(tmdbMeta?.posterPath ?? null, 342)}
+      fallbackPoster={channel?.logo ?? ''}
+      year={tmdbMeta?.year ?? channel?.year ?? null}
+      runtime={tmdbMeta?.runtime ? formatRuntime(tmdbMeta.runtime, locale) : null}
+      rating={tmdbMeta?.rating ?? null}
+      chips={tmdbMeta?.genres?.slice(0, 3)}
+      progress={resume && {
+        pct: resume.pct,
+        label: resume.minutesLeft !== null
+          ? t('modal.timeLeft', { time: formatRuntime(resume.minutesLeft, locale) })
+          : t('card.watched', { time: formatRuntime(Math.round(resume.position / 60), locale) }),
+      }}
+      overview={tmdbMeta?.overview}
+      director={tmdbMeta?.director}
+      cast={tmdbMeta?.cast?.map((m) => ({ name: m.name, character: m.character, image: profileUrl(m.profilePath, 92) }))}
+      actions={
         <>
-          {/* Backdrop scrim */}
-          <motion.div
-            key="scrim"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.22 }}
-            className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm"
-            onClick={onClose}
-          />
-
-          {/* Modal panel */}
-          <motion.div
-            key="panel"
-            initial={{ opacity: 0, y: 40, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1, transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] } }}
-            exit={{ opacity: 0, y: 20, scale: 0.97, transition: { duration: 0.22 } }}
-            className="fixed inset-x-4 top-6 bottom-6 z-40 md:inset-x-[10%] lg:inset-x-[15%] xl:inset-x-[20%] rounded-2xl overflow-hidden flex flex-col bg-surface-200 shadow-cinema outline-none"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Backdrop header */}
-            <div className="relative h-64 shrink-0 overflow-hidden bg-surface-300">
-              {backdrop && (
-                <img src={backdrop} alt="" aria-hidden="true" className="w-full h-full object-cover" decoding="async" />
-              )}
-              <div className="absolute inset-0 bg-gradient-to-t from-surface-200 via-surface-200/40 to-transparent" />
-
-              {/* Close button */}
-              <button
-                onClick={onClose}
-                className="absolute top-4 right-4 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-sm flex items-center justify-center ring-1 ring-white/20 transition-colors"
-              >
-                <X size={16} className="text-white" />
-              </button>
-            </div>
-
-            {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto px-6 pb-8 -mt-16 relative">
-              <div className="flex gap-5 items-end mb-6">
-                {/* Poster */}
-                <div className="w-24 aspect-[2/3] rounded-lg overflow-hidden shrink-0 ring-1 ring-white/15 shadow-cinema bg-surface-300">
-                  <img
-                    src={poster ?? fallbackPoster}
-                    alt={title}
-                    className="w-full h-full object-cover"
-                    decoding="async"
-                    onError={(e) => { (e.target as HTMLImageElement).src = fallbackPoster }}
-                  />
-                </div>
-
-                {/* Title block */}
-                <div className="flex-1 min-w-0 pb-1">
-                  <h2 className="text-heading-xl text-white leading-tight mb-1">{title}</h2>
-                  <div className="flex items-center gap-3 flex-wrap text-caption text-neutral-400">
-                    {tmdbMeta?.year && <span>{tmdbMeta.year}</span>}
-                    {runtime && (
-                      <span className="flex items-center gap-1"><Clock size={11} />{runtime}</span>
-                    )}
-                    {tmdbMeta?.rating && tmdbMeta.rating > 0 && (
-                      <span className="flex items-center gap-1">
-                        <Star size={11} fill="#f59e0b" className="text-warn-500" />
-                        {tmdbMeta.rating.toFixed(1)}
-                      </span>
-                    )}
-                    {tmdbMeta?.genres?.slice(0, 3).map((g) => (
-                      <span key={g} className="px-1.5 py-0.5 rounded-full ring-1 ring-white/15 text-neutral-500">{g}</span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* CTAs */}
-              <div className="flex flex-wrap gap-3 mb-6">
-                <button
-                  onClick={onPlay}
-                  className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-100 rounded-lg text-black font-semibold text-body transition-all active:scale-95"
-                >
-                  <Play size={16} fill="black" />
-                  {t('common.play')}
-                </button>
-                <button
-                  onClick={onWatchLater}
-                  className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-body transition-all active:scale-95 ring-1 ${
-                    isWatchLater
-                      ? 'bg-accent-600/20 ring-accent-600/40 text-accent-400'
-                      : 'bg-white/8 ring-white/15 text-neutral-300 hover:bg-white/12'
-                  }`}
-                >
-                  <Bookmark size={15} fill={isWatchLater ? 'currentColor' : 'none'} />
-                  {isWatchLater ? t('common.saved') : t('common.watchLater')}
-                </button>
-                {channel?.type === 'movie' && activeProfileId && (
-                  <button
-                    onClick={() => void markWatched(activeProfileId, [channel.id], !watched)}
-                    aria-pressed={watched}
-                    className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-body transition-all active:scale-95 ring-1 ${
-                      watched
-                        ? 'bg-accent-600/20 ring-accent-600/40 text-accent-400'
-                        : 'bg-white/8 ring-white/15 text-neutral-300 hover:bg-white/12'
-                    }`}
-                  >
-                    <Check size={15} />
-                    {watched ? t('common.markUnwatched') : t('common.markWatched')}
-                  </button>
-                )}
-                {channel && (
-                  <button
-                    onClick={() => openInVlc(channel)}
-                    title={t('common.openInVlc')}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium text-body transition-all active:scale-95 ring-1 bg-white/8 ring-white/15 text-neutral-300 hover:bg-white/12"
-                  >
-                    <span className="w-2.5 h-2.5 rounded-sm bg-[#ff8800]" />
-                    VLC
-                  </button>
-                )}
-              </div>
-
-              {/* Overview */}
-              {tmdbMeta?.overview && (
-                <p className="text-body text-neutral-300 leading-relaxed mb-6">{tmdbMeta.overview}</p>
-              )}
-
-              {/* Director */}
-              {tmdbMeta?.director && (
-                <p className="text-caption text-neutral-500 mb-5">
-                  <span className="text-neutral-400 font-medium">{t('modal.director')} </span>{tmdbMeta.director}
-                </p>
-              )}
-
-              {/* Cast */}
-              {tmdbMeta?.cast && tmdbMeta.cast.length > 0 && (
-                <div className="mb-6">
-                  <div className="flex items-center gap-1.5 mb-3">
-                    <Users size={13} className="text-neutral-500" />
-                    <span className="text-caption font-medium text-neutral-400 uppercase tracking-wider">{t('modal.cast')}</span>
-                  </div>
-                  <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1">
-                    {tmdbMeta.cast.map((member) => (
-                      <div key={member.name} className="flex-shrink-0 w-16 text-center">
-                        <div className="w-16 h-16 rounded-full overflow-hidden bg-surface-400 ring-1 ring-white/10 mb-1.5 mx-auto">
-                          {member.profilePath ? (
-                            <img
-                              src={profileUrl(member.profilePath, 92) ?? ''}
-                              alt={member.name}
-                              className="w-full h-full object-cover"
-                              decoding="async"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-neutral-600 text-heading-md font-bold">
-                              {member.name[0]}
-                            </div>
-                          )}
-                        </div>
-                        <p className="text-micro text-white font-medium line-clamp-1">{member.name}</p>
-                        <p className="text-micro text-neutral-600 line-clamp-1">{member.character}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </motion.div>
+          <button onClick={() => void start(false)} className={sheetButton('primary')}>
+            <Play size={16} fill="black" />
+            {resume ? t('modal.resume') : t('common.play')}
+          </button>
+          {resume && (
+            <button onClick={() => void start(true)} className={sheetButton('secondary')}>
+              <RotateCcw size={15} />
+              {t('modal.startOver')}
+            </button>
+          )}
+          <button onClick={toggleWatchLater} className={sheetButton(isWatchLater ? 'active' : 'secondary')}>
+            <Bookmark size={15} fill={isWatchLater ? 'currentColor' : 'none'} />
+            {isWatchLater ? t('common.saved') : t('common.watchLater')}
+          </button>
+          {channel?.type === 'movie' && activeProfileId && (
+            <button
+              onClick={() => void markWatched(activeProfileId, [channel.id], !watched)}
+              aria-pressed={watched}
+              className={sheetButton(watched ? 'active' : 'secondary')}
+            >
+              <Check size={15} />
+              {watched ? t('common.markUnwatched') : t('common.markWatched')}
+            </button>
+          )}
+          {channel && (
+            <button onClick={() => openInVlc(channel)} title={t('common.openInVlc')} className={sheetButton('secondary')}>
+              <span className="w-2.5 h-2.5 rounded-sm bg-[#ff8800]" />
+              VLC
+            </button>
+          )}
         </>
-      )}
-    </AnimatePresence>
+      }
+    />
   )
 }

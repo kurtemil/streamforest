@@ -809,10 +809,8 @@ export function SeriesPage() {
                           channel={channel}
                           progress={progress}
                           tmdbMeta={tmdbMap.get(showKey)}
-                          onClick={() => {
-                            navigate(`/series?show=${encodeURIComponent(showKey)}&playing=${channel.id}`)
-                            play(channel)
-                          }}
+                          // The overview, as on Home: its button says "Fortsätt S2 · E3".
+                          onClick={() => navigate(`/series?show=${encodeURIComponent(showKey)}`)}
                           onRemove={() => {
                             if (activeProfileId) {
                               clearProgress(activeProfileId, channel.id)

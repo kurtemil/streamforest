@@ -77,3 +77,27 @@ export function isPlaybackAtEnd(
   if (!Number.isFinite(realPosition) || realPosition < 0) return false
   return realDuration - realPosition <= toleranceSeconds
 }
+
+/** Where a title stands, for the detail sheet: started and not finished, or null. */
+export interface ResumePoint {
+  /** Seconds into the film, which is where playing will continue. */
+  position: number
+  pct: number
+  /** Whole minutes left, or null when the length is unknown or does not fit the position. */
+  minutesLeft: number | null
+}
+
+/**
+ * Whether opening a title should offer to continue it. The same threshold the
+ * Continue Watching rows use (past ten seconds, not finished), so the sheet and the
+ * row never disagree about whether something is under way.
+ */
+export function resumePoint(position: number, duration: number, completed: boolean): ResumePoint | null {
+  if (completed || !Number.isFinite(position) || position <= 10) return null
+  const left = Number.isFinite(duration) && duration > position ? duration - position : null
+  return {
+    position,
+    pct: progressPercent(position, duration),
+    minutesLeft: left === null ? null : Math.max(1, Math.round(left / 60)),
+  }
+}

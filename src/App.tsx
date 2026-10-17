@@ -15,6 +15,8 @@ const HomeLibraryPage = lazy(() => import('@/pages/HomeLibraryPage').then(m => (
 const FeedbackPage = lazy(() => import('@/pages/FeedbackPage').then(m => ({ default: m.FeedbackPage })))
 import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { HomePlayer } from '@/components/player/HomePlayer'
+import { MovieDetailModal } from '@/components/home/MovieDetailModal'
+import { HomeDetailModal } from '@/components/home/HomeDetailModal'
 import { ProfilePicker } from '@/components/ProfilePicker'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { useProfileStore } from '@/stores/profileStore'
@@ -88,6 +90,10 @@ export default function App() {
         </AnimatePresence>
         </Suspense>
       </Layout>
+      {/* The detail sheets, once for the whole app: any page can open a title
+          without starting it. Before the players, which cover them. */}
+      <MovieDetailModal />
+      <HomeDetailModal />
       <VideoPlayer />
       <HomePlayer />
       {(!activeProfileId || showPicker) && (

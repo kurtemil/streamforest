@@ -13,7 +13,7 @@ import { useT } from '@/lib/i18n'
  */
 export function HomeRail() {
   const t = useT()
-  const { status, items, play } = useHomeLibrary()
+  const { status, items, openDetail } = useHomeLibrary()
 
   if (status === 'unknown') return null
   if (status === 'blocked') {
@@ -30,7 +30,7 @@ export function HomeRail() {
       <ScrollableRow>
         {items.map((item) => (
           <div key={item.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
-            <HomeCard item={item} onClick={() => play(item)} />
+            <HomeCard item={item} onClick={() => openDetail(item)} />
           </div>
         ))}
       </ScrollableRow>

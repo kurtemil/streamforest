@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { watchedFraction, isCompleted, resolveSaveDuration, progressPercent, isPlaybackAtEnd } from './progress'
+import { watchedFraction, isCompleted, resolveSaveDuration, progressPercent, isPlaybackAtEnd, resumePoint } from './progress'
 
 // A two-hour film, resumed at 1:36 — the scenario behind finding C1.
 const FILM_DURATION = 7200
@@ -122,5 +122,28 @@ describe('isPlaybackAtEnd', () => {
     expect(isPlaybackAtEnd(1200, 0)).toBe(false)
     expect(isPlaybackAtEnd(1200, NaN)).toBe(false)
     expect(isPlaybackAtEnd(1200, Infinity)).toBe(false)
+  })
+})
+
+describe('resumePoint', () => {
+  it('offers to continue a film that is under way, with what is left', () => {
+    expect(resumePoint(RESUME_AT, FILM_DURATION, false)).toEqual({ position: RESUME_AT, pct: 80, minutesLeft: 24 })
+  })
+
+  it('offers nothing for a finished film, so the sheet says Play', () => {
+    expect(resumePoint(RESUME_AT, FILM_DURATION, true)).toBeNull()
+  })
+
+  it('uses the same ten-second threshold as Continue Watching', () => {
+    expect(resumePoint(10, FILM_DURATION, false)).toBeNull()
+    expect(resumePoint(11, FILM_DURATION, false)).not.toBeNull()
+  })
+
+  it('leaves the time left out rather than guess it when the length is unknown', () => {
+    expect(resumePoint(600, 0, false)).toEqual({ position: 600, pct: 0, minutesLeft: null })
+  })
+
+  it('never says zero minutes left for the last half minute', () => {
+    expect(resumePoint(FILM_DURATION - 20, FILM_DURATION, false)?.minutesLeft).toBe(1)
   })
 })

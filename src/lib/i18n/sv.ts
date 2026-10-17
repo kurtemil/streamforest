@@ -80,6 +80,10 @@ export const sv = {
   // ── Detail modal ───────────────────────────────────────────────────────────
   'modal.director': 'Regi:',
   'modal.cast': 'Skådespelare',
+  'modal.resume': 'Fortsätt titta',
+  'modal.startOver': 'Börja om',
+  'modal.timeLeft': '{time} kvar',
+  'homeDetail.source': 'Hemma',
 
   // ── Hero ───────────────────────────────────────────────────────────────────
   'hero.goToSlide': 'Gå till bild {number}',

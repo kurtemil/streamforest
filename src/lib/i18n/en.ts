@@ -87,6 +87,10 @@ export const en = {
   // ── Detail modal ───────────────────────────────────────────────────────────
   'modal.director': 'Director:',
   'modal.cast': 'Cast',
+  'modal.resume': 'Resume',
+  'modal.startOver': 'Start over',
+  'modal.timeLeft': '{time} left',
+  'homeDetail.source': 'Home library',
 
   // ── Hero ───────────────────────────────────────────────────────────────────
   'hero.goToSlide': 'Go to slide {number}',

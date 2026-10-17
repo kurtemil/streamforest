@@ -5,6 +5,7 @@ import { Play, Bookmark, Clock, Heart, Film, Tv, Radio } from 'lucide-react'
 import { normalizeShowKey } from '@/lib/utils'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { usePlayerStore } from '@/stores/playerStore'
+import { useDetailStore } from '@/stores/detailStore'
 import { useProfileStore } from '@/stores/profileStore'
 import { db, addToWatchLater, removeFromWatchLater, clearProgressMany, dismissRecommendation, recommendationKey } from '@/services/db'
 import { pushWatchLater, deleteRemoteWatchLater, deleteRemoteProgress } from '@/services/sync'
@@ -44,6 +45,7 @@ export function LibraryPage() {
   const navigate = useNavigate()
   const { channels } = usePlaylistStore()
   const { play } = usePlayerStore()
+  const openMovie = useDetailStore((s) => s.openMovie)
   const { activeProfileId } = useProfileStore()
   const [tab, setTab] = useState<Tab>('continue')
   const [sort, setSort] = useState<SortKey>('recent')
@@ -197,7 +199,8 @@ export function LibraryPage() {
   }
 
   const openChannel = (ch: Channel) => {
-    if (ch.type === 'movie') { navigate(`/movies?playing=${ch.id}`); play(ch) }
+    // A film opens its sheet first, which offers to continue or start over.
+    if (ch.type === 'movie') openMovie(ch)
     else if (ch.type === 'series') { navigate(`/series?show=${encodeURIComponent(normalizeShowKey(ch.showName ?? ch.name))}`) }
     else { play(ch); navigate('/live') }
   }
