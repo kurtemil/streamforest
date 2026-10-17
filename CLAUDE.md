@@ -265,6 +265,18 @@ Verified 2026-10-11 against the real server in Edge:
   and reopening resumes at 1208.6 s;
 - a kid profile sees only its allowlist.
 
+- **A card opens `HomeDetailModal`, not the player** (since 2026-10-17). What the
+  list carries (overview, genres, `CommunityRating`, `OfficialRating`, the
+  backdrop tag) shows at once; the people come from `/Items/{id}` when the sheet
+  opens. Watched/unwatched is `/UserPlayedItems/{id}` (POST/DELETE), the same flag
+  Swiftfin shows, and marking a film watched clears its resume point on the server.
+- **One load per profile at a time** (`homeLibraryStore`). Jellyfin revokes a
+  device's token when the same device signs in again, so two concurrent loads on
+  a first visit each signed in, one list came back 401, and the store could keep
+  the revoked token: playback and position reports then failed until the next
+  reload. A call during a load asks for one more pass instead. `forgetSession`
+  takes the refused token and leaves a newer one alone.
+
 The plan for one card per film across both sources, with kids' rules shared,
 lives outside this public repo.
 
@@ -290,7 +302,39 @@ All five from 2026-09-11 were built and ticked off on 2026-10-11:
 - **Genres** on Movies and Series: chips from TMDB. A genre shows TMDB's most
   popular titles in it that are here, and says so; the catalogue has no genres,
   so it is not "all comedies". Matching is by title and year:
-  `src/lib/catalogMatch.ts`, with lists cached 12 h per language.
+  `src/lib/catalogMatch.ts`, with lists cached 12 h per language. The chips are
+  44 px tall; they shipped at 36 and failed the touch audit on phone and iPad.
+
+### 2026-10-15: no card plays on the first tap
+
+Two reports: a Hemma film started straight away, and so did a film picked in
+search or in Continue Watching. Fixed 2026-10-17. **The rule now: a card or a
+search result opens the title; only a button that says Play plays.** The Hero's
+Play, an episode row and the overview's "Fortsätt S2 · E3" are such buttons.
+
+- **One sheet per source, mounted once in `App.tsx`.** `MovieDetailModal` reads
+  `useDetailStore` (`openMovie(channel, meta?)`), `HomeDetailModal` reads
+  `homeLibraryStore.detail`. Both are laid out by `ui/DetailSheet.tsx`. The film
+  sheet owns watch later, watched and resume itself, so a page that opens it needs
+  no handlers, and it looks the title up in TMDB when the opener had no metadata
+  (search, Library).
+- **Started means "Fortsätt titta", "Börja om" and the time left**
+  (`resumePoint` in `lib/progress.ts`, the same ten-second threshold as the
+  Continue Watching rows). Starting over clears the progress row before playing,
+  because `VideoPlayer` resumes from that row; in Hemma it plays the item at 0.
+- **A show goes to its overview** from every Continue Watching row and from
+  "Recently added shows", which used to play the new episode.
+- `e2e/detail-sheet.spec.ts` covers all of it, with Jellyfin answered by a
+  stand-in. It refuses every request that is not the dev server, so it cannot
+  reach the provider from the home IP.
+
+The four suggestions from the same evening were assessed, not built: subtitle
+size, a watched mark on cards, similar titles in the sheet, and VLC with saved
+progress on the coming kiosk. TMDB's `similar` is already fetched and cached with
+every lookup (8 titles) and shown nowhere. `MovieCard` has a watched check, but it
+is hidden whenever the card has a rating chip, which is almost always. And "Because
+you watched X" on Home and Movies is a random pick from the same playlist group,
+not anything like X.
 
 ## Handing playback to VLC
 
