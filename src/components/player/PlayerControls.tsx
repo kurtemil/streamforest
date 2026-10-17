@@ -7,6 +7,8 @@ import type { Channel } from '@/types'
 import { formatTime } from '@/lib/time'
 import { openInVlc } from '@/lib/vlc'
 import { useT } from '@/lib/i18n'
+import type { SubtitleSize } from '@/lib/subtitleSize'
+import { SubtitleSizePicker } from '@/components/ui/SubtitleSizePicker'
 
 interface Track { id: number; name: string; lang: string }
 
@@ -36,6 +38,8 @@ interface Props {
   onSelectSubtitle: (id: number) => void
   subtitleDelay: number
   onSubtitleDelayChange: (delta: number) => void
+  subtitleSize: SubtitleSize
+  onSubtitleSizeChange: (size: SubtitleSize) => void
   onSpeedChange: (s: number) => void
   onToggleFullscreen: () => void
   onPiP: () => void
@@ -48,7 +52,7 @@ export function PlayerControls({
   currentTime, duration, buffered,
   volume, muted,
   audioTracks, activeAudioTrack, subtitleTracks, activeSubtitle, loadingSubtitle,
-  subtitleDelay, onSubtitleDelayChange,
+  subtitleDelay, onSubtitleDelayChange, subtitleSize, onSubtitleSizeChange,
   playbackSpeed, pipAvailable,
   onTogglePlay, onSeek, onVolumeChange, onToggleMute,
   onSelectAudioTrack, onSelectSubtitle, onSpeedChange,
@@ -385,6 +389,11 @@ export function PlayerControls({
                               >
                                 +0.5s
                               </button>
+                            </div>
+                            <div className="border-t border-white/10 my-2" />
+                            <p className="text-white/50 text-xs uppercase tracking-wider mb-2 px-2">{t('player.subSize')}</p>
+                            <div className="px-1">
+                              <SubtitleSizePicker value={subtitleSize} onChange={onSubtitleSizeChange} />
                             </div>
                           </>
                         )}

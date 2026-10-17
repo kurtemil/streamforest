@@ -80,10 +80,18 @@ export const sv = {
   // ── Detail modal ───────────────────────────────────────────────────────────
   'modal.director': 'Regi:',
   'modal.cast': 'Skådespelare',
+  'detail.related': 'Liknande',
   'modal.resume': 'Fortsätt titta',
   'modal.startOver': 'Börja om',
   'modal.timeLeft': '{time} kvar',
   'homeDetail.source': 'Hemma',
+  'homePlayer.part': 'del {part} av {count}',
+  'vlcReturn.title': 'Tittat i VLC',
+  'vlcReturn.question': 'Hur långt kom du?',
+  'vlcReturn.save': 'Spara vid {time}',
+  'vlcReturn.finished': 'Jag såg klart',
+  'vlcReturn.skip': 'Spara inte',
+  'vlcReturn.why': 'VLC på den här enheten berättar inte var du slutade, så det här är en gissning utifrån hur länge du var borta.',
 
   // ── Hero ───────────────────────────────────────────────────────────────────
   'hero.goToSlide': 'Gå till bild {number}',
@@ -177,6 +185,8 @@ export const sv = {
   // ── Cards ──────────────────────────────────────────────────────────────────
   'card.watched': 'Sett {time}',
   'card.removeContinue': 'Ta bort från Fortsätt titta',
+  'card.watchedBadge': 'Sedd',
+  'card.episodesWatched': '{done} av {total} avsnitt sedda',
 
   // ── Command palette ────────────────────────────────────────────────────────
   'search.placeholder': 'Sök filmer, serier, kanaler…',
@@ -213,6 +223,12 @@ export const sv = {
   'player.volume': 'Volym',
   'player.audio': 'Ljud',
   'player.subtitles': 'Undertexter',
+  'player.subSize': 'Textstorlek',
+  'player.subSize_s': 'Liten',
+  'player.subSize_m': 'Mellan',
+  'player.subSize_l': 'Stor',
+  'player.subSize_xl': 'Extra stor',
+  'settings.subSizeHint': 'På en iPhone i helskärm ritar iOS undertexterna: Inställningar → Hjälpmedel → Undertexter och textning.',
   'player.subtitlesOff': 'Av',
   'player.sync': 'Synk',
   'player.track': 'Spår {number}',
@@ -402,8 +418,8 @@ export const sv = {
   'vlc.intro':
     'VLC-knapparna lämnar över uppspelningen till VLC — en hel säsong från seriens rubrik, ett enskilt avsnitt från dess rad.',
   'vlc.mobileHint':
-    'Inget att ställa in på den här enheten: VLC-appen registrerar sitt eget länkschema. Den behöver bara vara installerad.',
-  'vlc.worksHint': 'Den här datorn öppnar VLC direkt — inget att ställa in här.',
+    'Inget att ställa in på den här enheten: VLC-appen registrerar sitt eget länkschema. Den behöver bara vara installerad. VLC börjar där du var, men berättar inte var du slutade, så appen frågar när du kommer tillbaka.',
+  'vlc.worksHint': 'Den här datorn öppnar VLC direkt. Installerades hanteraren före 17 oktober 2026, kör kommandot nedan en gång till: då skickar VLC tillbaka var du är.',
   'vlc.downloadHint':
     'På den här datorn laddar knappen ner spellistan och VLC öppnar den. Två klick, om du inte gör det andra automatiskt:',
   'vlc.autoOpenTitle': 'Låt {browser} öppna den åt dig',
@@ -427,9 +443,9 @@ export const sv = {
   'vlc.knownUnknown': 'Aldrig kontrollerat på den här datorn.',
   'vlc.testNote': 'Öppnar VLC med en tom testspellista — den spelar ingenting.',
   'vlc.test': 'Testa',
-  'vlc.installerToggle': 'Hoppa över nedladdningen helt (ett inklistrat kommando)',
+  'vlc.installerToggle': 'Öppna VLC direkt och behåll var du är (ett inklistrat kommando)',
   'vlc.installerBody':
-    'Registrerar en {scheme}-hanterare på den här datorn, så att knapparna öppnar VLC utan att något laddas ner alls. En webbsida får inte göra det åt dig — på något av operativsystemen.',
+    'Registrerar en {scheme}-hanterare på den här datorn, så att knapparna öppnar VLC utan att något laddas ner alls. Medan VLC spelar skickar den var du är till StreamForest, så filmen fortsätter där i appen och på andra enheter. En webbsida får inte göra det åt dig — på något av operativsystemen.',
   'vlc.thisOne': ' · den här',
   'vlc.pasteInto': 'Klistra in i {terminal}. En gång per dator.',
   'vlc.terminalMac': 'Terminal (⌘-mellanslag → ”Terminal”)',

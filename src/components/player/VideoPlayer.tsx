@@ -24,6 +24,8 @@ import { openInVlc } from '@/lib/vlc'
 import { currentLocale, t, useT } from '@/lib/i18n'
 import { normalizeShowKey } from '@/lib/utils'
 import { parseVttBlock } from '@/lib/vtt'
+import { langMatches } from '@/lib/lang'
+import { subtitleFont } from '@/lib/subtitleSize'
 import { PlayerControls } from './PlayerControls'
 
 const SAVE_INTERVAL_MS = 5000
@@ -80,6 +82,8 @@ export function VideoPlayer() {
   const autoplayNextEpisode = rawPlaybackPrefs?.autoplayNextEpisode ?? true
   const preferredSubtitleLang = rawPlaybackPrefs?.preferredSubtitleLang ?? ''
   const preferredAudioLang = rawPlaybackPrefs?.preferredAudioLang ?? ''
+  const subtitleSize = rawPlaybackPrefs?.subtitleSize ?? 'm'
+  const setPlaybackPrefs = usePlaybackPrefsStore((s) => s.setPrefs)
   const videoRef = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -1566,7 +1570,7 @@ export function VideoPlayer() {
     const remembered = titlePrefs.subtitleLang
     const wanted = remembered || preferredSubtitleLang
     if (!wanted) return
-    const match = subtitleTracks.find(t => t.lang?.toLowerCase().startsWith(wanted.toLowerCase()))
+    const match = subtitleTracks.find(t => langMatches(wanted, t))
     if (match) selectSubtitle(match.id)
   }, [subtitleTracks, preferredSubtitleLang, titlePrefs.subtitleLang, selectSubtitle])
 
@@ -1576,7 +1580,7 @@ export function VideoPlayer() {
     const wanted = titlePrefs.audioLang || preferredAudioLang
     if (!wanted) return
     autoAudioSelectedRef.current = true
-    const match = audioTracks.find(t => t.lang?.toLowerCase().startsWith(wanted.toLowerCase()))
+    const match = audioTracks.find(t => langMatches(wanted, t))
     if (match && match.id !== activeAudioTrack) selectAudioTrack(match.id)
   }, [audioTracks, preferredAudioLang, titlePrefs.audioLang, activeAudioTrack, selectAudioTrack])
 
@@ -1753,7 +1757,10 @@ export function VideoPlayer() {
             renderer the system draws and having both showed every line twice. */}
         {!minimized && !(IS_IOS && isFullscreen) && activeCue && (
           <div className="absolute bottom-20 left-0 right-0 flex justify-center pointer-events-none z-10 px-8">
-            <div className="bg-black/75 text-white text-base font-medium px-3 py-1.5 rounded text-center max-w-2xl whitespace-pre-wrap leading-snug">
+            <div
+              className="bg-black/75 text-white font-medium px-[0.6em] py-[0.25em] rounded text-center max-w-[85%] whitespace-pre-wrap leading-snug"
+              style={{ fontSize: subtitleFont(subtitleSize) }}
+            >
               {activeCue.text.replace(/<[^>]+>/g, '').trim()}
             </div>
           </div>
@@ -1799,6 +1806,8 @@ export function VideoPlayer() {
             onSelectSubtitle={selectSubtitle}
             subtitleDelay={subtitleDelay}
             onSubtitleDelayChange={handleSubtitleDelayChange}
+            subtitleSize={subtitleSize}
+            onSubtitleSizeChange={(size) => { if (activeProfileId) setPlaybackPrefs(activeProfileId, { subtitleSize: size }) }}
             onSpeedChange={handleSpeedChange}
             onToggleFullscreen={toggleFullscreen}
             onPiP={handlePiP}

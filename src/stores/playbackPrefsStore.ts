@@ -1,24 +1,31 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { isSubtitleSize, type SubtitleSize } from '@/lib/subtitleSize'
 
 export interface PlaybackPrefs {
   preferredSubtitleLang: string  // '' = off
   preferredAudioLang: string     // '' = off
   autoplayNextEpisode: boolean
+  subtitleSize: SubtitleSize
 }
 
 const DEFAULT: PlaybackPrefs = {
   preferredSubtitleLang: '',
   preferredAudioLang: '',
   autoplayNextEpisode: true,
+  subtitleSize: 'm',
 }
 
 const PREFS_API = '/api/preferences'
 
 async function pushPrefs(profileId: string, prefs: Partial<PlaybackPrefs>) {
+  // Autoplay was never in here, so turning it off on the phone left it on
+  // everywhere else. It travels now, with the subtitle size.
   const value = JSON.stringify({
     subtitle_lang: prefs.preferredSubtitleLang ?? '',
     audio_lang: prefs.preferredAudioLang ?? '',
+    autoplay_next: prefs.autoplayNextEpisode ?? true,
+    subtitle_size: prefs.subtitleSize ?? 'm',
   })
   fetch(PREFS_API, {
     method: 'PUT',
@@ -76,10 +83,14 @@ export const usePlaybackPrefsStore = create<State>()(
           if (!res.ok) return
           const data = await res.json() as Record<string, string>
           if (!data.prefs) return
-          const remote = JSON.parse(data.prefs) as { subtitle_lang?: string; audio_lang?: string }
+          const remote = JSON.parse(data.prefs) as {
+            subtitle_lang?: string; audio_lang?: string; autoplay_next?: boolean; subtitle_size?: string
+          }
           const patch: Partial<PlaybackPrefs> = {}
           if (remote.subtitle_lang !== undefined) patch.preferredSubtitleLang = remote.subtitle_lang
           if (remote.audio_lang !== undefined) patch.preferredAudioLang = remote.audio_lang
+          if (typeof remote.autoplay_next === 'boolean') patch.autoplayNextEpisode = remote.autoplay_next
+          if (isSubtitleSize(remote.subtitle_size)) patch.subtitleSize = remote.subtitle_size
           set((s) => ({
             byProfile: { ...s.byProfile, [profileId]: { ...s.byProfile[profileId], ...patch } },
           }))

@@ -1,4 +1,4 @@
-import { test as base, expect, type Page } from '@playwright/test'
+import { test as base, expect, type Page, type Route } from '@playwright/test'
 
 // The app blocks on a profile picker until one is chosen, and the choice is a PIN
 // round trip. Seeding the persisted stores puts a test straight onto the page it
@@ -140,6 +140,24 @@ export function collectConsoleErrors(page: Page): string[] {
   })
   page.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`))
   return errors
+}
+
+export const JELLYFIN = 'https://jellyfin.krutofv.se'
+
+/**
+ * Refuses every request that is not the dev server. Run on the home network these
+ * tests browse at the home IP, and the IPTV provider has blocked that address
+ * twice for traffic that looked automated (CLAUDE.md, "Never let the home IP look
+ * like a scraper"). The home server is answered by `jellyfin`, a stand-in, when
+ * one is given.
+ */
+export async function stayOffline(page: Page, jellyfin?: (route: Route, url: URL) => Promise<void>) {
+  await page.context().route('**/*', async (route) => {
+    const url = new URL(route.request().url())
+    if (url.hostname === 'localhost') return route.continue()
+    if (jellyfin && url.origin === JELLYFIN) return jellyfin(route, url)
+    return route.abort()
+  })
 }
 
 export const test = base.extend<{ seededPage: Page; libraryPage: Page; pagedPage: Page; recentPage: Page }>({

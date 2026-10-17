@@ -1,5 +1,4 @@
-import type { Page, Route } from '@playwright/test'
-import { test, expect, seedLibrary } from './fixtures'
+import { test, expect, seedLibrary, stayOffline as offline } from './fixtures'
 
 // A title opens its sheet before anything plays (feedback box, 2026-10-15):
 // search, Continue Watching and the home library used to start the film on the
@@ -10,17 +9,6 @@ import { test, expect, seedLibrary } from './fixtures'
 // traffic that looked automated (CLAUDE.md, "Never let the home IP look like a
 // scraper"). So everything that is not the dev server is refused, and the home
 // server is answered by a stand-in below rather than reached.
-
-const JELLYFIN = 'https://jellyfin.krutofv.se'
-
-async function offline(page: Page, jellyfin?: (route: Route, url: URL) => Promise<void>) {
-  await page.context().route('**/*', async (route) => {
-    const url = new URL(route.request().url())
-    if (url.hostname === 'localhost') return route.continue()
-    if (jellyfin && url.origin === JELLYFIN) return jellyfin(route, url)
-    return route.abort()
-  })
-}
 
 test('a film in Continue Watching opens its sheet, which offers to resume or start over', async ({ page }) => {
   await offline(page)

@@ -11,6 +11,7 @@ import { useProfileStore, getProfile, PROFILES } from '@/stores/profileStore'
 import { useKidRestrictions } from '@/stores/kidRestrictionsStore'
 import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import { VlcHandlerSection } from '@/components/settings/VlcHandlerSection'
+import { SubtitleSizePicker } from '@/components/ui/SubtitleSizePicker'
 import { LanguageSwitch } from '@/components/ui/LanguageSwitch'
 import { formatDateTime, formatNumber, useT, type MessageKey } from '@/lib/i18n'
 import { needsProviderMove, PROVIDER_HOST } from '@/lib/provider'
@@ -320,7 +321,7 @@ export function SettingsPage() {
   const [selectedPlaybackProfile, setSelectedPlaybackProfile] = useState(activeProfileId ?? PROFILES[0].id)
   const { byProfile: playbackByProfile, setPrefs: setPlaybackPrefs } = usePlaybackPrefsStore()
   const rawPlaybackPrefs = playbackByProfile[selectedPlaybackProfile] ?? {}
-  const playbackPrefs = { preferredSubtitleLang: '', preferredAudioLang: '', autoplayNextEpisode: true, ...rawPlaybackPrefs }
+  const playbackPrefs = { preferredSubtitleLang: '', preferredAudioLang: '', autoplayNextEpisode: true, subtitleSize: 'm' as const, ...rawPlaybackPrefs }
 
   const [saved, setSaved] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -742,6 +743,17 @@ export function SettingsPage() {
                   <option key={code} value={code} className="bg-[#1e1e1e]">{t(`trackLang.${code}`)}</option>
                 ))}
               </select>
+            </div>
+          </div>
+          <div>
+            <p className="text-sm text-white mb-1">{t('player.subSize')}</p>
+            <p className="text-xs text-neutral-600 mb-2">{t('settings.subSizeHint')}</p>
+            <div className="max-w-xs">
+              <SubtitleSizePicker
+                tone="panel"
+                value={playbackPrefs.subtitleSize}
+                onChange={(size) => setPlaybackPrefs(selectedPlaybackProfile, { subtitleSize: size })}
+              />
             </div>
           </div>
         </div>

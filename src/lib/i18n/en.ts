@@ -87,10 +87,18 @@ export const en = {
   // ── Detail modal ───────────────────────────────────────────────────────────
   'modal.director': 'Director:',
   'modal.cast': 'Cast',
+  'detail.related': 'More like this',
   'modal.resume': 'Resume',
   'modal.startOver': 'Start over',
   'modal.timeLeft': '{time} left',
   'homeDetail.source': 'Home library',
+  'homePlayer.part': 'part {part} of {count}',
+  'vlcReturn.title': 'Watched in VLC',
+  'vlcReturn.question': 'How far did you get?',
+  'vlcReturn.save': 'Save at {time}',
+  'vlcReturn.finished': 'I watched to the end',
+  'vlcReturn.skip': 'Don’t save',
+  'vlcReturn.why': 'VLC on this device does not say where you stopped, so this is a guess from how long you were away.',
 
   // ── Hero ───────────────────────────────────────────────────────────────────
   'hero.goToSlide': 'Go to slide {number}',
@@ -184,6 +192,8 @@ export const en = {
   // ── Cards ──────────────────────────────────────────────────────────────────
   'card.watched': '{time} watched',
   'card.removeContinue': 'Remove from Continue Watching',
+  'card.watchedBadge': 'Watched',
+  'card.episodesWatched': '{done} of {total} episodes watched',
 
   // ── Command palette ────────────────────────────────────────────────────────
   'search.placeholder': 'Search movies, shows, channels…',
@@ -220,6 +230,12 @@ export const en = {
   'player.volume': 'Volume',
   'player.audio': 'Audio',
   'player.subtitles': 'Subtitles',
+  'player.subSize': 'Text size',
+  'player.subSize_s': 'Small',
+  'player.subSize_m': 'Normal',
+  'player.subSize_l': 'Large',
+  'player.subSize_xl': 'Extra large',
+  'settings.subSizeHint': 'On an iPhone in fullscreen, iOS draws the subtitles: Settings → Accessibility → Subtitles & Captioning.',
   'player.subtitlesOff': 'Off',
   'player.sync': 'Sync',
   'player.track': 'Track {number}',
@@ -407,8 +423,8 @@ export const en = {
   'vlc.intro':
     "The VLC buttons hand playback to VLC — a season from a show's header, a single episode from its row.",
   'vlc.mobileHint':
-    'Nothing to set up on this device: the VLC app registers its own link scheme. Just have it installed.',
-  'vlc.worksHint': 'This computer opens VLC directly — nothing to set up here.',
+    'Nothing to set up on this device: the VLC app registers its own link scheme. Just have it installed. VLC starts where you were but does not say where you stopped, so the app asks when you come back.',
+  'vlc.worksHint': 'This computer opens VLC directly. If the handler was installed before 17 October 2026, run the command below once more: then VLC reports where you are.',
   'vlc.downloadHint':
     'On this computer the button downloads the playlist and VLC opens it. Two clicks, unless you make the second one automatic:',
   'vlc.autoOpenTitle': 'Let {browser} open it for you',
@@ -431,9 +447,9 @@ export const en = {
   'vlc.knownUnknown': 'Never checked on this computer.',
   'vlc.testNote': 'Opens VLC on an empty test playlist — it plays nothing.',
   'vlc.test': 'Test',
-  'vlc.installerToggle': 'Skip the download entirely (one pasted command)',
+  'vlc.installerToggle': 'Open VLC directly and keep your place (one pasted command)',
   'vlc.installerBody':
-    'Registers a {scheme} handler on this computer, so the buttons open VLC with nothing downloaded at all. A web page is not allowed to do this for you — on either OS.',
+    'Registers a {scheme} handler on this computer, so the buttons open VLC with nothing downloaded at all. While VLC plays it sends StreamForest where you are, so the film continues there in the app and on other devices. A web page is not allowed to do this for you — on either OS.',
   'vlc.thisOne': ' · this one',
   'vlc.pasteInto': 'Paste into {terminal}. Once per computer.',
   'vlc.terminalMac': 'Terminal (⌘-space → "Terminal")',

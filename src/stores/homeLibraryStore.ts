@@ -67,7 +67,10 @@ async function loadOnce(profileId: string, userName: string): Promise<void> {
     if (!session) break
     try {
       const items = orderForHome(await listItems(session))
-      if (get().profileId === profileId) set({ status: 'ready', session, items })
+      // Keep the session object while its token is the same: things that hold it
+      // should not see a change that is not one.
+      const kept = get().session?.token === session.token ? get().session : session
+      if (get().profileId === profileId) set({ status: 'ready', session: kept, items })
       return
     } catch (e) {
       // A token the server no longer knows: sign in again, once.
@@ -117,8 +120,18 @@ export const useHomeLibraryStore = create<HomeLibraryState>((set, get) => ({
     if (profileId && userName) await get().load(profileId, userName)
   },
 
-  // The player resumes from the item's position, so starting over is the same item at 0.
-  play: (item, opts) => set({ playing: opts?.fromStart ? { ...item, positionSec: 0 } : item, detail: null }),
+  // The player resumes from the item's position, so starting over is the same item
+  // at 0. A split film starts over in every part: its watched parts are unmarked,
+  // or the film would still count them as seen.
+  play: (item, opts) => {
+    if (!opts?.fromStart) { set({ playing: item, detail: null }); return }
+    const { session } = get()
+    if (session && item.parts?.some((p) => p.played)) {
+      void Promise.all(item.parts.map((p) => setPlayed(session, p.id, false).catch(() => {})))
+    }
+    const parts = item.parts?.map((p) => ({ ...p, positionSec: 0, played: false }))
+    set({ playing: { ...item, positionSec: 0, played: false, ...(parts ? { parts } : {}) }, detail: null })
+  },
   close: () => set({ playing: null }),
   openDetail: (item) => set({ detail: item }),
   closeDetail: () => set({ detail: null }),
@@ -130,11 +143,11 @@ export const useHomeLibraryStore = create<HomeLibraryState>((set, get) => ({
     // and the card both drop the bar straight away rather than after the round trip.
     const patch = (i: HomeItem): HomeItem => (i.id === item.id ? { ...i, played, positionSec: played ? 0 : i.positionSec } : i)
     set((s) => ({ items: s.items.map(patch), detail: s.detail && patch(s.detail) }))
-    try {
-      await setPlayed(session, item.id, played)
-    } catch {
+    // Every file of a split film: the film is watched when all of them are.
+    const ids = item.parts?.map((p) => p.id) ?? [item.id]
+    await Promise.all(ids.map((id) => setPlayed(session, id, played).catch(() => {
       // The list read below puts back what the server actually has.
-    }
+    })))
     await get().reload()
     const fresh = get().items.find((i) => i.id === item.id)
     if (fresh && get().detail?.id === item.id) set({ detail: fresh })

@@ -24,6 +24,34 @@ export interface JellyfinSession {
   userId: string
 }
 
+/**
+ * One file of a film that is split in several (cd1, cd2). Jellyfin lists the film
+ * once, but only ever plays its first file: the rest are "additional parts" with
+ * their own ids and their own watch state. Until 2026-10-17 StreamForest played
+ * only part one, so Avatar stopped after 59 of its 161 minutes.
+ */
+export interface HomePart {
+  id: string
+  durationSec: number
+  positionSec: number
+  played: boolean
+  lastPlayedAt: number
+}
+
+/** A subtitle stream of the file being played, as the server offers it to this app. */
+export interface HomeSubtitle {
+  index: number
+  lang?: string
+  /** The stream's own title, if it has one ("Forced", "SDH"). */
+  title?: string
+  /** Text (SubRip, ASS…): a WebVTT file beside the video. Otherwise a picture (DVD, Blu-ray) that has to be burnt in. */
+  text: boolean
+  /** Where the WebVTT is, for a text stream. */
+  url?: string
+  forced: boolean
+  isDefault: boolean
+}
+
 export interface HomeItem {
   id: string
   name: string
@@ -46,12 +74,19 @@ export interface HomeItem {
   rating?: number
   /** The age limit as written on the film: "SE-11", "PG-13". */
   ageRating?: string
+  /**
+   * Set when the film is split in several files, the first being the item itself.
+   * Duration, position, played and last played above are then for the whole film.
+   */
+  parts?: HomePart[]
 }
 
 /** What the detail sheet adds to a list item: the people, fetched when it opens. */
 export interface HomeDetails {
   director?: string
   cast: { name: string; character?: string; image: string | null }[]
+  /** Jellyfin's "similar" for the film, as ids in this profile's library. */
+  similar: string[]
 }
 
 export interface PlaybackSource {
@@ -61,6 +96,10 @@ export interface PlaybackSource {
   itemId: string
   mediaSourceId: string
   playSessionId: string
+  /** Every subtitle stream in the file. */
+  subtitles: HomeSubtitle[]
+  /** The picture subtitle burnt into this source, if one was asked for. */
+  burntIn?: number
 }
 
 function storage(): Storage | null {
@@ -195,6 +234,7 @@ interface RawItem {
   OfficialRating?: string
   ImageTags?: { Primary?: string }
   BackdropImageTags?: string[]
+  PartCount?: number
   ProviderIds?: { Tmdb?: string }
   UserData?: { PlaybackPositionTicks?: number; Played?: boolean; LastPlayedDate?: string }
 }
@@ -223,9 +263,56 @@ export async function listItems(session: JellyfinSession): Promise<HomeItem[]> {
       limit: '500',
     })
     const r = await call<{ Items: RawItem[] }>(`/Items?${q}`, { token: session.token })
-    return r.Items.map((i) => toHomeItem(i, view.Name))
+    return Promise.all(r.Items.map(async (i) => {
+      const item = toHomeItem(i, view.Name)
+      if ((i.PartCount ?? 1) > 1) await addParts(session, item)
+      return item
+    }))
   }))
   return perLibrary.flat()
+}
+
+/**
+ * Reads the other files of a split film and makes the item speak for all of them.
+ * If they cannot be read the item stays as Jellyfin lists it, which is part one.
+ */
+async function addParts(session: JellyfinSession, item: HomeItem): Promise<void> {
+  try {
+    const r = await call<{ Items: RawItem[] }>(`/Videos/${item.id}/AdditionalParts?userId=${session.userId}`, { token: session.token })
+    const parts = [partOf(item), ...r.Items.map((p) => partOf(toHomeItem(p, item.library)))]
+    Object.assign(item, { parts }, combineParts(parts))
+  } catch {
+    // see above
+  }
+}
+
+function partOf(i: HomeItem): HomePart {
+  return { id: i.id, durationSec: i.durationSec, positionSec: i.positionSec, played: i.played, lastPlayedAt: i.lastPlayedAt }
+}
+
+/**
+ * A split film as one: its length is all parts, it is watched when every part is,
+ * and its position is where the first unwatched part stands, counted from the
+ * start of the film.
+ */
+export function combineParts(parts: readonly HomePart[]): Pick<HomeItem, 'durationSec' | 'positionSec' | 'played' | 'lastPlayedAt'> {
+  const durationSec = parts.reduce((sum, p) => sum + p.durationSec, 0)
+  const lastPlayedAt = Math.max(0, ...parts.map((p) => p.lastPlayedAt))
+  const current = parts.findIndex((p) => !p.played)
+  if (current === -1) return { durationSec, positionSec: 0, played: true, lastPlayedAt }
+  const before = parts.slice(0, current).reduce((sum, p) => sum + p.durationSec, 0)
+  const within = parts[current].positionSec > 10 ? parts[current].positionSec : 0
+  return { durationSec, positionSec: before + within, played: false, lastPlayedAt }
+}
+
+/** Which part a position in the whole film falls in, and how far into it. */
+export function locatePart(parts: readonly HomePart[], positionSec: number): { index: number; offsetSec: number } {
+  let rest = Math.max(0, positionSec)
+  for (let index = 0; index < parts.length; index++) {
+    if (rest < parts[index].durationSec || index === parts.length - 1) return { index, offsetSec: rest }
+    rest -= parts[index].durationSec
+  }
+  return { index: 0, offsetSec: 0 }
 }
 
 function toHomeItem(i: RawItem, library: string): HomeItem {
@@ -257,11 +344,18 @@ const CAST_SHOWN = 12
  * carries dozens of them, and only the one being looked at needs them.
  */
 export async function getDetails(session: JellyfinSession, itemId: string): Promise<HomeDetails> {
-  const i = await call<{ People?: { Id: string; Name: string; Role?: string; Type?: string; PrimaryImageTag?: string }[] }>(
-    `/Items/${itemId}?userId=${session.userId}`, { token: session.token },
-  )
+  const [i, similar] = await Promise.all([
+    call<{ People?: { Id: string; Name: string; Role?: string; Type?: string; PrimaryImageTag?: string }[] }>(
+      `/Items/${itemId}?userId=${session.userId}`, { token: session.token },
+    ),
+    // The server applies the profile's limits here too, so a kid gets only its allowlist.
+    call<{ Items: { Id: string }[] }>(`/Items/${itemId}/Similar?userId=${session.userId}&limit=12`, { token: session.token })
+      .then((r) => r.Items.map((x) => x.Id))
+      .catch(() => [] as string[]),
+  ])
   const people = i.People ?? []
   return {
+    similar,
     director: people.filter((p) => p.Type === 'Director').map((p) => p.Name).join(', ') || undefined,
     cast: people.filter((p) => p.Type === 'Actor').slice(0, CAST_SHOWN).map((p) => ({
       name: p.Name,
@@ -269,6 +363,21 @@ export async function getDetails(session: JellyfinSession, itemId: string): Prom
       image: p.PrimaryImageTag ? `${JELLYFIN_URL}/Items/${p.Id}/Images/Primary?fillWidth=92&quality=90&tag=${p.PrimaryImageTag}` : null,
     })),
   }
+}
+
+/**
+ * Puts the profile's place in a film at a given second of it, as Swiftfin will
+ * also see it: in a split film the parts before are watched and the part it
+ * falls in stands at that second. Used when the viewer says where VLC got to.
+ */
+export async function setPosition(session: JellyfinSession, item: HomeItem, positionSec: number): Promise<void> {
+  const parts = item.parts ?? [{ id: item.id, durationSec: item.durationSec, positionSec: item.positionSec, played: item.played, lastPlayedAt: item.lastPlayedAt }]
+  const { index, offsetSec } = locatePart(parts, positionSec)
+  await Promise.all(parts.slice(0, index).map((p) => setPlayed(session, p.id, true)))
+  await call(`/UserItems/${parts[index].id}/UserData?userId=${session.userId}`, {
+    method: 'POST', token: session.token,
+    body: { PlaybackPositionTicks: Math.round(offsetSec * TICKS_PER_SECOND), Played: false, LastPlayedDate: new Date().toISOString() },
+  })
 }
 
 /**
@@ -304,28 +413,67 @@ const DEVICE_PROFILE = {
     Context: 'Streaming', MaxAudioChannels: '2', BreakOnNonKeyFrames: true,
   }],
   CodecProfiles: [],
-  SubtitleProfiles: [],
+  // Text subtitles come as a WebVTT file beside the video, which every browser
+  // draws and which switches without stopping. Picture subtitles (DVD, Blu-ray)
+  // cannot be drawn by a browser, so the server burns the chosen one in. With no
+  // profile at all, as until 2026-10-17, the server burnt in whatever stream the
+  // file marked default: Hit and Run always had Swedish subtitles, and they could
+  // neither be changed nor turned off.
+  SubtitleProfiles: [
+    { Format: 'vtt', Method: 'External' },
+    ...['dvdsub', 'pgssub', 'dvbsub', 'xsub'].map((Format) => ({ Format, Method: 'Encode' })),
+  ],
 }
 
-/** Where to play `item` from. The URL carries the token, because native HLS cannot send headers. */
-export async function getPlaybackSource(session: JellyfinSession, item: HomeItem): Promise<PlaybackSource> {
-  const r = await call<{
+interface RawStream {
+  Type: string; Index: number; Language?: string; Title?: string; IsTextSubtitleStream?: boolean
+  DeliveryMethod?: string; DeliveryUrl?: string; IsForced?: boolean; IsDefault?: boolean
+}
+
+/**
+ * Where to play a file from. The URL carries the token, because native HLS cannot
+ * send headers. `burnIn` is the picture subtitle to burn into it; without one the
+ * picture plays clean, with the text subtitles beside it.
+ *
+ * The server only listens to a subtitle choice that comes with a `MediaSourceId`;
+ * without one it silently picks the file's default stream. For a film in one
+ * version the media source has the item's own id.
+ */
+export async function getPlaybackSource(session: JellyfinSession, itemId: string, opts: { burnIn?: number } = {}): Promise<PlaybackSource> {
+  const ask = (mediaSourceId: string) => call<{
     PlaySessionId: string
-    MediaSources: { Id: string; Container?: string; SupportsDirectPlay?: boolean; TranscodingUrl?: string }[]
-  }>(`/Items/${item.id}/PlaybackInfo?userId=${session.userId}`, {
+    MediaSources: { Id: string; Container?: string; SupportsDirectPlay?: boolean; TranscodingUrl?: string; MediaStreams?: RawStream[] }[]
+  }>(`/Items/${itemId}/PlaybackInfo?userId=${session.userId}`, {
     method: 'POST', token: session.token,
-    body: { DeviceProfile: DEVICE_PROFILE, UserId: session.userId, AutoOpenLiveStream: true },
+    body: {
+      DeviceProfile: DEVICE_PROFILE, UserId: session.userId, AutoOpenLiveStream: true,
+      MediaSourceId: mediaSourceId, SubtitleStreamIndex: opts.burnIn ?? -1,
+    },
   })
+  let r = await ask(itemId)
+  if (r.MediaSources[0] && r.MediaSources[0].Id !== itemId) r = await ask(r.MediaSources[0].Id)
   const ms = r.MediaSources[0]
+  const subtitles: HomeSubtitle[] = (ms.MediaStreams ?? []).filter((st) => st.Type === 'Subtitle').map((st) => ({
+    index: st.Index,
+    lang: st.Language || undefined,
+    title: st.Title || undefined,
+    text: Boolean(st.IsTextSubtitleStream),
+    url: st.IsTextSubtitleStream
+      ? JELLYFIN_URL + (st.DeliveryUrl ?? `/Videos/${itemId}/${ms.Id}/Subtitles/${st.Index}/0/Stream.vtt?ApiKey=${session.token}`)
+      : undefined,
+    forced: Boolean(st.IsForced),
+    isDefault: Boolean(st.IsDefault),
+  }))
+  const common = { itemId, mediaSourceId: ms.Id, playSessionId: r.PlaySessionId, subtitles, burntIn: opts.burnIn }
   if (ms.TranscodingUrl) {
     // Use the URL as given: the HLS routes are hidden from the 12.x API description,
     // and building them by hand is how a client breaks on the next release.
-    return { url: JELLYFIN_URL + ms.TranscodingUrl, hls: true, itemId: item.id, mediaSourceId: ms.Id, playSessionId: r.PlaySessionId }
+    return { url: JELLYFIN_URL + ms.TranscodingUrl, hls: true, ...common }
   }
   const q = new URLSearchParams({
     static: 'true', mediaSourceId: ms.Id, playSessionId: r.PlaySessionId, deviceId: deviceId(), ApiKey: session.token,
   })
-  return { url: `${JELLYFIN_URL}/Videos/${item.id}/stream.${ms.Container ?? 'mp4'}?${q}`, hls: false, itemId: item.id, mediaSourceId: ms.Id, playSessionId: r.PlaySessionId }
+  return { url: `${JELLYFIN_URL}/Videos/${itemId}/stream.${ms.Container ?? 'mp4'}?${q}`, hls: false, ...common }
 }
 
 export type PlaybackEvent = 'start' | 'progress' | 'stopped'
