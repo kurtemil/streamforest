@@ -275,7 +275,30 @@ Verified 2026-10-11 against the real server in Edge:
   a first visit each signed in, one list came back 401, and the store could keep
   the revoked token: playback and position reports then failed until the next
   reload. A call during a load asks for one more pass instead. `forgetSession`
-  takes the refused token and leaves a newer one alone.
+  takes the refused token and leaves a newer one alone. The store also keeps
+  the session object while its token is unchanged, and `HomePlayer` follows the
+  token: every list reload used to make a new object, which the player took for
+  a new session, so a tab switch started the film again from where it opened.
+- **Films in several files** (cd1, cd2; ten of them, Avatar in three). Jellyfin
+  lists the film once but plays only its first file; the rest are "additional
+  parts" with their own ids and watch state. Until 2026-10-17 StreamForest played
+  part one only, so Avatar stopped after 59 of 161 minutes. `listItems` reads
+  `/Videos/{id}/AdditionalParts` for every item with `PartCount > 1` and
+  `combineParts` makes the item speak for the whole film (length, position,
+  watched only when every part is). `HomePlayer` plays the parts in a row and
+  reports each to its own id; the top bar says "del 2 av 3". Marking watched,
+  starting over and the VLC button all cover every part.
+- **Subtitles.** Nearly the whole library is SweSub rips with the Swedish text
+  burnt into the picture, which needs nothing. Four films carry real subtitle
+  streams. Text streams come as WebVTT `<track>`s (switchable in place, listed by
+  the iPhone's own player too, sized by `::cue`); picture streams (DVD) are burnt
+  in by the server on request. The device profile used to have no subtitle
+  profiles, and then the server silently burnt in the file's *default* stream:
+  Hit and Run always had Swedish subtitles that could not be changed or turned
+  off. **A subtitle choice is ignored unless `MediaSourceId` is sent with it**;
+  for a film in one version that is the item id. The first choice follows
+  `pickHomeSubtitle` (remembered per film, then the profile's language, then an
+  untagged default stream, then a forced one) and carries over to the next part.
 
 The plan for one card per film across both sources, with kids' rules shared,
 lives outside this public repo.
@@ -328,13 +351,40 @@ Play, an episode row and the overview's "Fortsätt S2 · E3" are such buttons.
   stand-in. It refuses every request that is not the dev server, so it cannot
   reach the provider from the home IP.
 
-The four suggestions from the same evening were assessed, not built: subtitle
-size, a watched mark on cards, similar titles in the sheet, and VLC with saved
-progress on the coming kiosk. TMDB's `similar` is already fetched and cached with
-every lookup (8 titles) and shown nowhere. `MovieCard` has a watched check, but it
-is hidden whenever the card has a rating chip, which is almost always. And "Because
-you watched X" on Home and Movies is a random pick from the same playlist group,
-not anything like X.
+### 2026-10-15: the four suggestions, built 2026-10-17
+
+- **Seen or not, on every card.** `stores/watchStateStore.ts` holds the active
+  profile's progress rows from one live query in `App.tsx`; `MovieCard`,
+  `ShowCard` and `HomeCard` read their own row through it, so no page has to pass
+  progress down (several never did). A finished title has a check in the bottom
+  right (`ui/WatchedMarks.tsx`); the old check was drawn only on cards *without* a
+  rating chip, which with TMDB artwork meant almost never. A show card counts its
+  finished episodes against how many the catalogue has: a bar while some are
+  left, the check when none are.
+- **More like this.** The film sheet, the show overview and the home sheet end
+  with a row of related titles (`home/RelatedRails.tsx`). For the catalogue it is
+  `fetchRelated`: TMDB's recommendations, then its "similar" list, matched to what
+  the profile can play, in memory only (one list per title opened would fill
+  localStorage). Jellyfin's own `/Items/{id}/Similar` for the home library. Fewer
+  than four matches and there is no row.
+- **"Because you watched X" is about X now** (`hooks/useBecauseYouWatched.ts`).
+  It was a shuffle of X's playlist group, so "VOD: English" was the reason given.
+  Now it is `fetchRelated` for X, minus what is seen or dismissed, and the row is
+  absent rather than padded when fewer than four remain.
+- **Subtitle size**, per profile and synced (`lib/subtitleSize.ts`): four sizes
+  that grow with the screen, chosen in Settings or in either player's subtitle
+  menu. The overlay was a fixed 16 px. iOS draws subtitles itself in fullscreen,
+  so there its own setting applies, and Settings says so.
+- **VLC keeps your place**, on every device, not only the kiosk: see "Where VLC
+  got to" below.
+
+Found on the way and fixed: **a preferred language never matched.** Settings
+store "sv", tracks are tagged "swe", and the check was
+`track.lang.startsWith(pref)`. Swedish subtitles (Elof and Jossan's setting) and
+Swedish audio (Vera and Noah's) were never picked automatically, nor Spanish
+("spa") or German ("ger"). `lib/lang.ts` knows the two- and three-letter codes
+and the names a track title may carry instead. Autoplay-next-episode was also
+never synced between devices; it travels with the other preferences now.
 
 ## Handing playback to VLC
 
@@ -435,7 +485,50 @@ registry writes and its embedded `.vbs` are carried over verbatim from the
 **Which buttons hand over what:** the show header's VLC button sends the whole
 selected season; the per-episode button on each row sends that one episode. Both
 are wanted — the header one is "put this season on", the row one is "this episode
-misbehaves in the web player".
+misbehaves in the web player". Home-library films have a VLC button in their sheet
+too: the file itself from Jellyfin, every track in it, a split film as a playlist
+of its parts.
+
+### Where VLC got to
+
+Since 2026-10-17 every handover goes through `/api/playlist/…?d=…&r=…`, even a
+single film, because the playlist is what carries two things a bare stream URL
+cannot:
+
+- **Where to start.** Each entry may carry the profile's position, written as
+  `#EXTVLCOPT:start-time=` before it. `start-time` is one of the options libvlc 3
+  marks safe, so VLC honours it from a fetched playlist (desktop for certain;
+  VLC for iOS also resumes a URL it has played before by itself).
+- **Where to report** (`r=`): a StreamForest profile, or a Jellyfin user and token.
+
+**Desktop: the handler reports.** `public/vlc-handler.{sh,ps1}` install a helper
+beside the launcher. Given a playlist link with `r=` it starts VLC itself with
+its web interface on 127.0.0.1 (random port, a password made up per launch;
+`--no-one-instance` on Windows, the binary rather than `open` on a Mac, or the
+flags are lost to an already running VLC), reads `status.json` and the current
+entry from `playlist.json` every ten seconds, and posts them with the link to
+`/api/vlc-report`, plus once more when VLC closes. `src/lib/vlcReport.ts` decides
+the rest: which entry is playing, finished past 90 %, and the row it writes to
+`watch_progress` (newer wins, as in `/api/progress`). For a home film no Function
+can reach Jellyfin, so the answer is `RELAY` and three lines the handler sends on
+to `https://jellyfin.krutofv.se/Sessions/Playing…` itself. Answers are plain
+lines because the Mac helper is a shell script with no JSON parser. Handlers
+installed before 2026-10-17 do not report; running the one-liner again replaces
+them.
+
+**iPhone: the app asks.** VLC for iOS never hands a position back: its
+x-callback opens the return link with nothing appended (vlc-ios#1089, open since
+2015) and keeps its own resume point private. So `lib/vlcHandoff.ts` remembers a
+handed-over film or episode, and when the app is in front again (at least 45 s
+later, at most 12 h) `VlcReturnPrompt` first checks whether anything reported
+meanwhile; if not, it asks how far you got, with the time away as the starting
+guess on a slider. Nothing is written without a tap. A whole season is not asked
+about. The x-success link is `/vlc-done` with no query, because VLC 3.7 cuts it at
+the second `=`; a home-screen app gets none, since iOS would open it in Safari.
+
+App coming back to the front now also re-reads positions from D1 (at most every
+30 s). Before, they were read only on a profile switch, so a film paused on one
+device looked unstarted on another until a reload.
 
 ---
 
