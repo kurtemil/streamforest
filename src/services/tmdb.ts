@@ -90,9 +90,9 @@ function writeList(key: string, entry: { at: number; items: TmdbListItem[] }): v
   try { localStorage.setItem(LIST_STORAGE_PREFIX + key, JSON.stringify(entry)) } catch { /* full or private: memory still has it */ }
 }
 
-async function tmdbListPages(path: string, locale: Locale, params: Record<string, string>, pages: number): Promise<TmdbListItem[]> {
+async function tmdbListPages(path: string, locale: Locale, params: Record<string, string>, pages: number, persist = true): Promise<TmdbListItem[]> {
   const key = `${path}?${new URLSearchParams(params)}&pages=${pages}@${locale}`
-  const hit = readList(key)
+  const hit = persist ? readList(key) : listMemo.get(key) ?? null
   if (hit && Date.now() - hit.at < LIST_TTL_MS) return hit.items
   const items: TmdbListItem[] = []
   for (let page = 1; page <= pages; page++) {
@@ -114,7 +114,10 @@ async function tmdbListPages(path: string, locale: Locale, params: Record<string
     if (data.total_pages && page >= data.total_pages) break
   }
   // An empty answer (no key, offline) is not cached, so the next visit asks again.
-  if (items.length) writeList(key, { at: Date.now(), items })
+  if (items.length) {
+    if (persist) writeList(key, { at: Date.now(), items })
+    else listMemo.set(key, { at: Date.now(), items })
+  }
   return items
 }
 
@@ -128,6 +131,21 @@ export function discoverByGenre(kind: 'movie' | 'tv', genreId: number, locale: L
   return tmdbListPages(`/discover/${kind}`, locale, {
     with_genres: String(genreId), sort_by: 'popularity.desc', 'vote_count.gte': '50',
   }, 10)
+}
+
+/**
+ * What TMDB suggests after this title: its recommendations (what people who liked
+ * it went on to), then its "similar" list (shared keywords and genres) to fill in
+ * behind them. Kept in memory only: one entry per title ever opened would fill
+ * localStorage within weeks.
+ */
+export async function fetchRelated(kind: 'movie' | 'tv', tmdbId: number, locale: Locale): Promise<TmdbListItem[]> {
+  const [recommended, similar] = await Promise.all([
+    tmdbListPages(`/${kind}/${tmdbId}/recommendations`, locale, {}, 2, false),
+    tmdbListPages(`/${kind}/${tmdbId}/similar`, locale, {}, 1, false),
+  ])
+  const seen = new Set<number>([tmdbId])
+  return [...recommended, ...similar].filter((i) => !seen.has(i.tmdbId) && Boolean(seen.add(i.tmdbId)))
 }
 
 const genreMemo = new Map<string, Promise<{ id: number; name: string }[]>>()

@@ -37,6 +37,9 @@ import { backdropUrl, posterUrl } from '@/services/tmdb'
 import { normalizeShowKey } from '@/lib/utils'
 import { openInVlc, openPlaylistInVlc } from '@/lib/vlc'
 import { markWatched } from '@/services/watched'
+import { useShowWatched } from '@/stores/watchStateStore'
+import { WatchedMarks } from '@/components/ui/WatchedMarks'
+import { RelatedShows } from '@/components/home/RelatedRails'
 import { formatNumber, useLocale, useT } from '@/lib/i18n'
 import { GenreChips, type Genre } from '@/components/ui/GenreChips'
 import { useCatalogShows, useHeroItems } from '@/hooks/useCatalogList'
@@ -216,6 +219,7 @@ function EpisodeRow({
 // ─── Show card ─────────────────────────────────────────────────────────────────
 
 function ShowCard({
+  showKey,
   showName,
   poster,
   seasons,
@@ -225,6 +229,7 @@ function ShowCard({
   onClick,
   onWatchLater,
 }: {
+  showKey: string
   showName: string
   poster: string
   seasons: number
@@ -237,6 +242,8 @@ function ShowCard({
   const t = useT()
   const rating = tmdbMeta && !tmdbMeta.notFound && tmdbMeta.rating > 0 ? tmdbMeta.rating : null
   const sizeLabel = t('series.seasonsAndEpisodes', { seasons, episodes })
+  const seen = useShowWatched(showKey)
+  const watched = seen !== null && seen.done >= seen.total
 
   return (
     <button onClick={onClick} className="group text-left w-full">
@@ -273,11 +280,16 @@ function ShowCard({
             <Star size={9} fill="#f59e0b" className="text-warn-500 shrink-0" />
             <span className="text-micro font-semibold text-white">{rating.toFixed(1)}</span>
           </div>
-        ) : (
+        ) : !seen && (
           <div className="absolute bottom-0 left-0 right-0 p-2">
             <p className="text-xs text-neutral-300">{sizeLabel}</p>
           </div>
         )}
+        <WatchedMarks
+          watched={watched}
+          pct={seen && !watched ? Math.round((seen.done / seen.total) * 100) : 0}
+          label={seen ? t('card.episodesWatched', { done: seen.done, total: seen.total }) : undefined}
+        />
       </div>
       <div className="mt-2 px-0.5">
         <p className="text-body text-white font-medium leading-tight line-clamp-2">
@@ -718,6 +730,8 @@ export function SeriesPage() {
               />
             ))}
           </div>
+
+          <RelatedShows tmdbId={showTmdb && !showTmdb.notFound ? showTmdb.tmdbId || null : null} excludeKey={selectedShow} />
         </div>
       </div>
     )
@@ -833,6 +847,7 @@ export function SeriesPage() {
                     return (
                       <div key={name} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                         <ShowCard
+                          showKey={name}
                           showName={data.displayName}
                           poster={data.logo}
                           seasons={data.seasons.size}
@@ -860,7 +875,8 @@ export function SeriesPage() {
                       return (
                         <div key={name} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                           <ShowCard
-                            showName={data.displayName}
+                            showKey={name}
+                          showName={data.displayName}
                             poster={data.logo}
                             seasons={data.seasons.size}
                             episodes={allEps.length}
@@ -891,7 +907,8 @@ export function SeriesPage() {
                       return (
                         <div key={name} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                           <ShowCard
-                            showName={data.displayName}
+                            showKey={name}
+                          showName={data.displayName}
                             poster={data.logo}
                             seasons={data.seasons.size}
                             episodes={allEps.length}
@@ -968,6 +985,7 @@ export function SeriesPage() {
                     return (
                       <ShowCard
                         key={name}
+                        showKey={name}
                         showName={data.displayName}
                         poster={data.logo}
                         seasons={data.seasons.size}

@@ -23,6 +23,7 @@ import { GroupSidebar } from '@/components/ui/GroupSidebar'
 import { ScrollableRow, SectionHeader } from '@/components/ui/MediaRow'
 import { ContinueCard } from '@/components/ui/ContinueCard'
 import { useTmdbEnrich } from '@/hooks/useTmdbEnrich'
+import { useBecauseYouWatched, type RecSource } from '@/hooks/useBecauseYouWatched'
 import { useInfiniteScroll } from '@/hooks/useInfiniteScroll'
 import { formatNumber, useLocale, useT } from '@/lib/i18n'
 import { GenreChips, type Genre } from '@/components/ui/GenreChips'
@@ -169,6 +170,22 @@ export function MoviesPage() {
 
   const { count, sentinelRef, reset } = useInfiniteScroll(filtered.length)
 
+  // "Since you watched X": the film most recently watched through (or past half).
+  // The row itself is TMDB's recommendations for it (useBecauseYouWatched).
+  const recSource = useMemo((): (RecSource & { watchedIds: Set<string> }) | null => {
+    if (!recentProgress?.length || !movies.length || !isRowMode) return null
+    const movieIds = new Set(movies.map((m) => m.id))
+    const watched = recentProgress.filter(
+      (p) =>
+        movieIds.has(p.channelId) &&
+        (p.completed || (p.duration > 0 && p.position / p.duration > 0.5)),
+    )
+    if (!watched.length) return null
+    const source = movies.find((m) => m.id === watched[0].channelId)
+    if (!source) return null
+    return { channel: source, key: source.id, kind: 'movie', watchedIds: new Set(watched.map((p) => p.channelId)) }
+  }, [recentProgress, movies, isRowMode])
+
   // Enrich first N movies in row mode (covers all rows + gives TMDB genre data).
   // In the grid, enrich what is on screen plus the next rows: a fixed first-N window
   // meant nothing past it ever got artwork, however far one scrolled.
@@ -179,6 +196,8 @@ export function MoviesPage() {
       for (const { channel } of continueWatchingMovies) {
         if (!seen.has(channel.id)) { seen.add(channel.id); result.push(channel) }
       }
+      // The film "Since you watched" is about: its TMDB id is what the row asks with.
+      if (recSource && !seen.has(recSource.key)) { seen.add(recSource.key); result.push(recSource.channel) }
       for (const m of movies) {
         if (result.length >= ENRICH_LIMIT) break
         if (!seen.has(m.id)) { seen.add(m.id); result.push(m) }
@@ -186,9 +205,15 @@ export function MoviesPage() {
       return result
     }
     return filtered.slice(0, count + ENRICH_AHEAD)
-  }, [isRowMode, continueWatchingMovies, movies, filtered, count])
+  }, [isRowMode, continueWatchingMovies, recSource, movies, filtered, count])
 
   const tmdbMap = useTmdbEnrich(enrichTargets)
+
+  const recommendations = useBecauseYouWatched(
+    recSource,
+    recSource ? tmdbMap.get(recSource.key) : undefined,
+    (id) => Boolean(recSource?.watchedIds.has(id) || progressMap?.[id]?.completed),
+  )
 
   // TMDB genre rows — built from enriched data, populates progressively
   const tmdbGenreRows = useMemo(() => {
@@ -209,26 +234,6 @@ export function MoviesPage() {
       .map(([genre, items]) => ({ genre, items: items.slice(0, 20) }))
   }, [movies, tmdbMap, isRowMode])
 
-  // "Since you watched X"
-  const recommendations = useMemo(() => {
-    if (!recentProgress?.length || !movies.length || !isRowMode) return null
-    const movieIds = new Set(movies.map((m) => m.id))
-    const watched = recentProgress.filter(
-      (p) =>
-        movieIds.has(p.channelId) &&
-        (p.completed || (p.duration > 0 && p.position / p.duration > 0.5)),
-    )
-    if (!watched.length) return null
-    const source = movies.find((m) => m.id === watched[0].channelId)
-    if (!source) return null
-    const watchedIds = new Set(watched.map((p) => p.channelId))
-    const pool = movies.filter((m) => !watchedIds.has(m.id))
-    const sameGroup = pool.filter((m) => m.groupTitle === source.groupTitle)
-    const candidates = sameGroup.length >= 4 ? sameGroup : pool
-    if (!candidates.length) return null
-    const shuffled = [...candidates].sort(() => Math.random() - 0.5).slice(0, 16)
-    return { title: source.movieTitle ?? source.name, sourceKey: source.id, items: shuffled }
-  }, [recentProgress, movies, isRowMode])
 
   const watchLaterSet = useLiveQuery(async () => {
     if (!activeProfileId) return new Set<string>()
@@ -443,18 +448,18 @@ export function MoviesPage() {
                   <section>
                     <SectionHeader
                       title={t('movies.sinceYouWatched', {
-                        title: tmdbMap.get(recommendations.sourceKey)?.title ?? recommendations.title,
+                        title: recommendations.title,
                       })}
                     />
                     <ScrollableRow>
-                      {recommendations.items.map((m) => (
+                      {recommendations.items.map(({ channel: m, meta }) => (
                         <div key={m.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
                           <MovieCard
                             channel={m}
                             progress={progressMap?.[m.id]}
                             isWatchLater={watchLaterSet?.has(m.id)}
-                            tmdbMeta={tmdbMap.get(m.id)}
-                            onClick={() => handleOpenDetail(m)}
+                            tmdbMeta={tmdbMap.get(m.id) ?? meta}
+                            onClick={() => openMovie(m, tmdbMap.get(m.id) ?? meta)}
                             onWatchLater={(e) => toggleWatchLater(m.id, e)}
                           />
                         </div>

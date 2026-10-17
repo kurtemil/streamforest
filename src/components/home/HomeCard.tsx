@@ -1,5 +1,6 @@
 import { Film, Play } from 'lucide-react'
 import { posterUrl, type HomeItem } from '@/services/jellyfin'
+import { WatchedMarks } from '@/components/ui/WatchedMarks'
 
 /** A poster card for a title in the home library, with its progress bar. */
 export function HomeCard({ item, onClick }: { item: HomeItem; onClick: () => void }) {
@@ -22,11 +23,7 @@ export function HomeCard({ item, onClick }: { item: HomeItem; onClick: () => voi
             <Play size={18} fill="white" className="text-white ml-0.5" />
           </div>
         </div>
-        {pct > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/50">
-            <div className="h-full bg-accent-400 rounded-r-full" style={{ width: `${pct}%` }} />
-          </div>
-        )}
+        <WatchedMarks watched={item.played} pct={pct} />
       </div>
       <div className="mt-2 px-0.5 min-h-[3.75rem]">
         <p className="text-body text-white font-medium leading-tight line-clamp-2">{item.name}</p>

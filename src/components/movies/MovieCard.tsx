@@ -1,7 +1,10 @@
-import { Play, Check, Bookmark, Star, X } from 'lucide-react'
+import { Play, Bookmark, Star, X } from 'lucide-react'
 import { Poster } from '@/ui'
 import { progressPercent } from '@/lib/progress'
 import { useT } from '@/lib/i18n'
+import { normalizeShowKey } from '@/lib/utils'
+import { useShowWatched, useWatched } from '@/stores/watchStateStore'
+import { WatchedMarks } from '@/components/ui/WatchedMarks'
 import type { Channel, WatchProgress, TmdbMeta } from '@/types'
 
 interface Props {
@@ -26,7 +29,18 @@ interface Props {
    `e2e/perf-probe.spec.ts` is the measurement, if it needs repeating. */
 export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLabel, onClick, onWatchLater, onRemove }: Props) {
   const t = useT()
-  const pct = progress ? Math.round(progressPercent(progress.position, progress.duration)) : 0
+  // A show card speaks for the whole show: how many of its episodes are finished.
+  // An episode card (it has a label) and a card handed an explicit row speak for
+  // that one item. Rows the caller did not pass come from the profile's own.
+  const isShow = channel.type === 'series' && !episodeLabel && progress === undefined
+  const own = useWatched(channel.id)
+  const show = useShowWatched(isShow ? normalizeShowKey(channel.showName ?? channel.name) : '')
+  const item = isShow ? undefined : (progress ?? own)
+  const watched = isShow ? show !== null && show.done >= show.total : Boolean(item?.completed)
+  const pct = isShow
+    ? (show && !watched ? Math.round((show.done / show.total) * 100) : 0)
+    : (item && !item.completed ? Math.round(progressPercent(item.position, item.duration)) : 0)
+  const showLabel = show ? t('card.episodesWatched', { done: show.done, total: show.total }) : undefined
 
   const displayTitle = tmdbMeta?.title ?? channel.movieTitle ?? channel.showName ?? channel.name
   const displayYear  = tmdbMeta?.year  ?? channel.year
@@ -86,19 +100,7 @@ export function MovieCard({ channel, progress, isWatchLater, tmdbMeta, episodeLa
           </div>
         )}
 
-        {/* Completed badge */}
-        {progress?.completed && !rating && (
-          <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-accent-600 flex items-center justify-center">
-            <Check size={12} className="text-white" />
-          </div>
-        )}
-
-        {/* Progress bar + ring */}
-        {!progress?.completed && pct > 0 && (
-          <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/50">
-            <div className="h-full bg-accent-400 rounded-r-full" style={{ width: `${pct}%` }} />
-          </div>
-        )}
+        <WatchedMarks watched={watched} pct={pct} label={isShow ? showLabel : undefined} />
       </div>
 
       <div className="mt-2 px-0.5 min-h-[3.75rem]">

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { isVisible, useActiveExclusions } from '@/hooks/useActiveExclusions'
 import { buildMovieIndex, buildShowIndex, matchMovies, matchShows } from '@/lib/catalogMatch'
-import { fetchGenres, fetchTrending, type TmdbListItem } from '@/services/tmdb'
+import { fetchGenres, fetchRelated, fetchTrending, type TmdbListItem } from '@/services/tmdb'
 import { useLocale } from '@/lib/i18n'
 import type { TmdbMeta } from '@/types'
 
@@ -57,6 +57,27 @@ export function useCatalogShows(load: (() => Promise<TmdbListItem[]>) | null, ke
     [items, index, excluded],
   )
   return { matches, loading: Boolean(load) && items === null }
+}
+
+/**
+ * Films TMDB relates to this one (`fetchRelated`) that this profile can play here.
+ * `tmdbId` null means none to ask about; the result is then empty.
+ */
+export function useRelatedMovies(tmdbId: number | null) {
+  const locale = useLocale()
+  return useCatalogMovies(
+    tmdbId ? () => fetchRelated('movie', tmdbId, locale) : null,
+    tmdbId ? `related-movie-${tmdbId}@${locale}` : 'none',
+  )
+}
+
+/** Shows TMDB relates to this one that this profile can play here. */
+export function useRelatedShows(tmdbId: number | null) {
+  const locale = useLocale()
+  return useCatalogShows(
+    tmdbId ? () => fetchRelated('tv', tmdbId, locale) : null,
+    tmdbId ? `related-tv-${tmdbId}@${locale}` : 'none',
+  )
 }
 
 /** At most this many slides: a hero is a few highlights, not a second rail. */

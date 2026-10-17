@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Star, Clock, Users } from 'lucide-react'
 import { useT } from '@/lib/i18n'
@@ -28,8 +28,8 @@ interface Props {
   overview?: string | null
   director?: string | null
   cast?: DetailCastMember[]
-  /** More sections under the cast. */
-  children?: ReactNode
+  /** More sections under the cast: what is like this one. */
+  after?: ReactNode
 }
 
 /**
@@ -40,9 +40,13 @@ interface Props {
  */
 export function DetailSheet({
   open, onClose, title, backdrop, poster, fallbackPoster = '', year, runtime, rating, chips,
-  progress, actions, overview, director, cast, children,
+  progress, actions, overview, director, cast, after,
 }: Props) {
   const t = useT()
+  // A related title opens in the same sheet; it should start at its top, not
+  // wherever the previous one was scrolled to.
+  const scroller = useRef<HTMLDivElement>(null)
+  useEffect(() => { scroller.current?.scrollTo({ top: 0 }) }, [title])
 
   useEffect(() => {
     if (!open) return
@@ -101,7 +105,7 @@ export function DetailSheet({
             </div>
 
             {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto px-6 pb-8 -mt-16 relative">
+            <div ref={scroller} className="flex-1 overflow-y-auto px-6 pb-8 -mt-16 relative">
               <div className="flex gap-5 items-end mb-6">
                 {/* Poster */}
                 <div className="w-24 aspect-[2/3] rounded-lg overflow-hidden shrink-0 ring-1 ring-white/15 shadow-cinema bg-surface-300">
@@ -188,7 +192,7 @@ export function DetailSheet({
                 </div>
               )}
 
-              {children}
+              {after}
             </div>
           </motion.div>
         </>

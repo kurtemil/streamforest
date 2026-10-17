@@ -19,6 +19,7 @@ import { ScrollableRow, SectionHeader } from '@/components/ui/MediaRow'
 import { ContinueCard } from '@/components/ui/ContinueCard'
 import type { Channel, WatchProgress, TmdbMeta } from '@/types'
 import { useTmdbEnrich } from '@/hooks/useTmdbEnrich'
+import { useBecauseYouWatched, type RecSource } from '@/hooks/useBecauseYouWatched'
 import { useT } from '@/lib/i18n'
 
 export function HomePage() {
@@ -189,66 +190,47 @@ export function HomePage() {
       })
   }, [series])
 
-  // "Because you watched X"
-  const recommendations = useMemo(() => {
+  // "Because you watched X": the title most recently watched through (or past
+  // half), and TMDB's recommendations for it that are here and not yet seen.
+  const recSource = useMemo((): (RecSource & { watchedIds: Set<string>; watchedShowKeys: Set<string> }) | null => {
     if (!recentProgress?.length || !channels.length) return null
     const chanById = new Map(channels.filter((c) => isVisible(c, excluded)).map((c) => [c.id, c]))
-
     const watchedChannels = recentProgress
       .filter((p) => p.completed || (p.duration > 0 && p.position / p.duration > 0.5))
       .map((p) => chanById.get(p.channelId))
       .filter(Boolean) as Channel[]
-
     if (!watchedChannels.length) return null
-
     const source = watchedChannels[0]
-    const sourceKey =
-      source.type === 'series' && source.showName
-        ? normalizeShowKey(source.showName)
-        : source.id
-
-    const watchedIds = new Set(watchedChannels.map((c) => c.id))
-    const watchedShowKeys = new Set(
-      watchedChannels.map((c) =>
-        c.type === 'series' && c.showName ? normalizeShowKey(c.showName) : c.id,
+    const isShow = source.type === 'series' && Boolean(source.showName)
+    return {
+      channel: source,
+      key: isShow ? normalizeShowKey(source.showName!) : source.id,
+      kind: isShow ? 'tv' : 'movie',
+      watchedIds: new Set(watchedChannels.map((c) => c.id)),
+      watchedShowKeys: new Set(
+        watchedChannels.filter((c) => c.type === 'series').map((c) => normalizeShowKey(c.showName ?? c.name)),
       ),
-    )
-
-    const dismissed = dismissedRecKeys ?? new Set<string>()
-    const pool: Channel[] = []
-    for (const m of movies) {
-      if (!watchedIds.has(m.id) && !dismissed.has(`ch:${m.id}`)) pool.push(m)
     }
-    const seenShows = new Set<string>()
-    for (const ch of series) {
-      const k = normalizeShowKey(ch.showName ?? ch.name)
-      if (!seenShows.has(k) && !watchedShowKeys.has(k) && !dismissed.has(`show:${k}`)) {
-        seenShows.add(k)
-        pool.push(ch)
-      }
-    }
-
-    const sameGroup = pool.filter((c) => c.groupTitle === source.groupTitle)
-    const candidates = sameGroup.length >= 4 ? sameGroup : pool
-    if (!candidates.length) return null
-
-    const shuffled = [...candidates].sort(() => Math.random() - 0.5).slice(0, 16)
-    const title = source.movieTitle ?? source.showName ?? source.name
-    return { title, sourceKey, items: shuffled }
-  }, [recentProgress, channels, movies, series, dismissedRecKeys, excluded])
+  }, [recentProgress, channels, excluded])
 
   const enrichTargets = useMemo(
     () => [
       ...continueWatching.map((x) => x.channel),
       ...recentMovies,
       ...recentShows,
-      ...(recommendations?.items ?? []),
+      ...(recSource ? [recSource.channel] : []),
       ...movieGenreRows.flatMap((r) => r.items),
       ...showGenreRows.flatMap((r) => r.items),
     ],
-    [continueWatching, recentMovies, recentShows, recommendations, movieGenreRows, showGenreRows],
+    [continueWatching, recentMovies, recentShows, recSource, movieGenreRows, showGenreRows],
   )
   const tmdbMap = useTmdbEnrich(enrichTargets)
+
+  const recommendations = useBecauseYouWatched(recSource, recSource ? tmdbMap.get(recSource.key) : undefined, (key) => {
+    if (!recSource) return true
+    if (recSource.kind === 'movie') return recSource.watchedIds.has(key) || Boolean(progressMap?.[key]?.completed) || Boolean(dismissedRecKeys?.has(`ch:${key}`))
+    return recSource.watchedShowKeys.has(key) || Boolean(dismissedRecKeys?.has(`show:${key}`))
+  })
 
   // TMDB genre rows for movies — populates progressively as enrichment happens
   const tmdbMovieGenreRows = useMemo(() => {
@@ -503,38 +485,23 @@ export function HomePage() {
         {recommendations && recommendations.items.length > 0 && (
           <section>
             <SectionHeader
-              title={t('home.becauseYouWatched', {
-                title: tmdbMap.get(recommendations.sourceKey)?.title ?? recommendations.title,
-              })}
+              title={t('home.becauseYouWatched', { title: recommendations.title })}
             />
             <ScrollableRow>
-              {recommendations.items.map((ch) => {
-                const key =
-                  ch.type === 'series' && ch.showName
-                    ? normalizeShowKey(ch.showName)
-                    : ch.id
-                return (
-                  <div key={ch.id} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
-                    <MovieCard
-                      channel={ch}
-                      tmdbMeta={tmdbMap.get(key)}
-                      isWatchLater={watchLaterSet.has(key)}
-                      onClick={() => {
-                        if (ch.type === 'series' && ch.showName) {
-                          navigate(
-                            `/series?show=${encodeURIComponent(normalizeShowKey(ch.showName))}`,
-                          )
-                        } else {
-                          openMovie(ch, tmdbMap.get(key) ?? null)
-                        }
-                      }}
-                      onWatchLater={(e) =>
-                        toggleWatchLater(key, ch.type === 'series' ? 'series' : 'movie', e)
-                      }
-                    />
-                  </div>
-                )
-              })}
+              {recommendations.items.map(({ channel: ch, key, meta }) => (
+                <div key={key} className="flex-shrink-0 w-40 sm:w-44 lg:w-48 snap-start">
+                  <MovieCard
+                    channel={ch}
+                    tmdbMeta={tmdbMap.get(key) ?? meta}
+                    isWatchLater={watchLaterSet.has(key)}
+                    onClick={() => {
+                      if (ch.type === 'series') navigate(`/series?show=${encodeURIComponent(key)}`)
+                      else openMovie(ch, tmdbMap.get(key) ?? meta)
+                    }}
+                    onWatchLater={(e) => toggleWatchLater(key, ch.type === 'series' ? 'series' : 'movie', e)}
+                  />
+                </div>
+              ))}
             </ScrollableRow>
           </section>
         )}
