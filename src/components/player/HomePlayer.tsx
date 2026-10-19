@@ -14,6 +14,7 @@ import { SubtitleSizePicker } from '@/components/ui/SubtitleSizePicker'
 import { useLocale, useT } from '@/lib/i18n'
 import { isKiosk } from '@/lib/kiosk'
 import { markHomePlayerFailed, setHomePlayerBridge } from '@/lib/homePlayerBridge'
+import { playsHlsItself } from '@/lib/nativeHls'
 
 const REPORT_EVERY_MS = 10_000
 
@@ -128,19 +129,27 @@ export function HomePlayer() {
         setSubs(source.subtitles)
         setChosen(here)
 
-        if (source.hls && !video.canPlayType('application/vnd.apple.mpegurl')) {
-          const HlsLib = (await import('hls.js')).default
-          if (cancelled) return
-          if (!HlsLib.isSupported()) throw new Error('no MSE')
-          hls = new HlsLib({ startPosition: startAt > 0 ? startAt : -1 })
-          hls.on(HlsLib.Events.ERROR, (_e, data) => { if (data.fatal) { setFailed(true); markHomePlayerFailed(video) } })
-          hls.loadSource(source.url)
-          hls.attachMedia(video)
-        } else {
-          video.src = source.url
+        const playDirect = (url: string) => {
+          video.src = url
           if (startAt > 0) {
             video.addEventListener('loadedmetadata', () => { video.currentTime = startAt }, { once: true })
           }
+        }
+        if (source.hls && !playsHlsItself(video)) {
+          const HlsLib = (await import('hls.js')).default
+          if (cancelled) return
+          if (HlsLib.isSupported()) {
+            hls = new HlsLib({ startPosition: startAt > 0 ? startAt : -1 })
+            hls.on(HlsLib.Events.ERROR, (_e, data) => { if (data.fatal) { setFailed(true); markHomePlayerFailed(video) } })
+            hls.loadSource(source.url)
+            hls.attachMedia(video)
+          } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            playDirect(source.url)
+          } else {
+            throw new Error('no MSE')
+          }
+        } else {
+          playDirect(source.url)
         }
         // May be refused outside the tap that opened the player (iOS). The controls
         // then show a play button, which is the right fallback.

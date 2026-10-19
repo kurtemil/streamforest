@@ -240,8 +240,10 @@ from Caddy on the server, via a DNS-01 challenge.
   server. None of VideoPlayer's proxy machinery applies, and none of it should be
   at risk from this. Use the `TranscodingUrl` from `PlaybackInfo` as given (12.x
   hides the HLS routes from its API description). It carries `ApiKey=` because
-  native HLS cannot send headers. Edge and Safari play it natively, other
-  browsers through hls.js.
+  native HLS cannot send headers. Only Apple's engine plays it natively
+  (`lib/nativeHls.ts`); everything else goes through hls.js. Chromium 155 answers
+  "maybe" to `canPlayType` and then cannot parse the playlist, so asking it is not
+  enough (found on the kiosk, 2026-10-19).
 - **Watch state is Jellyfin's.** Start, progress every 10 s and on pause, and
   stopped on close. That is what lets Swiftfin and this app resume each other.
   Jellyfin ignores positions under 5 % of the runtime, so a quick test leaves no
