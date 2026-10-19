@@ -1,41 +1,61 @@
 import { useEffect, useRef, useState } from 'react'
 import { HomePlayer } from '@/components/player/HomePlayer'
+import { VideoPlayer } from '@/components/player/VideoPlayer'
 import { useHomeLibraryStore } from '@/stores/homeLibraryStore'
-import { getProfile, useProfileStore } from '@/stores/profileStore'
+import { usePlayerStore } from '@/stores/playerStore'
+import { usePlaylistStore } from '@/stores/playlistStore'
+import { getProfile, useProfileStore, type Profile } from '@/stores/profileStore'
 import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
-import { backdropUrl, type HomeItem } from '@/services/jellyfin'
-import { pollBion, putBionStatus, type BionCommand, type BionStatus } from '@/services/bion'
-import { getHomePlayerBridge, seekTarget } from '@/lib/homePlayerBridge'
+import { channelTitle } from '@/stores/bionStore'
+import { syncFromRemote } from '@/services/sync'
+import { clearProgress } from '@/services/db'
+import { backdropUrl } from '@/services/jellyfin'
+import { pollBion, putBionStatus, type BionCommand, type BionSource, type BionStatus } from '@/services/bion'
+import { getPlayerBridge, seekTarget } from '@/lib/playerBridge'
 import { progressPercent } from '@/lib/progress'
 import { t, useLocale, useT, INTL_TAGS } from '@/lib/i18n'
 
 const POLL_MS = 2_000
 /** Status writes while a film is on; the phone's remote follows these. */
 const STATUS_EVERY_MS = 5_000
-/** While idle, only often enough for the phone to know the kiosk is alive. */
+/** While idle, only often enough for the phone to know the kiosk is switched on. */
 const IDLE_STATUS_EVERY_MS = 60_000
 const FAILED_SHOWN_MS = 12_000
+/** A film that has ended with no next episode coming is put away after this long. */
+const ENDED_CLOSE_MS = 15_000
 /** How often an idle kiosk looks for a newer build. It has no service worker and is never reloaded by hand. */
 const UPDATE_CHECK_MS = 10 * 60_000
 
 type Phase =
   | { state: 'idle' }
-  | { state: 'loading'; item?: HomeItem }
+  | { state: 'loading'; title?: string; backdrop?: string | null }
   | { state: 'failed'; message: string }
 
-interface Live { state: BionStatus['state']; position: number; duration: number }
+interface Live { state: BionStatus['state']; position: number; duration: number; live: boolean; ended: boolean }
+
+/** What is open in either player: its id, name and where it came from. */
+interface Film { source: BionSource; id: string; title: string; backdrop: string | null }
+
+function currentFilm(): Film | null {
+  const home = useHomeLibraryStore.getState().playing
+  if (home) return { source: 'home', id: home.id, title: home.name, backdrop: backdropUrl(home) }
+  const channel = usePlayerStore.getState().current
+  if (channel) return { source: 'iptv', id: channel.id, title: channelTitle(channel), backdrop: null }
+  return null
+}
 
 /** Where the film stands, read from the player. Null when nothing is playing. */
 function readLive(): Live | null {
-  const bridge = getHomePlayerBridge()
+  const bridge = getPlayerBridge()
   if (!bridge) return null
   const v = bridge.video
-  if (bridge.failed) return { state: 'failed', position: 0, duration: bridge.duration }
+  const base = { position: bridge.position(), duration: bridge.duration(), live: bridge.live, ended: v.ended }
+  if (bridge.failed) return { ...base, state: 'failed' }
   // Paused at zero is a film that has not started yet, not one somebody paused.
   const state: Live['state'] = v.paused
     ? (v.currentTime > 0 ? 'paused' : 'loading')
     : (v.readyState >= 3 ? 'playing' : 'loading')
-  return { state, position: bridge.offset + v.currentTime, duration: bridge.duration }
+  return { ...base, state }
 }
 
 /** The one build this page was loaded with, by its entry script. */
@@ -45,24 +65,56 @@ function currentBuild(): string | null {
 }
 
 /**
+ * The IPTV playlist, on a kiosk that may never have had one. The same steps a new
+ * phone takes: what is stored, then the address from D1, then a fetch. Shared, so
+ * a play that arrives while it runs waits for the same fetch.
+ */
+let playlistReady: Promise<void> | null = null
+function ensurePlaylist(force = false): Promise<void> {
+  if (playlistReady && !force) return playlistReady
+  playlistReady = (async () => {
+    const store = usePlaylistStore.getState()
+    if (!force) {
+      await store.loadFromDB()
+      if (usePlaylistStore.getState().channels.length > 0) return
+      await store.syncM3uUrlFromRemote()
+    }
+    if (usePlaylistStore.getState().m3uUrl) await usePlaylistStore.getState().refresh()
+  })().catch(() => {})
+  return playlistReady
+}
+
+function closeBoth() {
+  const bridge = getPlayerBridge()
+  if (bridge) bridge.close()
+  useHomeLibraryStore.getState().close()
+  usePlayerStore.getState().close()
+}
+
+/**
  * StreamForest as the kiosk in the basement ("Bion"). No profile picker, no tab
- * bar, no browser controls: an idle screen with the time, and the home player when
- * the phone sends a film. Commands come from /api/bion every two seconds; the
- * status goes back the same way.
+ * bar, no controls on screen: an idle screen with the time, and the home player or
+ * the IPTV player when the phone sends something. Commands come from /api/bion
+ * every two seconds; the status goes back the same way.
  */
 export function KioskApp() {
   const tr = useT()
-  const playing = useHomeLibraryStore((s) => s.playing)
+  const homeOpen = useHomeLibraryStore((s) => s.playing !== null)
+  const iptvOpen = usePlayerStore((s) => s.current !== null)
+  const filmOpen = homeOpen || iptvOpen
   const [phase, setPhase] = useState<Phase>({ state: 'idle' })
   const [live, setLive] = useState<Live | null>(null)
   const phaseRef = useRef(phase)
   phaseRef.current = phase
 
+  // The playlist is fetched once up front, so the first IPTV film starts as fast as a home one.
+  useEffect(() => { void ensurePlaylist() }, [])
+
   // Back to idle when the film is closed or has ended, unless a failure is showing.
   useEffect(() => {
-    if (playing) setPhase((p) => (p.state === 'loading' ? { state: 'idle' } : p))
+    if (filmOpen) setPhase((p) => (p.state === 'loading' ? { state: 'idle' } : p))
     else setPhase((p) => (p.state === 'failed' ? p : { state: 'idle' }))
-  }, [playing])
+  }, [filmOpen])
 
   useEffect(() => {
     if (phase.state !== 'failed') return
@@ -73,9 +125,17 @@ export function KioskApp() {
   // A film the player could not open is shown as failed for a while, then put away.
   useEffect(() => {
     if (live?.state !== 'failed') return
-    const timer = window.setTimeout(() => useHomeLibraryStore.getState().close(), FAILED_SHOWN_MS)
+    const timer = window.setTimeout(closeBoth, FAILED_SHOWN_MS)
     return () => window.clearTimeout(timer)
   }, [live?.state])
+
+  // An ended film with no next episode would otherwise sit on its last frame.
+  // A next episode replaces the player's bridge within ten seconds and resets this.
+  useEffect(() => {
+    if (!live?.ended) return
+    const timer = window.setTimeout(() => { if (getPlayerBridge()?.video.ended) closeBoth() }, ENDED_CLOSE_MS)
+    return () => window.clearTimeout(timer)
+  }, [live?.ended])
 
   // Commands. The first poll only learns where the queue stands, so a restart never
   // replays a film somebody asked for before it.
@@ -84,34 +144,55 @@ export function KioskApp() {
     let after: number | null = null
     let timer = 0
 
-    const start = async (c: Extract<BionCommand, { type: 'play' }>) => {
-      const profile = getProfile(c.profileId)
-      if (!profile) return
-      const home = useHomeLibraryStore.getState()
-      home.close()
-      setPhase({ state: 'loading' })
+    const become = async (profile: Profile) => {
       useProfileStore.getState().setProfile(profile.id)
-      // Subtitle language and size are the profile's, as on the phone.
-      await usePlaybackPrefsStore.getState().syncFromRemote(profile.id).catch(() => {})
+      // Subtitle language and size, and (for IPTV) where each film was left, are the
+      // profile's, as on the phone. Home films keep their positions in Jellyfin.
+      await Promise.all([
+        usePlaybackPrefsStore.getState().syncFromRemote(profile.id).catch(() => {}),
+        syncFromRemote(profile.id),
+      ])
+    }
+
+    const startHome = async (c: Extract<BionCommand, { type: 'play' }>, profile: Profile) => {
+      await become(profile)
+      const home = useHomeLibraryStore.getState()
       await home.load(profile.id, profile.name)
       const fresh = useHomeLibraryStore.getState()
       const item = fresh.status === 'ready' ? fresh.items.find((i) => i.id === c.itemId) : undefined
-      if (!item) {
-        setPhase({ state: 'failed', message: t('bion.notFound', { name: profile.name }) })
-        return
-      }
-      setPhase({ state: 'loading', item })
+      if (!item) return setPhase({ state: 'failed', message: t('bion.notFound', { name: profile.name }) })
+      setPhase({ state: 'loading', title: item.name, backdrop: backdropUrl(item) })
       fresh.play(item, { fromStart: c.fromStart })
     }
 
+    const startIptv = async (c: Extract<BionCommand, { type: 'play' }>, profile: Profile) => {
+      setPhase({ state: 'loading' })
+      await become(profile)
+      await ensurePlaylist()
+      const find = () => usePlaylistStore.getState().channels.find((ch) => ch.id === c.itemId)
+      let channel = find()
+      // The phone's playlist may be newer than this one.
+      if (!channel) { await ensurePlaylist(true); channel = find() }
+      if (!channel) return setPhase({ state: 'failed', message: t('bion.notFound', { name: profile.name }) })
+      if (c.fromStart) await clearProgress(profile.id, channel.id).catch(() => {})
+      setPhase({ state: 'loading', title: channelTitle(channel) })
+      usePlayerStore.getState().play(channel)
+    }
+
     const apply = async (c: BionCommand) => {
-      const video = getHomePlayerBridge()?.video
-      if (c.type === 'play') return start(c)
-      if (c.type === 'stop') { useHomeLibraryStore.getState().close(); return }
-      if (!video) return
-      if (c.type === 'pause') video.pause()
-      if (c.type === 'resume') void video.play().catch(() => {})
-      if (c.type === 'seek') video.currentTime = seekTarget(video.currentTime, c.by, video.duration)
+      if (c.type === 'play') {
+        const profile = getProfile(c.profileId)
+        if (!profile) return
+        closeBoth()
+        setPhase({ state: 'loading' })
+        return c.source === 'iptv' ? startIptv(c, profile) : startHome(c, profile)
+      }
+      if (c.type === 'stop') { closeBoth(); return }
+      const bridge = getPlayerBridge()
+      if (!bridge) return
+      if (c.type === 'pause') bridge.video.pause()
+      if (c.type === 'resume') void bridge.video.play().catch(() => {})
+      if (c.type === 'seek' && !bridge.live) bridge.seek(seekTarget(bridge.position(), c.by, bridge.duration()))
     }
 
     const loop = async () => {
@@ -132,29 +213,32 @@ export function KioskApp() {
     return () => { alive = false; window.clearTimeout(timer) }
   }, [])
 
-  // Status, every second read and written when it changes, or as often as the phone needs it.
+  // Status, read every second and written when it changes, or as often as the phone needs it.
   useEffect(() => {
     let sentKey = ''
     let sentAt = 0
     const timer = window.setInterval(() => {
       const current = readLive()
-      setLive((prev) => (prev?.state === current?.state && Math.floor(prev?.position ?? 0) === Math.floor(current?.position ?? 0) ? prev : current))
-      const film = useHomeLibraryStore.getState().playing
+      setLive((prev) => (prev && current && prev.state === current.state && prev.ended === current.ended &&
+        Math.floor(prev.position) === Math.floor(current.position) ? prev : current))
+      const film = currentFilm()
       const p = phaseRef.current
       const status: Omit<BionStatus, 'updated'> = film && current?.state === 'failed'
-        ? { state: 'failed', itemId: film.id, title: t('home.playFailed') }
+        ? { state: 'failed', source: film.source, itemId: film.id, title: t('home.playFailed') }
         : film && current
         ? {
             state: current.state,
+            source: film.source,
+            live: current.live || undefined,
             profileId: useProfileStore.getState().activeProfileId ?? undefined,
             itemId: film.id,
-            title: film.name,
-            position: Math.round(current.position),
-            duration: Math.round(current.duration),
+            title: film.title,
+            position: current.live ? undefined : Math.round(current.position),
+            duration: current.live ? undefined : Math.round(current.duration),
           }
-        : p.state === 'loading' ? { state: 'loading', itemId: p.item?.id, title: p.item?.name }
+        : p.state === 'loading' ? { state: 'loading', title: p.title }
         : p.state === 'failed' ? { state: 'failed', title: p.message }
-        : { state: film ? 'loading' : 'idle' }
+        : { state: film ? 'loading' : 'idle', title: film?.title }
       const key = `${status.state}|${status.itemId ?? ''}|${status.title ?? ''}`
       const now = Date.now()
       const every = status.state === 'idle' ? IDLE_STATUS_EVERY_MS : STATUS_EVERY_MS
@@ -172,7 +256,7 @@ export function KioskApp() {
     const mine = currentBuild()
     if (!mine) return
     const timer = window.setInterval(async () => {
-      if (useHomeLibraryStore.getState().playing || phaseRef.current.state !== 'idle') return
+      if (currentFilm() || phaseRef.current.state !== 'idle') return
       try {
         const html = await (await fetch('/', { cache: 'no-store' })).text()
         if (!html.includes(mine)) window.location.reload()
@@ -181,27 +265,27 @@ export function KioskApp() {
     return () => window.clearInterval(timer)
   }, [])
 
-  const film = playing
-  const loadingItem = phase.state === 'loading' ? phase.item ?? null : null
-  const showLoading = phase.state === 'loading' || (film && (!live || live.state === 'loading'))
-  // The player shows its own failure line over the picture; the loading screen must not cover it.
+  const film = filmOpen ? currentFilm() : null
   const filmFailed = live?.state === 'failed'
-  const loadingTitle = film?.name ?? loadingItem?.name
+  const showLoading = !filmFailed && (phase.state === 'loading' || (film && (!live || live.state === 'loading')))
+  const loadingTitle = phase.state === 'loading' ? phase.title ?? film?.title : film?.title
+  const loadingBackdrop = phase.state === 'loading' && phase.backdrop !== undefined ? phase.backdrop : film?.backdrop ?? null
 
   return (
     <div className="fixed inset-0 bg-black text-white cursor-none select-none overflow-hidden">
       {!film && phase.state !== 'loading' && <Idle message={phase.state === 'failed' ? phase.message : null} />}
       <HomePlayer />
-      {showLoading && !filmFailed && (
-        <Loading title={loadingTitle} backdrop={(film ?? loadingItem) ? backdropUrl((film ?? loadingItem)!) : null} />
-      )}
+      <VideoPlayer />
+      {showLoading && <Loading title={loadingTitle} backdrop={loadingBackdrop} />}
       {film && live?.state === 'paused' && (
         <div className="fixed inset-x-0 bottom-0 z-[60] px-16 pb-14 pt-40 bg-gradient-to-t from-black/90 via-black/60 to-transparent">
           <p className="text-2xl text-white/60">{tr('bion.pausedLabel')}</p>
-          <p className="mt-1 text-5xl font-semibold tracking-tight">{film.name}</p>
-          <div className="mt-6 h-1.5 rounded-full bg-white/15 overflow-hidden">
-            <div className="h-full bg-white/80" style={{ width: `${progressPercent(live.position, live.duration)}%` }} />
-          </div>
+          <p className="mt-1 text-5xl font-semibold tracking-tight">{film.title}</p>
+          {!live.live && (
+            <div className="mt-6 h-1.5 rounded-full bg-white/15 overflow-hidden">
+              <div className="h-full bg-white/80" style={{ width: `${progressPercent(live.position, live.duration)}%` }} />
+            </div>
+          )}
         </div>
       )}
     </div>

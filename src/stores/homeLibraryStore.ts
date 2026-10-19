@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useBionStore } from '@/stores/bionStore'
 import {
   forgetSession, getSession, isAuthError, isReachable, listItems, localNetworkPermission, setPlayed,
   type HomeItem, type JellyfinSession,
@@ -124,6 +125,14 @@ export const useHomeLibraryStore = create<HomeLibraryState>((set, get) => ({
   // at 0. A split film starts over in every part: its watched parts are unmarked,
   // or the film would still count them as seen.
   play: (item, opts) => {
+    // Bion mode sends it to the kiosk, which plays it as this same profile.
+    const bion = useBionStore.getState()
+    const profileId = get().profileId
+    if (bion.mode && profileId) {
+      set({ detail: null })
+      void bion.playHome(item, profileId, opts?.fromStart)
+      return
+    }
     if (!opts?.fromStart) { set({ playing: item, detail: null }); return }
     const { session } = get()
     if (session && item.parts?.some((p) => p.played)) {

@@ -60,7 +60,9 @@ export function cleanCommand(raw: unknown): Record<string, unknown> | null {
   if (typeof c.type !== 'string' || !COMMAND_TYPES.has(c.type)) return null
   if (c.type === 'play') {
     if (typeof c.profileId !== 'string' || typeof c.itemId !== 'string') return null
-    return { type: 'play', profileId: c.profileId, itemId: c.itemId, fromStart: c.fromStart === true }
+    // `home` is the home server's Jellyfin, `iptv` the playlist. Older phones sent no source.
+    const source = c.source === 'iptv' ? 'iptv' : 'home'
+    return { type: 'play', source, profileId: c.profileId, itemId: c.itemId, fromStart: c.fromStart === true }
   }
   if (c.type === 'seek') {
     const by = Number(c.by)

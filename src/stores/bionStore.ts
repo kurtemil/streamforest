@@ -1,71 +1,119 @@
 import { create } from 'zustand'
 import { isBionActive, pollBion, sendBion, STATUS_FRESH_MS, type BionCommand, type BionStatus } from '@/services/bion'
+import { isKiosk } from '@/lib/kiosk'
 import type { HomeItem } from '@/services/jellyfin'
+import type { Channel } from '@/types'
 
 /** How long "starting on Bion" is shown before the kiosk's own status has to take over. */
 const PENDING_MS = 15_000
+/** The kiosk writes its idle status every minute; this is how long it counts as switched on. */
+export const ALIVE_MS = 150_000
+const MODE_KEY = 'sf-bion-mode'
+
+function readMode(): boolean {
+  try { return !isKiosk() && localStorage.getItem(MODE_KEY) === '1' } catch { return false }
+}
 
 interface BionState {
+  /**
+   * Bion mode, per device: every Play in the app goes to the kiosk in the basement
+   * instead of playing here. An old iPad can stay in it and be the cinema's remote.
+   * Never on the kiosk itself, which would send its films to itself.
+   */
+  mode: boolean
   status: BionStatus | null
   /** Server clock minus this device's, from the last poll: `status.updated` is server time. */
   clockSkew: number
   /** A film just sent, shown until the kiosk reports it. */
   pending: { title: string; at: number } | null
   failed: boolean
+  setMode: (on: boolean) => void
   poll: () => Promise<void>
-  /** Starts a home film on Bion as this profile, where this profile left it unless `fromStart`. */
-  play: (item: HomeItem, profileId: string, fromStart?: boolean) => Promise<boolean>
+  /** A home-library film, as this profile, where this profile left it unless `fromStart`. */
+  playHome: (item: HomeItem, profileId: string, fromStart?: boolean) => Promise<boolean>
+  /** An IPTV film, episode or channel, by the id every device parses from the playlist. */
+  playIptv: (channel: Channel, profileId: string) => Promise<boolean>
   send: (command: Exclude<BionCommand, { type: 'play' }>) => Promise<void>
 }
 
-export const useBionStore = create<BionState>((set, get) => ({
-  status: null,
-  clockSkew: 0,
-  pending: null,
-  failed: false,
+/** What the phone shows while it waits: the film's name, as the cards show it. */
+export function channelTitle(c: Channel): string {
+  if (c.type === 'series' && c.showName) {
+    const s = c.season !== undefined ? `S${String(c.season).padStart(2, '0')}` : ''
+    const e = c.episode !== undefined ? `E${String(c.episode).padStart(2, '0')}` : ''
+    return `${c.showName}${s || e ? ` · ${s}${e}` : ''}`
+  }
+  return c.movieTitle ?? c.name
+}
 
-  async poll() {
-    const result = await pollBion()
-    if (!result) return
-    const pending = get().pending
-    // The kiosk has taken the film over once it reports anything but idle after it was sent.
-    const reported = result.status && result.status.updated !== undefined && pending &&
-      result.status.state !== 'idle' && result.status.updated >= pending.at + get().clockSkew
-    set({
-      status: result.status,
-      clockSkew: result.now - Date.now(),
-      pending: reported || (pending && Date.now() - pending.at > PENDING_MS) ? null : pending,
-    })
-  },
-
-  async play(item, profileId, fromStart) {
-    set({ pending: { title: item.name, at: Date.now() }, failed: false })
-    const ok = await sendBion({ type: 'play', profileId, itemId: item.id, fromStart })
+export const useBionStore = create<BionState>((set, get) => {
+  const start = async (title: string, command: Extract<BionCommand, { type: 'play' }>) => {
+    set({ pending: { title, at: Date.now() }, failed: false })
+    const ok = await sendBion(command)
     if (!ok) set({ pending: null, failed: true })
     return ok
-  },
+  }
 
-  async send(command) {
-    // Shown at once; the next poll puts back whatever the kiosk actually did.
-    const status = get().status
-    if (status) {
-      if (command.type === 'pause') set({ status: { ...status, state: 'paused' } })
-      if (command.type === 'resume') set({ status: { ...status, state: 'playing' } })
-      if (command.type === 'seek' && status.position !== undefined) {
-        set({ status: { ...status, position: Math.max(0, status.position + command.by) } })
+  return {
+    mode: readMode(),
+    status: null,
+    clockSkew: 0,
+    pending: null,
+    failed: false,
+
+    setMode(on) {
+      if (isKiosk()) return
+      try { if (on) localStorage.setItem(MODE_KEY, '1'); else localStorage.removeItem(MODE_KEY) } catch { /* the choice lasts the visit */ }
+      set({ mode: on, failed: false })
+    },
+
+    async poll() {
+      const result = await pollBion()
+      if (!result) return
+      const pending = get().pending
+      // The kiosk has taken the film over once it reports anything but idle after it was sent.
+      const reported = result.status && result.status.updated !== undefined && pending &&
+        result.status.state !== 'idle' && result.status.updated >= pending.at + get().clockSkew
+      set({
+        status: result.status,
+        clockSkew: result.now - Date.now(),
+        pending: reported || (pending && Date.now() - pending.at > PENDING_MS) ? null : pending,
+      })
+    },
+
+    playHome: (item, profileId, fromStart) =>
+      start(item.name, { type: 'play', source: 'home', profileId, itemId: item.id, fromStart }),
+
+    playIptv: (channel, profileId) =>
+      start(channelTitle(channel), { type: 'play', source: 'iptv', profileId, itemId: channel.id }),
+
+    async send(command) {
+      // Shown at once; the next poll puts back whatever the kiosk actually did.
+      const status = get().status
+      if (status) {
+        if (command.type === 'pause') set({ status: { ...status, state: 'paused' } })
+        if (command.type === 'resume') set({ status: { ...status, state: 'playing' } })
+        if (command.type === 'seek' && status.position !== undefined) {
+          set({ status: { ...status, position: Math.max(0, status.position + command.by) } })
+        }
+        if (command.type === 'stop') set({ status: { ...status, state: 'idle' }, pending: null })
       }
-      if (command.type === 'stop') set({ status: { ...status, state: 'idle' }, pending: null })
-    }
-    const ok = await sendBion(command)
-    set({ failed: !ok })
-  },
-}))
+      const ok = await sendBion(command)
+      set({ failed: !ok })
+    },
+  }
+})
 
-/** Whether the remote should be on screen, by this device's clock. */
+/** Whether something is on Bion, or about to be, by this device's clock. */
 export function bionVisible(s: Pick<BionState, 'status' | 'clockSkew' | 'pending'>, now = Date.now()): boolean {
   if (s.pending && now - s.pending.at <= PENDING_MS) return true
   // A film the kiosk could not start stays on screen long enough to be read.
   const st = s.status
   if (st?.state === 'failed' && st.updated !== undefined && now + s.clockSkew - st.updated <= STATUS_FRESH_MS) return true
   return isBionActive(st, now + s.clockSkew)
+}
+
+/** Whether the kiosk has been heard from lately, idle or not. */
+export function bionAlive(s: Pick<BionState, 'status' | 'clockSkew'>, now = Date.now()): boolean {
+  return s.status?.updated !== undefined && now + s.clockSkew - s.status.updated <= ALIVE_MS
 }

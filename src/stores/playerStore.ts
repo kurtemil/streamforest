@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import type { Channel } from '@/types'
 import { toPlaylistHost } from '@/lib/provider'
 import { usePlaylistStore } from '@/stores/playlistStore'
+import { useBionStore } from '@/stores/bionStore'
+import { useProfileStore } from '@/stores/profileStore'
 
 interface PlayerState {
   current: Channel | null
@@ -32,6 +34,11 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   // provider's dead panel domain is pointed at the host the playlist comes from.
   // The stored catalogue may predate the move; the URL is fixed on the way out.
   play: (channel) => {
+    // Bion mode: the film goes to the kiosk in the basement instead of playing here.
+    // This is the one door every Play goes through, so no card needs to know.
+    const bion = useBionStore.getState()
+    const profileId = useProfileStore.getState().activeProfileId
+    if (bion.mode && profileId) { void bion.playIptv(channel, profileId); return }
     const url = toPlaylistHost(channel.url, usePlaylistStore.getState().m3uUrl)
     set({ current: url === channel.url ? channel : { ...channel, url }, playing: true })
   },

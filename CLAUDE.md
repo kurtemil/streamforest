@@ -313,10 +313,17 @@ compositor). Its container lives in the `hemma` repo, `bio/kiosk/`, and opens
 `/?kiosk=bion`. Nobody touches it: there is no keyboard or mouse in the sofa.
 
 - **`src/lib/kiosk.ts`** decides it once, from `?kiosk=` kept in localStorage
-  (`?kiosk=off` clears it). `main.tsx` then renders `KioskApp` instead of `App`, and
-  registers no service worker: `autoUpdate` would reload the page in the middle of a
-  film. `KioskApp` instead reloads itself while idle when `/` names another entry
-  script (every 10 minutes).
+  (`?kiosk=off` clears it). `main.tsx` then renders `KioskApp` instead of `App`
+  (inside the router: VideoPlayer navigates), and registers no service worker:
+  `autoUpdate` would reload the page in the middle of a film. `KioskApp` reloads
+  itself while idle when `/` names another entry script (every 10 minutes).
+- **Bion mode on the phone** (`stores/bionStore.ts`, `mode`, per device in
+  `sf-bion-mode`): the TV button above the profile avatar turns it on, and then
+  *every* Play goes to Bion instead of playing here. The two doors are
+  `usePlayerStore.play` (IPTV) and `useHomeLibraryStore.play` (home library); no
+  card knows about Bion. An old iPad can stay in this mode as the cinema remote.
+  The mode can never be on in the kiosk itself. The button shows while the kiosk
+  has been heard from (`ALIVE_MS`, its idle heartbeat is a minute) or the mode is on.
 - **`/api/bion`** (`functions/api/bion.ts`) is two D1 tables: a command queue and one
   status row. The kiosk polls `GET ?device=bion&after=<seq>` every 2 s; its first
   poll has no `after` and only learns the cursor, so a restart never replays an old
@@ -324,26 +331,32 @@ compositor). Its container lives in the `hemma` repo, `bio/kiosk/`, and opens
   `POST`s commands (`play`, `pause`, `resume`, `seek`, `stop`) and reads the status
   the kiosk `PUT`s every 5 s while a film is on (60 s while idle). About 43 000
   requests a day with the kiosk on all day, a few rows each.
-- **Playing as the phone's profile.** A `play` carries the profile and the Jellyfin
-  item id. The kiosk switches to that profile, signs in as that Jellyfin user, finds
-  the item in that user's list and plays it with `HomePlayer`. So the resume point,
-  the subtitle choice and the kids' allowlist are the same as on the phone, and an
-  item the profile may not see fails with a line on the screen instead of playing.
-- **`HomePlayer` on the kiosk** has no top bar and no browser controls, closes when
-  the last part ends, and registers its `<video>` in `lib/homePlayerBridge.ts`.
-  Pause, seek and the reported position go through that bridge; the position is
-  film time across parts (`offset` + `currentTime`).
-- **The phone:** `HomeDetailModal` has *Spela på Bion* wherever the home library is
-  `ready` (the same network condition Bion needs). `BionRemote` floats above the tab
-  bar while the status is fresh (`STATUS_FRESH_MS`) and something is on, polling
-  every 2.5 s then and every 15 s otherwise, only while visible and only where the
-  home library answers. `status.updated` is server time; the store keeps the clock
-  skew from the poll's `now` so a phone with a wrong clock still judges freshness
-  right.
-- **Tests:** `src/lib/bion-api.test.ts` runs the API against an in-memory D1 and
-  pins the visibility and seek rules. The kiosk itself is checked on the real
-  machine over the DevTools protocol (`KIOSK_FLAGS=--remote-debugging-port=9222`,
-  see `hemma/hemmabio.md`).
+- **`play` carries a source.** `home`: a Jellyfin item id; the kiosk becomes that
+  profile, signs in as that Jellyfin user and plays it with `HomePlayer`, so resume
+  point, subtitles and the kids' allowlist are the phone's. `iptv`: a playlist id
+  (`m_…`, `s_…`, `l_…` — parsed from the stream URL, so the same on every device);
+  the kiosk syncs the profile's progress from D1, looks the id up in its own
+  playlist (fetched on first use, and once more if the id is missing — the phone's
+  may be newer) and plays it with `VideoPlayer`, which resumes from that progress.
+  A missing source is `home`: what the first phones sent.
+- **Both players register in `lib/playerBridge.ts`**: the `<video>`, film-time
+  `position()` and `duration()`, `seek(to)` and `close()`. Film time is across the
+  parts of a split film (HomePlayer) and past the offset a transcoded stream starts
+  at (VideoPlayer's `seekTo`, which restarts ffmpeg when the target is not
+  buffered). `close()` is the player's own close, so the position is saved. Live
+  TV has no duration and no seek. On the kiosk neither player shows its controls,
+  VideoPlayer's close does not `navigate(-1)` (there is nothing behind the kiosk),
+  and an ended film with no next episode is put away after 15 s.
+- **The remote** (`components/bion/BionRemote.tsx`) floats above the tab bar while
+  the mode is on or something plays on Bion: title and time on one row, the buttons
+  on the next (four 44 px buttons beside the title cut the time off on a phone).
+  It polls every 2.5 s while something is on, 5 s in Bion mode, 15 s otherwise,
+  only while visible. `status.updated` is server time; the store keeps the clock
+  skew from the poll's `now`.
+- **Tests:** `src/lib/bion-api.test.ts` runs the API against an in-memory D1, pins
+  the visibility, alive and seek rules, and checks that Bion mode sends instead of
+  playing. The kiosk itself is checked on the real machine over the DevTools
+  protocol (`KIOSK_FLAGS=--remote-debugging-port=9222`, see `hemma/hemmabio.md`).
 
 ## Feedback-box suggestions, October 2026
 

@@ -13,7 +13,7 @@ import { subtitleFont } from '@/lib/subtitleSize'
 import { SubtitleSizePicker } from '@/components/ui/SubtitleSizePicker'
 import { useLocale, useT } from '@/lib/i18n'
 import { isKiosk } from '@/lib/kiosk'
-import { markHomePlayerFailed, setHomePlayerBridge } from '@/lib/homePlayerBridge'
+import { clearPlayerBridge, markPlayerFailed, setPlayerBridge } from '@/lib/playerBridge'
 import { playsHlsItself } from '@/lib/nativeHls'
 
 const REPORT_EVERY_MS = 10_000
@@ -98,10 +98,20 @@ export function HomePlayer() {
     // The first cursor already starts at 0 below ten seconds (the resume rule);
     // a reopen for another subtitle starts at the very second it left.
     const startAt = cursor.at > 1 ? cursor.at : 0
-    setHomePlayerBridge({
+    // Film time is the parts before this one plus where this file is. A seek stays
+    // inside the file that is playing: crossing into the next part is a new file.
+    const offset = parts.slice(0, cursor.part).reduce((sum, p) => sum + p.durationSec, 0)
+    const total = parts.reduce((sum, p) => sum + p.durationSec, 0)
+    setPlayerBridge({
       video,
-      offset: parts.slice(0, cursor.part).reduce((sum, p) => sum + p.durationSec, 0),
-      duration: parts.reduce((sum, p) => sum + p.durationSec, 0),
+      position: () => offset + video.currentTime,
+      duration: () => total,
+      seek: (to) => {
+        const end = Number.isFinite(video.duration) && video.duration > 0 ? video.duration - 1 : Infinity
+        video.currentTime = Math.max(0, Math.min(end, to - offset))
+      },
+      close: () => useHomeLibraryStore.getState().close(),
+      live: false,
     })
 
     const stop = () => {
@@ -140,7 +150,7 @@ export function HomePlayer() {
           if (cancelled) return
           if (HlsLib.isSupported()) {
             hls = new HlsLib({ startPosition: startAt > 0 ? startAt : -1 })
-            hls.on(HlsLib.Events.ERROR, (_e, data) => { if (data.fatal) { setFailed(true); markHomePlayerFailed(video) } })
+            hls.on(HlsLib.Events.ERROR, (_e, data) => { if (data.fatal) { setFailed(true); markPlayerFailed(video) } })
             hls.loadSource(source.url)
             hls.attachMedia(video)
           } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
@@ -155,7 +165,7 @@ export function HomePlayer() {
         // then show a play button, which is the right fallback.
         video.play().catch(() => {})
       } catch {
-        if (!cancelled) { setFailed(true); markHomePlayerFailed(video) }
+        if (!cancelled) { setFailed(true); markPlayerFailed(video) }
       }
     })()
 
@@ -185,7 +195,7 @@ export function HomePlayer() {
       video.removeEventListener('pause', onPause)
       video.removeEventListener('ended', onEnded)
       stop()
-      setHomePlayerBridge(null)
+      clearPlayerBridge(video)
       hls?.destroy()
       video.removeAttribute('src')
       video.load()

@@ -5,6 +5,8 @@ import { useNavigate } from 'react-router-dom'
 import { usePlayerStore } from '@/stores/playerStore'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { saveProgress, getProgress, clearProgress, getTmdbMeta } from '@/services/db'
+import { isKiosk } from '@/lib/kiosk'
+import { clearPlayerBridge, markPlayerFailed, setPlayerBridge } from '@/lib/playerBridge'
 import { posterUrl, tmdbCacheKey } from '@/services/tmdb'
 import { pushProgress, deleteRemoteProgress } from '@/services/sync'
 import { useProfileStore } from '@/stores/profileStore'
@@ -318,8 +320,9 @@ export function VideoPlayer() {
           .then((entry) => pushProgress(entry))
       }
     }
-    // Live channels don't push a route when opened, so navigate(-1) would leave /live
-    if (current?.type !== 'live') navigate(-1)
+    // Live channels don't push a route when opened, so navigate(-1) would leave /live.
+    // The kiosk never pushed one either, and has nothing behind it to go back to.
+    if (current?.type !== 'live' && !isKiosk()) navigate(-1)
     close()
   }, [navigate, close, current])
 
@@ -1591,6 +1594,33 @@ export function VideoPlayer() {
     if (typeof titlePrefs.subtitleDelay === 'number') setSubtitleDelay(titlePrefs.subtitleDelay)
   }, [titleKey, titlePrefs.subtitleDelay])
 
+  // The kiosk ("Bion") drives this player from the phone through the bridge. Refs,
+  // so the bridge registered when the stream opened always calls the current
+  // seekTo and handleClose rather than the ones from that render.
+  const durationRef = useRef(0)
+  durationRef.current = duration
+  const seekToRef = useRef(seekTo)
+  seekToRef.current = seekTo
+  const handleCloseRef = useRef(handleClose)
+  handleCloseRef.current = handleClose
+  useEffect(() => {
+    const video = videoRef.current
+    if (!current || !video) return
+    const live = current.type === 'live'
+    setPlayerBridge({
+      video,
+      position: () => playbackOffsetRef.current + video.currentTime,
+      duration: () => (live ? 0 : durationRef.current),
+      seek: (to) => seekToRef.current(to),
+      close: () => handleCloseRef.current(),
+      live,
+    })
+    return () => clearPlayerBridge(video)
+  }, [current])
+  useEffect(() => {
+    if (error && videoRef.current) markPlayerFailed(videoRef.current)
+  }, [error])
+
   if (!current) return null
 
   const togglePlay = () => {
@@ -1784,7 +1814,7 @@ export function VideoPlayer() {
         {!minimized && (
           <PlayerControls
             channel={current}
-            visible={showControls}
+            visible={showControls && !isKiosk()}
             isPlaying={isPlaying}
             currentTime={currentTime}
             duration={duration}

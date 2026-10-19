@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Play, Check, RotateCcw, Tv } from 'lucide-react'
+import { Play, Check, RotateCcw } from 'lucide-react'
 import { backdropUrl, getDetails, posterUrl, type HomeDetails } from '@/services/jellyfin'
 import { useHomeLibraryStore } from '@/stores/homeLibraryStore'
 import { resumePoint } from '@/lib/progress'
@@ -7,8 +7,6 @@ import { formatRuntime, useLocale, useT } from '@/lib/i18n'
 import { DetailSheet, sheetButton } from '@/components/ui/DetailSheet'
 import { RelatedHome } from '@/components/home/RelatedRails'
 import { openHomeInVlc } from '@/lib/vlc'
-import { useProfileStore } from '@/stores/profileStore'
-import { useBionStore } from '@/stores/bionStore'
 
 /** People change less often than this sheet is opened; one read per film per visit. */
 const detailsCache = new Map<string, HomeDetails>()
@@ -22,9 +20,7 @@ const detailsCache = new Map<string, HomeDetails>()
 export function HomeDetailModal() {
   const t = useT()
   const locale = useLocale()
-  const { detail: item, items, session, status, closeDetail, openDetail, play, markPlayed } = useHomeLibraryStore()
-  const activeProfileId = useProfileStore((s) => s.activeProfileId)
-  const playOnBion = useBionStore((s) => s.play)
+  const { detail: item, items, session, closeDetail, openDetail, play, markPlayed } = useHomeLibraryStore()
   const [details, setDetails] = useState<HomeDetails | null>(null)
 
   useEffect(() => {
@@ -72,18 +68,6 @@ export function HomeDetailModal() {
             <Play size={16} fill="black" />
             {resume ? t('modal.resume') : t('common.play')}
           </button>
-          {/* Bion, the kiosk in the basement, is on the home network: where the home
-              library answers, it can be reached too. It plays as this profile, so it
-              continues where this profile left off. */}
-          {status === 'ready' && activeProfileId && (
-            <button
-              onClick={() => { void playOnBion(item, activeProfileId); closeDetail() }}
-              className={sheetButton('secondary')}
-            >
-              <Tv size={15} />
-              {resume ? t('bion.resumeOn') : t('bion.playOn')}
-            </button>
-          )}
           {resume && (
             <button onClick={() => play(item, { fromStart: true })} className={sheetButton('secondary')}>
               <RotateCcw size={15} />

@@ -51,10 +51,9 @@ void updateServiceWorker
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {kiosk ? <KioskApp /> : (
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    )}
+    {/* The kiosk is inside the router too: the IPTV player it opens navigates. */}
+    <BrowserRouter>
+      {kiosk ? <KioskApp /> : <App />}
+    </BrowserRouter>
   </StrictMode>,
 )

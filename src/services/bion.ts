@@ -7,8 +7,11 @@ const API = '/api/bion'
 /** The one kiosk there is. A second screen would be a second device name. */
 export const BION_DEVICE = 'bion'
 
+/** Where a film comes from: the home server's Jellyfin, or the IPTV playlist. */
+export type BionSource = 'home' | 'iptv'
+
 export type BionCommand =
-  | { type: 'play'; profileId: string; itemId: string; fromStart?: boolean }
+  | { type: 'play'; source?: BionSource; profileId: string; itemId: string; fromStart?: boolean }
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'seek'; by: number }
@@ -18,6 +21,9 @@ export type BionState = 'idle' | 'loading' | 'playing' | 'paused' | 'failed'
 
 export interface BionStatus {
   state: BionState
+  source?: BionSource
+  /** Live TV: no length, and nothing to seek in. */
+  live?: boolean
   profileId?: string
   itemId?: string
   title?: string

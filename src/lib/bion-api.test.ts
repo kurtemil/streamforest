@@ -1,10 +1,14 @@
 // /api/bion against a small in-memory D1, and the rules the phone and the kiosk
 // read the answers by. Lives here because every file in functions/ is a route.
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanCommand, COMMAND_TTL_MS, onRequest } from '../../functions/api/bion'
 import { isBionActive, STATUS_FRESH_MS } from '@/services/bion'
-import { bionVisible } from '@/stores/bionStore'
-import { seekTarget } from '@/lib/homePlayerBridge'
+import { ALIVE_MS, bionAlive, bionVisible, channelTitle, useBionStore } from '@/stores/bionStore'
+import { usePlayerStore } from '@/stores/playerStore'
+import { useHomeLibraryStore } from '@/stores/homeLibraryStore'
+import { useProfileStore } from '@/stores/profileStore'
+import type { Channel } from '@/types'
+import { seekTarget } from '@/lib/playerBridge'
 
 /** Just enough SQL for the statements bion.ts makes. */
 function memoryDb() {
@@ -62,7 +66,8 @@ describe('/api/bion', () => {
     await call(env, 'POST', '', { device: 'bion', command: { type: 'pause' } })
     const first = await call(env, 'GET', `?device=bion&after=${cursor}`)
     expect(first.body.commands.map((c: { type: string }) => c.type)).toEqual(['play', 'pause'])
-    expect(first.body.commands[0]).toMatchObject({ profileId: 'elof', itemId: 'abc', fromStart: false })
+    // A play without a source is a home film: what the first phones sent.
+    expect(first.body.commands[0]).toMatchObject({ source: 'home', profileId: 'elof', itemId: 'abc', fromStart: false })
 
     const again = await call(env, 'GET', `?device=bion&after=${first.body.latest}`)
     expect(again.body.commands).toEqual([])
@@ -95,6 +100,8 @@ describe('/api/bion', () => {
     expect(cleanCommand({ type: 'seek', by: 99999 })).toEqual({ type: 'seek', by: 3600 })
     expect(cleanCommand({ type: 'seek', by: 0 })).toBeNull()
     expect(cleanCommand({ type: 'pause', extra: 'x' })).toEqual({ type: 'pause' })
+    expect(cleanCommand({ type: 'play', source: 'iptv', profileId: 'elof', itemId: 'm_1' })).toMatchObject({ source: 'iptv' })
+    expect(cleanCommand({ type: 'play', source: 'ftp', profileId: 'elof', itemId: 'm_1' })).toMatchObject({ source: 'home' })
   })
 
   it('keeps the latest status per device, stamped with server time', async () => {
@@ -140,5 +147,60 @@ describe('reading the status', () => {
     expect(seekTarget(5, -10, 100)).toBe(0)
     expect(seekTarget(95, 30, 100)).toBe(99)
     expect(seekTarget(50, 30, Infinity)).toBe(80)
+  })
+})
+
+describe('Bion mode', () => {
+  const channel: Channel = { id: 'm_42', name: 'Arrival [2016]', url: 'http://example.invalid/movie/42.mkv', logo: '', groupTitle: 'VOD', type: 'movie', sortIndex: 0, movieTitle: 'Arrival' }
+  const sent = () => (vi.mocked(fetch).mock.calls as [string, RequestInit][])
+    .filter(([, init]) => init?.method === 'POST')
+    .map(([, init]) => JSON.parse(String(init.body)))
+
+  afterEach(() => {
+    useBionStore.setState({ mode: false, pending: null })
+    usePlayerStore.setState({ current: null })
+    useHomeLibraryStore.setState({ playing: null, profileId: null })
+    vi.unstubAllGlobals()
+  })
+
+  it('sends a Play to Bion instead of opening the player here', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"ok":true}')))
+    useProfileStore.setState({ activeProfileId: 'elof' })
+    useBionStore.setState({ mode: true })
+    usePlayerStore.getState().play(channel)
+    await Promise.resolve()
+    expect(usePlayerStore.getState().current).toBeNull()
+    expect(sent()).toEqual([{ device: 'bion', command: { type: 'play', source: 'iptv', profileId: 'elof', itemId: 'm_42' } }])
+    expect(useBionStore.getState().pending?.title).toBe('Arrival')
+  })
+
+  it('sends a home film as the profile the library was loaded for', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"ok":true}')))
+    useBionStore.setState({ mode: true })
+    useHomeLibraryStore.setState({ profileId: 'vera' })
+    const item = { id: 'jf1', name: 'Paul', durationSec: 6000, positionSec: 0, played: false } as never
+    useHomeLibraryStore.getState().play(item, { fromStart: true })
+    await Promise.resolve()
+    expect(useHomeLibraryStore.getState().playing).toBeNull()
+    expect(sent()[0].command).toEqual({ type: 'play', source: 'home', profileId: 'vera', itemId: 'jf1', fromStart: true })
+  })
+
+  it('plays here as before when the mode is off', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}')))
+    useProfileStore.setState({ activeProfileId: 'elof' })
+    usePlayerStore.getState().play(channel)
+    expect(usePlayerStore.getState().current?.id).toBe('m_42')
+    expect(sent()).toEqual([])
+  })
+
+  it('counts the kiosk as on while its idle heartbeat is recent', () => {
+    const now = 5_000_000
+    expect(bionAlive({ status: { state: 'idle', updated: now - 60_000 }, clockSkew: 0 }, now)).toBe(true)
+    expect(bionAlive({ status: { state: 'idle', updated: now - ALIVE_MS - 1 }, clockSkew: 0 }, now)).toBe(false)
+    expect(bionAlive({ status: null, clockSkew: 0 }, now)).toBe(false)
+  })
+
+  it('names an episode by its show', () => {
+    expect(channelTitle({ ...channel, type: 'series', showName: 'Severance', season: 1, episode: 2 })).toBe('Severance · S01E02')
   })
 })
