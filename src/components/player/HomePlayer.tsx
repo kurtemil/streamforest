@@ -12,6 +12,8 @@ import { pickHomeSubtitle, samePick, subtitleLabel, SUBTITLES_OFF } from '@/lib/
 import { subtitleFont } from '@/lib/subtitleSize'
 import { SubtitleSizePicker } from '@/components/ui/SubtitleSizePicker'
 import { useLocale, useT } from '@/lib/i18n'
+import { isKiosk } from '@/lib/kiosk'
+import { markHomePlayerFailed, setHomePlayerBridge } from '@/lib/homePlayerBridge'
 
 const REPORT_EVERY_MS = 10_000
 
@@ -60,6 +62,9 @@ export function HomePlayer() {
   const sourceRef = useRef<PlaybackSource | null>(null)
   const titleKey = playing ? `jf:${playing.id}` : ''
   const subtitleSize = prefs?.subtitleSize ?? 'm'
+  // On the kiosk the phone is the remote: no top bar, no browser controls, and the
+  // kiosk reaches the <video> through the bridge (KioskApp).
+  const kiosk = isKiosk()
 
   const parts = useMemo<HomePart[]>(() => (playing
     ? playing.parts ?? [{ id: playing.id, durationSec: playing.durationSec, positionSec: playing.positionSec, played: playing.played, lastPlayedAt: playing.lastPlayedAt }]
@@ -92,6 +97,11 @@ export function HomePlayer() {
     // The first cursor already starts at 0 below ten seconds (the resume rule);
     // a reopen for another subtitle starts at the very second it left.
     const startAt = cursor.at > 1 ? cursor.at : 0
+    setHomePlayerBridge({
+      video,
+      offset: parts.slice(0, cursor.part).reduce((sum, p) => sum + p.durationSec, 0),
+      duration: parts.reduce((sum, p) => sum + p.durationSec, 0),
+    })
 
     const stop = () => {
       if (!source || !started || stopped) return
@@ -123,7 +133,7 @@ export function HomePlayer() {
           if (cancelled) return
           if (!HlsLib.isSupported()) throw new Error('no MSE')
           hls = new HlsLib({ startPosition: startAt > 0 ? startAt : -1 })
-          hls.on(HlsLib.Events.ERROR, (_e, data) => { if (data.fatal) setFailed(true) })
+          hls.on(HlsLib.Events.ERROR, (_e, data) => { if (data.fatal) { setFailed(true); markHomePlayerFailed(video) } })
           hls.loadSource(source.url)
           hls.attachMedia(video)
         } else {
@@ -136,7 +146,7 @@ export function HomePlayer() {
         // then show a play button, which is the right fallback.
         video.play().catch(() => {})
       } catch {
-        if (!cancelled) setFailed(true)
+        if (!cancelled) { setFailed(true); markHomePlayerFailed(video) }
       }
     })()
 
@@ -149,6 +159,8 @@ export function HomePlayer() {
       stop()
       // A split film goes straight on to its next file.
       if (cursor.part < parts.length - 1) setCursor({ part: cursor.part + 1, at: 0, n: cursor.n + 1 })
+      // The kiosk goes back to its idle screen; nobody is there to press close.
+      else if (kiosk) close()
     }
     video.addEventListener('playing', onPlaying)
     video.addEventListener('pause', onPause)
@@ -164,6 +176,7 @@ export function HomePlayer() {
       video.removeEventListener('pause', onPause)
       video.removeEventListener('ended', onEnded)
       stop()
+      setHomePlayerBridge(null)
       hls?.destroy()
       video.removeAttribute('src')
       video.load()
@@ -213,7 +226,7 @@ export function HomePlayer() {
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
       <style>{`.sf-home-video::cue { font-size: ${subtitleFont(subtitleSize)}; line-height: 1.25; background-color: rgba(0, 0, 0, 0.75); }`}</style>
-      <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-3 pt-safe px-safe">
+      {!kiosk && <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-3 pt-safe px-safe">
         <button
           onClick={close}
           aria-label={t('common.close')}
@@ -239,7 +252,7 @@ export function HomePlayer() {
             <Captions size={18} />
           </button>
         )}
-      </div>
+      </div>}
       {menuOpen && (
         <div
           role="menu"
@@ -271,7 +284,7 @@ export function HomePlayer() {
       )}
       <video
         ref={videoRef}
-        controls
+        controls={!kiosk}
         playsInline
         autoPlay
         // The subtitle files are on the same server as the video but not on this

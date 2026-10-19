@@ -18,6 +18,7 @@ import { HomePlayer } from '@/components/player/HomePlayer'
 import { MovieDetailModal } from '@/components/home/MovieDetailModal'
 import { VlcReturnPrompt } from '@/components/VlcReturnPrompt'
 import { HomeDetailModal } from '@/components/home/HomeDetailModal'
+import { BionRemote } from '@/components/bion/BionRemote'
 import { ProfilePicker } from '@/components/ProfilePicker'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { useProfileStore } from '@/stores/profileStore'
@@ -114,6 +115,8 @@ export default function App() {
       <MovieDetailModal />
       <HomeDetailModal />
       <VlcReturnPrompt />
+      {/* The remote for Bion floats over the pages, under the players. */}
+      <BionRemote />
       <VideoPlayer />
       <HomePlayer />
       {(!activeProfileId || showPicker) && (

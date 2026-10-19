@@ -1,0 +1,144 @@
+// /api/bion against a small in-memory D1, and the rules the phone and the kiosk
+// read the answers by. Lives here because every file in functions/ is a route.
+import { describe, expect, it } from 'vitest'
+import { cleanCommand, COMMAND_TTL_MS, onRequest } from '../../functions/api/bion'
+import { isBionActive, STATUS_FRESH_MS } from '@/services/bion'
+import { bionVisible } from '@/stores/bionStore'
+import { seekTarget } from '@/lib/homePlayerBridge'
+
+/** Just enough SQL for the statements bion.ts makes. */
+function memoryDb() {
+  const commands: { seq: number; device: string; body: string; created: number }[] = []
+  const status = new Map<string, { body: string; updated: number }>()
+  let seq = 0
+  const stmt = (sql: string, args: unknown[] = []) => ({
+    bind: (...a: unknown[]) => stmt(sql, a),
+    async run() {
+      if (sql.startsWith('INSERT INTO bion_commands')) {
+        commands.push({ seq: ++seq, device: String(args[0]), body: String(args[1]), created: Number(args[2]) })
+      } else if (sql.startsWith('DELETE FROM bion_commands')) {
+        for (let i = commands.length - 1; i >= 0; i--) if (commands[i].created < Number(args[0])) commands.splice(i, 1)
+      } else if (sql.trim().startsWith('INSERT INTO bion_status')) {
+        status.set(String(args[0]), { body: String(args[1]), updated: Number(args[2]) })
+      }
+      return {}
+    },
+    async all() {
+      if (sql.startsWith('SELECT MAX(seq)')) {
+        const mine = commands.filter((c) => c.device === args[0])
+        return { results: [{ latest: mine.length ? Math.max(...mine.map((c) => c.seq)) : null }] }
+      }
+      if (sql.startsWith('SELECT body, updated FROM bion_status')) {
+        const row = status.get(String(args[0]))
+        return { results: row ? [row] : [] }
+      }
+      if (sql.startsWith('SELECT seq, body, created FROM bion_commands')) {
+        const [device, after, since] = args as [string, number, number]
+        return { results: commands.filter((c) => c.device === device && c.seq > after && c.created > since) }
+      }
+      return { results: [] }
+    },
+  })
+  return { commands, status, db: { prepare: (sql: string) => stmt(sql) } }
+}
+
+const call = async (env: unknown, method: string, query = '', body?: unknown) => {
+  const res = await onRequest({
+    request: new Request(`https://x/api/bion${query}`, { method, body: body ? JSON.stringify(body) : undefined }),
+    env: env as never,
+  })
+  return { status: res.status, body: await res.json().catch(() => null) }
+}
+
+describe('/api/bion', () => {
+  it('hands the kiosk what the phone sent, once, in order', async () => {
+    const m = memoryDb()
+    const env = { DB: m.db }
+    const start = await call(env, 'GET', '?device=bion')
+    expect(start.body.commands).toEqual([])
+    const cursor = start.body.latest
+
+    await call(env, 'POST', '', { device: 'bion', command: { type: 'play', profileId: 'elof', itemId: 'abc' } })
+    await call(env, 'POST', '', { device: 'bion', command: { type: 'pause' } })
+    const first = await call(env, 'GET', `?device=bion&after=${cursor}`)
+    expect(first.body.commands.map((c: { type: string }) => c.type)).toEqual(['play', 'pause'])
+    expect(first.body.commands[0]).toMatchObject({ profileId: 'elof', itemId: 'abc', fromStart: false })
+
+    const again = await call(env, 'GET', `?device=bion&after=${first.body.latest}`)
+    expect(again.body.commands).toEqual([])
+  })
+
+  it('does not replay to a kiosk that starts up after the command was sent', async () => {
+    const m = memoryDb()
+    const env = { DB: m.db }
+    await call(env, 'POST', '', { device: 'bion', command: { type: 'play', profileId: 'elof', itemId: 'old' } })
+    // A kiosk coming up asks without `after` and gets only the cursor.
+    const start = await call(env, 'GET', '?device=bion')
+    expect(start.body.commands).toEqual([])
+    const next = await call(env, 'GET', `?device=bion&after=${start.body.latest}`)
+    expect(next.body.commands).toEqual([])
+  })
+
+  it('drops commands older than a minute', async () => {
+    const m = memoryDb()
+    m.commands.push({ seq: 1, device: 'bion', body: JSON.stringify({ type: 'stop' }), created: Date.now() - COMMAND_TTL_MS - 1 })
+    const res = await call({ DB: m.db }, 'GET', '?device=bion&after=0')
+    expect(res.body.commands).toEqual([])
+  })
+
+  it('refuses what the kiosk would not understand', async () => {
+    const env = { DB: memoryDb().db }
+    expect((await call(env, 'POST', '', { device: 'bion', command: { type: 'rm -rf' } })).status).toBe(400)
+    expect((await call(env, 'POST', '', { device: 'Bion!', command: { type: 'pause' } })).status).toBe(400)
+    expect((await call(env, 'POST', '', { device: 'bion', command: { type: 'play', profileId: 'elof' } })).status).toBe(400)
+    expect((await call(env, 'GET', '?device=')).status).toBe(400)
+    expect(cleanCommand({ type: 'seek', by: 99999 })).toEqual({ type: 'seek', by: 3600 })
+    expect(cleanCommand({ type: 'seek', by: 0 })).toBeNull()
+    expect(cleanCommand({ type: 'pause', extra: 'x' })).toEqual({ type: 'pause' })
+  })
+
+  it('keeps the latest status per device, stamped with server time', async () => {
+    const m = memoryDb()
+    const env = { DB: m.db }
+    await call(env, 'PUT', '', { device: 'bion', status: { state: 'playing', title: 'Filmen', position: 12 } })
+    await call(env, 'PUT', '', { device: 'bion', status: { state: 'paused', title: 'Filmen', position: 15 } })
+    const res = await call(env, 'GET', '?device=bion')
+    expect(res.body.status).toMatchObject({ state: 'paused', position: 15 })
+    expect(typeof res.body.status.updated).toBe('number')
+  })
+})
+
+describe('reading the status', () => {
+  const now = 1_000_000
+
+  it('shows the remote only while something is on and the kiosk has spoken lately', () => {
+    expect(isBionActive({ state: 'playing', updated: now - 1000 }, now)).toBe(true)
+    expect(isBionActive({ state: 'paused', updated: now - 1000 }, now)).toBe(true)
+    expect(isBionActive({ state: 'idle', updated: now - 1000 }, now)).toBe(false)
+    // A kiosk that was switched off mid-film leaves "playing" behind; it goes stale.
+    expect(isBionActive({ state: 'playing', updated: now - STATUS_FRESH_MS - 1 }, now)).toBe(false)
+    expect(isBionActive(null, now)).toBe(false)
+  })
+
+  it('shows "starting" at once, before the kiosk has answered', () => {
+    expect(bionVisible({ status: null, clockSkew: 0, pending: { title: 'X', at: now - 2000 } }, now)).toBe(true)
+    expect(bionVisible({ status: null, clockSkew: 0, pending: { title: 'X', at: now - 60_000 } }, now)).toBe(false)
+  })
+
+  it('judges the server stamp by the server clock', () => {
+    // The phone's clock is ten minutes slow; the status is a second old by the server.
+    const skew = 600_000
+    expect(bionVisible({ status: { state: 'playing', updated: now + skew - 1000 }, clockSkew: skew, pending: null }, now)).toBe(true)
+  })
+
+  it('keeps a failure on screen long enough to be read', () => {
+    expect(bionVisible({ status: { state: 'failed', updated: now - 5000 }, clockSkew: 0, pending: null }, now)).toBe(true)
+    expect(bionVisible({ status: { state: 'failed', updated: now - STATUS_FRESH_MS - 1 }, clockSkew: 0, pending: null }, now)).toBe(false)
+  })
+
+  it('seeks inside the file that is playing', () => {
+    expect(seekTarget(5, -10, 100)).toBe(0)
+    expect(seekTarget(95, 30, 100)).toBe(99)
+    expect(seekTarget(50, 30, Infinity)).toBe(80)
+  })
+})

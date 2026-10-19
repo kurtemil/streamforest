@@ -2,6 +2,8 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
+import { KioskApp } from './components/kiosk/KioskApp'
+import { isKiosk } from './lib/kiosk'
 import { registerSW } from 'virtual:pwa-register'
 import { traceSessionStart } from './lib/diagnostics'
 import './index.css'
@@ -23,7 +25,18 @@ traceSessionStart()
 //
 // So: check when the app comes back to the foreground, and hourly while it is
 // open. `autoUpdate` reloads once the new worker takes control.
-const updateServiceWorker = registerSW({
+// The kiosk ("Bion", in the basement) runs without one: `autoUpdate` reloads the page
+// when a new worker takes over, which on the kiosk would be in the middle of a film.
+// It picks up new builds itself, while idle (KioskApp). One left from before the
+// kiosk flag was set is removed.
+const kiosk = isKiosk()
+if (kiosk) {
+  void navigator.serviceWorker?.getRegistrations()
+    .then((list) => Promise.all(list.map((r) => r.unregister())))
+    .catch(() => {})
+}
+
+const updateServiceWorker = kiosk ? undefined : registerSW({
   immediate: true,
   onRegisteredSW(_swUrl, registration) {
     if (!registration) return
@@ -38,8 +51,10 @@ void updateServiceWorker
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
-      <App />
-    </BrowserRouter>
+    {kiosk ? <KioskApp /> : (
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    )}
   </StrictMode>,
 )

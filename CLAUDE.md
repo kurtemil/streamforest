@@ -303,6 +303,46 @@ Verified 2026-10-11 against the real server in Edge:
 The plan for one card per film across both sources, with kids' rules shared,
 lives outside this public repo.
 
+## Bion: the kiosk in the basement, with the phone as its remote
+
+Added 2026-10-19. The home server (ProDesk) drives the projector in the basement
+and shows StreamForest full screen in Chromium (cage, a one-window Wayland
+compositor). Its container lives in the `hemma` repo, `bio/kiosk/`, and opens
+`/?kiosk=bion`. Nobody touches it: there is no keyboard or mouse in the sofa.
+
+- **`src/lib/kiosk.ts`** decides it once, from `?kiosk=` kept in localStorage
+  (`?kiosk=off` clears it). `main.tsx` then renders `KioskApp` instead of `App`, and
+  registers no service worker: `autoUpdate` would reload the page in the middle of a
+  film. `KioskApp` instead reloads itself while idle when `/` names another entry
+  script (every 10 minutes).
+- **`/api/bion`** (`functions/api/bion.ts`) is two D1 tables: a command queue and one
+  status row. The kiosk polls `GET ?device=bion&after=<seq>` every 2 s; its first
+  poll has no `after` and only learns the cursor, so a restart never replays an old
+  command, and commands older than a minute are not handed out at all. The phone
+  `POST`s commands (`play`, `pause`, `resume`, `seek`, `stop`) and reads the status
+  the kiosk `PUT`s every 5 s while a film is on (60 s while idle). About 43 000
+  requests a day with the kiosk on all day, a few rows each.
+- **Playing as the phone's profile.** A `play` carries the profile and the Jellyfin
+  item id. The kiosk switches to that profile, signs in as that Jellyfin user, finds
+  the item in that user's list and plays it with `HomePlayer`. So the resume point,
+  the subtitle choice and the kids' allowlist are the same as on the phone, and an
+  item the profile may not see fails with a line on the screen instead of playing.
+- **`HomePlayer` on the kiosk** has no top bar and no browser controls, closes when
+  the last part ends, and registers its `<video>` in `lib/homePlayerBridge.ts`.
+  Pause, seek and the reported position go through that bridge; the position is
+  film time across parts (`offset` + `currentTime`).
+- **The phone:** `HomeDetailModal` has *Spela på Bion* wherever the home library is
+  `ready` (the same network condition Bion needs). `BionRemote` floats above the tab
+  bar while the status is fresh (`STATUS_FRESH_MS`) and something is on, polling
+  every 2.5 s then and every 15 s otherwise, only while visible and only where the
+  home library answers. `status.updated` is server time; the store keeps the clock
+  skew from the poll's `now` so a phone with a wrong clock still judges freshness
+  right.
+- **Tests:** `src/lib/bion-api.test.ts` runs the API against an in-memory D1 and
+  pins the visibility and seek rules. The kiosk itself is checked on the real
+  machine over the DevTools protocol (`KIOSK_FLAGS=--remote-debugging-port=9222`,
+  see `hemma/hemmabio.md`).
+
 ## Feedback-box suggestions, October 2026
 
 All five from 2026-09-11 were built and ticked off on 2026-10-11:
