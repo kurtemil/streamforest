@@ -203,7 +203,7 @@ export function DetailSheet({
 
 /** The look every button in the sheet's action row shares. */
 export function sheetButton(kind: 'primary' | 'secondary' | 'active'): string {
-  const base = 'flex items-center gap-2 min-h-11 rounded-lg font-medium text-body transition-all active:scale-95'
+  const base = 'flex items-center gap-2 min-h-11 rounded-lg font-medium text-body whitespace-nowrap transition-all active:scale-95'
   if (kind === 'primary') return `${base} px-6 bg-white hover:bg-neutral-100 text-black font-semibold`
   if (kind === 'active') return `${base} px-4 ring-1 bg-accent-600/20 ring-accent-600/40 text-accent-400`
   return `${base} px-4 ring-1 bg-white/8 ring-white/15 text-neutral-300 hover:bg-white/12`

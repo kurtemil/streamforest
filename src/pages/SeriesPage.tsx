@@ -641,7 +641,10 @@ export function SeriesPage() {
             </div>
           </div>
 
-          <div className="flex gap-3 mb-5">
+          {/* Wraps, and no button breaks its own label: five buttons in one row were
+              wider than a phone, so they squeezed into two-line stubs and the sheet
+              scrolled sideways. */}
+          <div className="flex flex-wrap gap-3 mb-5 [&>button]:whitespace-nowrap">
             {(resume || episodes[0]) && (() => {
               // Continue the episode in progress; otherwise start the season shown.
               const target = resume?.ep ?? episodes[0]

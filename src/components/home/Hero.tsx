@@ -26,6 +26,7 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
   const locale = useLocale()
   const [idx, setIdx] = useState(0)
   const timer = useRef<number | null>(null)
+  const touchStart = useRef<{ x: number; y: number } | null>(null)
 
   const startTimer = () => {
     if (timer.current) clearInterval(timer.current)
@@ -43,6 +44,29 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
 
   if (!items.length) return null
 
+  const go = (step: number) => {
+    setIdx((i) => (i + step + items.length) % items.length)
+    startTimer()
+  }
+
+  // A sideways swipe moves a slide; anything more vertical than sideways is the
+  // page scrolling and is left alone. On a phone this was the missing way through:
+  // the arrows are pointer-only and the dots are small.
+  const onTouchStart = (e: React.TouchEvent) => {
+    const p = e.touches[0]
+    touchStart.current = { x: p.clientX, y: p.clientY }
+  }
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const start = touchStart.current
+    touchStart.current = null
+    if (!start || items.length < 2) return
+    const p = e.changedTouches[0]
+    const dx = p.clientX - start.x
+    const dy = p.clientY - start.y
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy) * 1.5) return
+    go(dx < 0 ? 1 : -1)
+  }
+
   // The list can shrink under the timer (a profile switch, a catalogue refresh).
   const { channel, tmdbMeta } = items[idx % items.length]
   const backdrop = backdropUrl(tmdbMeta.backdropPath, 1280)
@@ -59,7 +83,11 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
   const runtime = tmdbMeta.runtime ? formatRuntime(tmdbMeta.runtime, locale) : null
 
   return (
-    <div className="group relative w-full h-[52vh] min-h-[360px] max-h-[560px] overflow-hidden select-none">
+    <div
+      className="group relative w-full h-[52vh] min-h-[360px] max-h-[560px] overflow-hidden select-none touch-pan-y"
+      onTouchStart={onTouchStart}
+      onTouchEnd={onTouchEnd}
+    >
       {/* Backdrop. The Ken Burns drift is gated to pointer devices, and that gate
           is the difference between Home scrolling and Home stuttering. Measured
           on a phone-shaped viewport against the same build and the same page,
@@ -205,7 +233,7 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
               reaches every slide through the dots below, and the row advances on
               its own, so there is no affordance lost by removing them. */}
           <button
-            onClick={() => { setIdx((idx - 1 + items.length) % items.length); startTimer() }}
+            onClick={() => go(-1)}
             aria-label={t('common.previous')}
             data-pointer-affordance="hero-slide"
             className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 hover:bg-black/75 backdrop-blur-sm hidden can-hover:flex items-center justify-center ring-1 ring-white/20 transition-all opacity-0 hover:opacity-100 group-hover:opacity-100 focus:opacity-100"
@@ -213,22 +241,37 @@ export function Hero({ items, onPlay, onMoreInfo, onWatchLater, isWatchLater }: 
             <ChevronLeft size={20} className="text-white" />
           </button>
           <button
-            onClick={() => { setIdx((idx + 1) % items.length); startTimer() }}
+            onClick={() => go(1)}
             aria-label={t('common.next')}
             data-pointer-affordance="hero-slide"
             className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/50 hover:bg-black/75 backdrop-blur-sm hidden can-hover:flex items-center justify-center ring-1 ring-white/20 transition-all opacity-0 hover:opacity-100 group-hover:opacity-100 focus:opacity-100"
           >
             <ChevronRight size={20} className="text-white" />
           </button>
-          {/* The dot stays 6px — that is the design. The button around it is a
-              44px square of transparent padding, because that is what a thumb
-              actually aims at. Negative margins keep the row's spacing unchanged. */}
-          <div className="absolute bottom-4 right-8 flex items-center gap-1.5">
+          {/* The dot stays 6px and the current one a 20px pill — that is the design.
+              They used to be 44px squares pulled in by negative margins to slots about
+              9px wide, which the 20px pill did not fit, so it lay across its
+              neighbours (Emil's phone, 2026-10-19). Now each dot has its own room.
+
+              Under a thumb they only show where you are, and a swipe moves the slide:
+              a row of 44px targets would not fit beside the buttons, and anything
+              smaller fails the touch audit. With a pointer they are buttons, as the
+              arrows are. */}
+          <div className="absolute bottom-3 right-6 flex can-hover:hidden items-center h-8 gap-2" aria-hidden="true">
+            {items.map((_, i) => (
+              <span
+                key={i}
+                className={`rounded-full transition-all duration-300 ${i === idx ? 'w-5 h-1.5 bg-white' : 'w-1.5 h-1.5 bg-white/30'}`}
+              />
+            ))}
+          </div>
+          <div className="absolute bottom-3 right-6 hidden can-hover:flex items-center">
             {items.map((_, i) => (
               <button
                 key={i}
                 onClick={() => { setIdx(i); startTimer() }}
-                className="grid place-items-center w-11 h-11 -mx-[1.1rem] -my-[1.1rem] group/dot"
+                data-pointer-affordance="hero-slide"
+                className="flex items-center h-8 px-1 group/dot"
                 aria-label={t('hero.goToSlide', { number: i + 1 })}
                 aria-current={i === idx ? 'true' : undefined}
               >
