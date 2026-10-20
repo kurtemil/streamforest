@@ -817,6 +817,11 @@ VITE_TMDB_API_KEY=<your key>
 - Live: https://streamforest.krutofv.se (also streamforest.pages.dev)
 - GitHub: https://github.com/kurtemil/streamforest
 - D1 database binding: `streamforest-profiles` (id in wrangler.toml)
+- Pages secret `HA_BION_WEBHOOK` (set 2026-10-20): Home Assistant's webhook for the
+  cinema, see *Bion*. The id is also in `hemma/.env` (`BION_WEBHOOK_ID`) and HA's
+  `secrets.yaml`. A secret reaches a deployment only when it is built. Set it with
+  wrangler's own login, not from `hemma/`, whose `.env` holds an expired `CF_API_TOKEN`
+  that wrangler picks up.
 
 **Transcode server** — manual deploy on the HP ProDesk:
 ```bash
