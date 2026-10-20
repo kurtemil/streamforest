@@ -1,6 +1,7 @@
-import { useEffect, useReducer } from 'react'
-import { Pause, Play, RotateCcw, RotateCw, Square, Tv } from 'lucide-react'
+import { useEffect, useReducer, useRef, useState } from 'react'
+import { Captions, Check, Pause, Play, RotateCcw, RotateCw, Square, Tv } from 'lucide-react'
 import { bionAlive, bionVisible, useBionStore } from '@/stores/bionStore'
+import type { BionTrack } from '@/services/bion'
 import { progressPercent } from '@/lib/progress'
 import { useT } from '@/lib/i18n'
 
@@ -31,6 +32,9 @@ export function BionRemote() {
   const alive = bionAlive({ status, clockSkew })
   // Re-render on a timer too, so a status that goes stale takes the remote away.
   const [, tick] = useReducer((n: number) => n + 1, 0)
+  // Where the scrubber is held while a finger is on it; sent when it lets go.
+  const [drag, setDrag] = useState<number | null>(null)
+  const [tracksOpen, setTracksOpen] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -60,12 +64,29 @@ export function BionRemote() {
   const label = state === 'failed' ? 'Bion'
     : state === 'paused' ? t('bion.paused')
     : state === 'playing' ? t('bion.playing')
+    : state === 'waiting' ? t('bion.waiting')
     : state === 'loading' ? t('bion.starting')
     : alive ? `Bion · ${t('bion.ready')}` : t('bion.offline')
-  const pct = status && active && !pending ? progressPercent(status.position ?? 0, status.duration ?? 0) : 0
   const live = state === 'playing' || state === 'paused'
   const seekable = live && !status?.live
+  const duration = status?.duration ?? 0
+  const position = drag ?? status?.position
+  const pct = status && active && !pending ? progressPercent(position ?? 0, duration) : 0
+  const audio = live ? status?.audio ?? [] : []
+  const subtitles = live ? status?.subtitles ?? [] : []
+  const hasTracks = audio.length > 1 || subtitles.length > 0
   const button = 'w-11 h-11 shrink-0 rounded-full flex items-center justify-center text-white hover:bg-white/10 active:scale-95 transition-transform'
+
+  // Pointer, touch and blur can all end one drag; the ref makes it one seek.
+  const dragRef = useRef<number | null>(null)
+  const move = (to: number) => { dragRef.current = to; setDrag(to) }
+  const letGo = () => {
+    const to = dragRef.current
+    if (to === null) return
+    dragRef.current = null
+    setDrag(null)
+    void send({ type: 'seek', to })
+  }
 
   return (
     <>
@@ -88,6 +109,26 @@ export function BionRemote() {
           aria-label={t('bion.remote')}
           className="fixed z-40 left-3 right-[4.5rem] bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] md:left-auto md:right-20 md:bottom-4 md:w-[26rem] rounded-2xl bg-surface-200/90 backdrop-blur-xl ring-1 ring-white/12 shadow-cinema overflow-hidden"
         >
+          {tracksOpen && hasTracks && (
+            <div className="max-h-[45vh] overflow-y-auto border-b border-white/10 bg-surface-200 px-2 py-2">
+              {audio.length > 1 && (
+                <TrackList
+                  heading={t('player.audio')}
+                  tracks={audio}
+                  active={status?.audioActive}
+                  onPick={(id) => void send({ type: 'audio', id })}
+                />
+              )}
+              {subtitles.length > 0 && (
+                <TrackList
+                  heading={t('player.subtitles')}
+                  tracks={[{ id: -1, name: t('player.subtitlesOff') }, ...subtitles]}
+                  active={status?.subtitleActive ?? -1}
+                  onPick={(id) => void send({ type: 'subtitle', id })}
+                />
+              )}
+            </div>
+          )}
           {/* Title on its own row and the buttons under it: four 44px buttons beside
               the title left it about 90px on a phone, and the time was cut off. */}
           <div className="flex items-center gap-2.5 px-3 py-2 min-h-14">
@@ -95,8 +136,8 @@ export function BionRemote() {
             <div className="flex-1 min-w-0">
               <p className="text-caption text-neutral-400 leading-tight truncate">
                 {label}
-                {seekable && status?.position !== undefined && (
-                  <span className="tabular-nums"> · {clock(status.position)}{status.duration ? ` / ${clock(status.duration)}` : ''}</span>
+                {seekable && position !== undefined && (
+                  <span className="tabular-nums"> · {clock(position)}{duration ? ` / ${clock(duration)}` : ''}</span>
                 )}
               </p>
               <p className="text-body text-white font-medium leading-tight truncate">
@@ -104,20 +145,49 @@ export function BionRemote() {
               </p>
             </div>
           </div>
-          {(state === 'loading' || live) && (
+          {seekable && duration > 0 && (
+            // The browser's own range is drawn dark on dark in Safari, so it is drawn
+            // here and the real input lies invisible on top: a 40px strip to grab.
+            <div className="relative mx-4 -mt-2 h-10">
+              <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-1.5 rounded-full bg-white/20 overflow-hidden">
+                <div className="h-full bg-accent-500" style={{ width: `${pct}%` }} />
+              </div>
+              <div
+                className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow ring-2 ring-accent-500 transition-[width,height] ${drag === null ? 'w-3.5 h-3.5' : 'w-5 h-5'}`}
+                style={{ left: `${pct}%` }}
+                aria-hidden="true"
+              />
+              <input
+                type="range"
+                min={0}
+                max={Math.round(duration)}
+                step={1}
+                value={Math.round(position ?? 0)}
+                onChange={(e) => move(Number(e.target.value))}
+                onPointerUp={letGo}
+                onTouchEnd={letGo}
+                onKeyUp={letGo}
+                onBlur={letGo}
+                aria-label={t('bion.scrub')}
+                aria-valuetext={clock(position)}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+            </div>
+          )}
+          {(state === 'loading' || state === 'waiting' || live) && (
             <div className="flex items-center justify-center gap-3 px-2 pb-1.5 -mt-1">
               {seekable && (
                 <button onClick={() => void send({ type: 'seek', by: -10 })} aria-label={t('bion.back')} className={button}>
                   <RotateCcw size={18} />
                 </button>
               )}
-              {live && (
+              {(live || state === 'waiting') && (
                 <button
-                  onClick={() => void send({ type: state === 'paused' ? 'resume' : 'pause' })}
-                  aria-label={state === 'paused' ? t('bion.resume') : t('bion.pause')}
+                  onClick={() => void send({ type: state === 'playing' ? 'pause' : 'resume' })}
+                  aria-label={state === 'playing' ? t('bion.pause') : state === 'waiting' ? t('bion.startNow') : t('bion.resume')}
                   className={button}
                 >
-                  {state === 'paused' ? <Play size={20} fill="currentColor" /> : <Pause size={20} fill="currentColor" />}
+                  {state === 'playing' ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
                 </button>
               )}
               {seekable && (
@@ -125,12 +195,22 @@ export function BionRemote() {
                   <RotateCw size={18} />
                 </button>
               )}
+              {hasTracks && (
+                <button
+                  onClick={() => setTracksOpen(!tracksOpen)}
+                  aria-label={t('bion.tracks')}
+                  aria-expanded={tracksOpen}
+                  className={`${button} ${tracksOpen ? 'bg-white/15' : ''}`}
+                >
+                  <Captions size={19} />
+                </button>
+              )}
               <button onClick={() => void send({ type: 'stop' })} aria-label={t('bion.stop')} className={button}>
                 <Square size={16} fill="currentColor" />
               </button>
             </div>
           )}
-          {active && (
+          {active && !(seekable && duration > 0) && (
             <div className="h-0.5 bg-white/10">
               <div className="h-full bg-accent-500 transition-[width] duration-700" style={{ width: `${pct}%` }} />
             </div>
@@ -138,5 +218,29 @@ export function BionRemote() {
         </div>
       )}
     </>
+  )
+}
+
+function TrackList({ heading, tracks, active, onPick }: {
+  heading: string
+  tracks: BionTrack[]
+  active: number | undefined
+  onPick: (id: number) => void
+}) {
+  return (
+    <div className="py-1">
+      <p className="px-2 pb-1 text-caption uppercase tracking-wider text-neutral-500">{heading}</p>
+      {tracks.map((track) => (
+        <button
+          key={track.id}
+          onClick={() => onPick(track.id)}
+          aria-pressed={track.id === active}
+          className="w-full min-h-11 flex items-center gap-3 px-2 rounded-xl text-left text-body text-white hover:bg-white/10 active:bg-white/15"
+        >
+          <span className="w-5 shrink-0 text-accent-400">{track.id === active && <Check size={18} />}</span>
+          <span className="truncate">{track.name}</span>
+        </button>
+      ))}
+    </div>
   )
 }

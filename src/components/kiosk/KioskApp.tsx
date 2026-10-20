@@ -11,7 +11,7 @@ import { syncFromRemote } from '@/services/sync'
 import { clearProgress } from '@/services/db'
 import { backdropUrl } from '@/services/jellyfin'
 import { pollBion, putBionStatus, type BionCommand, type BionSource, type BionStatus } from '@/services/bion'
-import { getPlayerBridge, seekTarget } from '@/lib/playerBridge'
+import { getPlayerBridge, seekTarget, type PlayerBridge } from '@/lib/playerBridge'
 import { progressPercent } from '@/lib/progress'
 import { t, useLocale, useT, INTL_TAGS } from '@/lib/i18n'
 
@@ -25,6 +25,29 @@ const FAILED_SHOWN_MS = 12_000
 const ENDED_CLOSE_MS = 15_000
 /** How often an idle kiosk looks for a newer build. It has no service worker and is never reloaded by hand. */
 const UPDATE_CHECK_MS = 10 * 60_000
+/**
+ * The longest a `hold` keeps a film still: a projector cooling down (~100 s), then
+ * warming up (~25 s) and finding its input. Home Assistant normally sends `resume`
+ * well before; this is for when it never does.
+ */
+const HOLD_MS = 4 * 60_000
+/** What the phone is offered of a film's tracks, so the status stays small. */
+const MAX_TRACKS = 30
+const MAX_TRACK_NAME = 60
+
+/**
+ * Set while Home Assistant warms the projector up: every film that starts playing
+ * is stopped at once and waits for `resume`. One kiosk, one hold, so it lives here.
+ */
+let hold: { until: number } | null = null
+/** Set by a seek: the phone's scrubber should not jump back for want of a status. */
+let writeStatusNow = false
+
+function holdFilm() {
+  hold = { until: Date.now() + HOLD_MS }
+  const video = getPlayerBridge()?.video
+  if (video && !video.paused) video.pause()
+}
 
 type Phase =
   | { state: 'idle' }
@@ -51,11 +74,26 @@ function readLive(): Live | null {
   const v = bridge.video
   const base = { position: bridge.position(), duration: bridge.duration(), live: bridge.live, ended: v.ended }
   if (bridge.failed) return { ...base, state: 'failed' }
+  if (hold) return { ...base, state: 'waiting' }
   // Paused at zero is a film that has not started yet, not one somebody paused.
   const state: Live['state'] = v.paused
     ? (v.currentTime > 0 ? 'paused' : 'loading')
     : (v.readyState >= 3 ? 'playing' : 'loading')
   return { ...base, state }
+}
+
+/** The tracks worth offering on the phone: audio when there is a choice, subtitles when there are any. */
+function trackStatus(bridge: PlayerBridge | null): Pick<BionStatus, 'audio' | 'audioActive' | 'subtitles' | 'subtitleActive'> {
+  const tracks = bridge?.tracks?.()
+  if (!tracks) return {}
+  const trim = (list: { id: number; name: string }[]) =>
+    list.slice(0, MAX_TRACKS).map((x) => ({ id: x.id, name: x.name.slice(0, MAX_TRACK_NAME) }))
+  return {
+    ...(bridge?.selectAudio && tracks.audio.length > 1 ? { audio: trim(tracks.audio), audioActive: tracks.audioActive } : {}),
+    ...(bridge?.selectSubtitle && tracks.subtitles.length > 0
+      ? { subtitles: trim(tracks.subtitles), subtitleActive: tracks.subtitleActive }
+      : {}),
+  }
 }
 
 /** The one build this page was loaded with, by its entry script. */
@@ -137,6 +175,14 @@ export function KioskApp() {
     return () => window.clearTimeout(timer)
   }, [live?.ended])
 
+  // While the projector warms up, a film that gets going is stopped on its first
+  // frame. `playing` does not bubble, so this listens on the way down.
+  useEffect(() => {
+    const onPlaying = (e: Event) => { if (hold && e.target instanceof HTMLMediaElement) e.target.pause() }
+    document.addEventListener('playing', onPlaying, true)
+    return () => document.removeEventListener('playing', onPlaying, true)
+  }, [])
+
   // Commands. The first poll only learns where the queue stands, so a restart never
   // replays a film somebody asked for before it.
   useEffect(() => {
@@ -187,12 +233,22 @@ export function KioskApp() {
         setPhase({ state: 'loading' })
         return c.source === 'iptv' ? startIptv(c, profile) : startHome(c, profile)
       }
-      if (c.type === 'stop') { closeBoth(); return }
+      if (c.type === 'stop') { hold = null; closeBoth(); return }
+      if (c.type === 'hold') { holdFilm(); return }
+      // From Home Assistant when the picture is up, or from the phone: start anyway.
+      if (c.type === 'resume') hold = null
       const bridge = getPlayerBridge()
       if (!bridge) return
       if (c.type === 'pause') bridge.video.pause()
       if (c.type === 'resume') void bridge.video.play().catch(() => {})
-      if (c.type === 'seek' && !bridge.live) bridge.seek(seekTarget(bridge.position(), c.by, bridge.duration()))
+      if (c.type === 'seek' && !bridge.live) {
+        bridge.seek(c.to !== undefined
+          ? seekTarget(0, c.to, bridge.duration())
+          : seekTarget(bridge.position(), c.by, bridge.duration()))
+        writeStatusNow = true
+      }
+      if (c.type === 'audio') bridge.selectAudio?.(c.id)
+      if (c.type === 'subtitle') bridge.selectSubtitle?.(c.id)
     }
 
     const loop = async () => {
@@ -218,6 +274,11 @@ export function KioskApp() {
     let sentKey = ''
     let sentAt = 0
     const timer = window.setInterval(() => {
+      // A hold nobody lifted: the film starts, picture or not.
+      if (hold && Date.now() > hold.until) {
+        hold = null
+        void getPlayerBridge()?.video.play().catch(() => {})
+      }
       const current = readLive()
       setLive((prev) => (prev && current && prev.state === current.state && prev.ended === current.ended &&
         Math.floor(prev.position) === Math.floor(current.position) ? prev : current))
@@ -235,17 +296,21 @@ export function KioskApp() {
             title: film.title,
             position: current.live ? undefined : Math.round(current.position),
             duration: current.live ? undefined : Math.round(current.duration),
+            ...trackStatus(getPlayerBridge()),
           }
         : p.state === 'loading' ? { state: 'loading', title: p.title }
         : p.state === 'failed' ? { state: 'failed', title: p.message }
         : { state: film ? 'loading' : 'idle', title: film?.title }
-      const key = `${status.state}|${status.itemId ?? ''}|${status.title ?? ''}`
+      // A track switch is written at once, so the phone's menu ticks the new one.
+      const key = `${status.state}|${status.itemId ?? ''}|${status.title ?? ''}|` +
+        `${status.audio?.length ?? 0}:${status.audioActive ?? ''}|${status.subtitles?.length ?? 0}:${status.subtitleActive ?? ''}`
       const now = Date.now()
       const every = status.state === 'idle' ? IDLE_STATUS_EVERY_MS : STATUS_EVERY_MS
-      if (key !== sentKey || now - sentAt >= every) {
+      if (key !== sentKey || now - sentAt >= every || writeStatusNow) {
         putBionStatus(status)
         sentKey = key
         sentAt = now
+        writeStatusNow = false
       }
     }, 1000)
     return () => window.clearInterval(timer)
@@ -267,7 +332,8 @@ export function KioskApp() {
 
   const film = filmOpen ? currentFilm() : null
   const filmFailed = live?.state === 'failed'
-  const showLoading = !filmFailed && (phase.state === 'loading' || (film && (!live || live.state === 'loading')))
+  const showLoading = !filmFailed &&
+    (phase.state === 'loading' || (film && (!live || live.state === 'loading' || live.state === 'waiting')))
   const loadingTitle = phase.state === 'loading' ? phase.title ?? film?.title : film?.title
   const loadingBackdrop = phase.state === 'loading' && phase.backdrop !== undefined ? phase.backdrop : film?.backdrop ?? null
 

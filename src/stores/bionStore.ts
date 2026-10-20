@@ -33,7 +33,7 @@ interface BionState {
   playHome: (item: HomeItem, profileId: string, fromStart?: boolean) => Promise<boolean>
   /** An IPTV film, episode or channel, by the id every device parses from the playlist. */
   playIptv: (channel: Channel, profileId: string) => Promise<boolean>
-  send: (command: Exclude<BionCommand, { type: 'play' }>) => Promise<void>
+  send: (command: Exclude<BionCommand, { type: 'play' | 'hold' }>) => Promise<void>
 }
 
 /** What the phone shows while it waits: the film's name, as the cards show it. */
@@ -93,9 +93,12 @@ export const useBionStore = create<BionState>((set, get) => {
       if (status) {
         if (command.type === 'pause') set({ status: { ...status, state: 'paused' } })
         if (command.type === 'resume') set({ status: { ...status, state: 'playing' } })
-        if (command.type === 'seek' && status.position !== undefined) {
+        if (command.type === 'seek' && command.to !== undefined) set({ status: { ...status, position: command.to } })
+        else if (command.type === 'seek' && status.position !== undefined) {
           set({ status: { ...status, position: Math.max(0, status.position + command.by) } })
         }
+        if (command.type === 'audio') set({ status: { ...status, audioActive: command.id } })
+        if (command.type === 'subtitle') set({ status: { ...status, subtitleActive: command.id } })
         if (command.type === 'stop') set({ status: { ...status, state: 'idle' }, pending: null })
       }
       const ok = await sendBion(command)

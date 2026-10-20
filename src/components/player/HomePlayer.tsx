@@ -13,7 +13,7 @@ import { subtitleFont } from '@/lib/subtitleSize'
 import { SubtitleSizePicker } from '@/components/ui/SubtitleSizePicker'
 import { useLocale, useT } from '@/lib/i18n'
 import { isKiosk } from '@/lib/kiosk'
-import { clearPlayerBridge, markPlayerFailed, setPlayerBridge } from '@/lib/playerBridge'
+import { clearPlayerBridge, markPlayerFailed, setPlayerBridge, type BridgeTracks } from '@/lib/playerBridge'
 import { playsHlsItself } from '@/lib/nativeHls'
 
 const REPORT_EVERY_MS = 10_000
@@ -61,6 +61,10 @@ export function HomePlayer() {
   // first file has been read and a choice made from what it offers.
   const choiceRef = useRef<HomeSubtitle | null | undefined>(undefined)
   const sourceRef = useRef<PlaybackSource | null>(null)
+  const bridgeRef = useRef<{ tracks: () => BridgeTracks; choose: (id: number) => void }>({
+    tracks: () => ({ audio: [], audioActive: -1, subtitles: [], subtitleActive: -1 }),
+    choose: () => {},
+  })
   const titleKey = playing ? `jf:${playing.id}` : ''
   const subtitleSize = prefs?.subtitleSize ?? 'm'
   // On the kiosk the phone is the remote: no top bar, no browser controls, and the
@@ -112,6 +116,9 @@ export function HomePlayer() {
       },
       close: () => useHomeLibraryStore.getState().close(),
       live: false,
+      // Subtitles only: the server sends one audio stream, the file's default.
+      tracks: () => bridgeRef.current.tracks(),
+      selectSubtitle: (id) => bridgeRef.current.choose(id),
     })
 
     const stop = () => {
@@ -238,6 +245,17 @@ export function HomePlayer() {
     } else {
       setChosen(s)
     }
+  }
+
+  // What the kiosk's bridge reads and chooses through: this render's menu.
+  bridgeRef.current = {
+    tracks: () => ({
+      audio: [],
+      audioActive: -1,
+      subtitles: subs.map((s) => ({ id: s.index, name: subtitleLabel(s, locale, t('player.track', { number: s.index + 1 })) })),
+      subtitleActive: chosen?.index ?? -1,
+    }),
+    choose: (id) => choose(id === -1 ? null : subs.find((s) => s.index === id) ?? null),
   }
 
   if (!playing) return null

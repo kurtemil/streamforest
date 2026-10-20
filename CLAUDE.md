@@ -328,9 +328,18 @@ compositor). Its container lives in the `hemma` repo, `bio/kiosk/`, and opens
   status row. The kiosk polls `GET ?device=bion&after=<seq>` every 2 s; its first
   poll has no `after` and only learns the cursor, so a restart never replays an old
   command, and commands older than a minute are not handed out at all. The phone
-  `POST`s commands (`play`, `pause`, `resume`, `seek`, `stop`) and reads the status
-  the kiosk `PUT`s every 5 s while a film is on (60 s while idle). About 43 000
+  `POST`s commands (`play`, `pause`, `resume`, `seek` by a step or `to` a point,
+  `audio` and `subtitle` by track id, `stop`) and reads the status the kiosk `PUT`s
+  every 5 s while a film is on (60 s while idle, at once after a seek). About 43 000
   requests a day with the kiosk on all day, a few rows each.
+- **A Play on Bion switches the cinema on.** With the Pages secret `HA_BION_WEBHOOK`
+  (Home Assistant's webhook, the whole URL) set, `POST play` to `bion` calls it in
+  `waitUntil`; a webhook that fails or is unset changes nothing for the film. HA's
+  automation *Bio – Spela på Bion* (`hemma/bio/`) runs the Bion button's script and,
+  if the projector was off, posts `hold` first and `resume` once the picture is up.
+  `hold` keeps every film that starts still on its first frame (a capture listener
+  for `playing`), reported as state `waiting` ("Projektorn startar", with a button
+  to start anyway); the kiosk lets go by itself after four minutes.
 - **`play` carries a source.** `home`: a Jellyfin item id; the kiosk becomes that
   profile, signs in as that Jellyfin user and plays it with `HomePlayer`, so resume
   point, subtitles and the kids' allowlist are the phone's. `iptv`: a playlist id
@@ -344,7 +353,10 @@ compositor). Its container lives in the `hemma` repo, `bio/kiosk/`, and opens
   parts of a split film (HomePlayer) and past the offset a transcoded stream starts
   at (VideoPlayer's `seekTo`, which restarts ffmpeg when the target is not
   buffered). `close()` is the player's own close, so the position is saved. Live
-  TV has no duration and no seek. On the kiosk neither player shows its controls,
+  TV has no duration and no seek. `tracks()`, `selectAudio` and `selectSubtitle` are
+  the players' own menus: VideoPlayer offers both, HomePlayer subtitles only (Jellyfin
+  sends one audio stream, and the phone has no audio choice for home films either).
+  The status carries them, at most 30 per list. On the kiosk neither player shows its controls,
   VideoPlayer's close does not `navigate(-1)` (there is nothing behind the kiosk),
   and an ended film with no next episode is put away after 15 s.
 - **The kiosk's Chromium must not freeze hidden pages.** When the screen goes away
@@ -355,13 +367,17 @@ compositor). Its container lives in the `hemma` repo, `bio/kiosk/`, and opens
   `seekTo` restarts the transcode and plays. Known, not fixed.
 - **The remote** (`components/bion/BionRemote.tsx`) floats above the tab bar while
   the mode is on or something plays on Bion: title and time on one row, the buttons
-  on the next (four 44 px buttons beside the title cut the time off on a phone).
+  on the next (four 44 px buttons beside the title cut the time off on a phone), and
+  between them a scrubber that seeks when the finger lets go. Safari draws a native
+  range dark on dark, so the track is drawn and the input lies invisible on top. The
+  captions button opens the film's audio and subtitle tracks above the title.
   It polls every 2.5 s while something is on, 5 s in Bion mode, 15 s otherwise,
   only while visible. `status.updated` is server time; the store keeps the clock
   skew from the poll's `now`.
 - **Tests:** `src/lib/bion-api.test.ts` runs the API against an in-memory D1, pins
-  the visibility, alive and seek rules, and checks that Bion mode sends instead of
-  playing. The kiosk itself is checked on the real machine over the DevTools
+  the visibility, alive and seek rules, the webhook, and checks that Bion mode sends
+  instead of playing. `e2e/bion-remote.spec.ts` drives the remote in iPhone WebKit:
+  scrubber, track menu, and the warming-up state. The kiosk itself is checked on the real machine over the DevTools
   protocol (`KIOSK_FLAGS=--remote-debugging-port=9222`, see `hemma/hemmabio.md`).
 
 ## Feedback-box suggestions, October 2026

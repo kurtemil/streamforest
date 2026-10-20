@@ -17,6 +17,20 @@ export interface PlayerBridge {
   live: boolean
   /** Set by the player when it could not open what it was given. */
   failed?: boolean
+  /** The tracks the player's own menus offer, and which are on. */
+  tracks?: () => BridgeTracks
+  /** The way the player's audio menu would. */
+  selectAudio?: (id: number) => void
+  /** The way the player's subtitle menu would; -1 is off. */
+  selectSubtitle?: (id: number) => void
+}
+
+export interface BridgeTracks {
+  audio: { id: number; name: string }[]
+  audioActive: number
+  subtitles: { id: number; name: string }[]
+  /** -1: off. */
+  subtitleActive: number
 }
 
 let current: PlayerBridge | null = null

@@ -55,6 +55,8 @@ const call = async (env: unknown, method: string, query = '', body?: unknown) =>
 }
 
 describe('/api/bion', () => {
+  afterEach(() => { vi.unstubAllGlobals() })
+
   it('hands the kiosk what the phone sent, once, in order', async () => {
     const m = memoryDb()
     const env = { DB: m.db }
@@ -104,6 +106,42 @@ describe('/api/bion', () => {
     expect(cleanCommand({ type: 'play', source: 'ftp', profileId: 'elof', itemId: 'm_1' })).toMatchObject({ source: 'home' })
   })
 
+  it('takes a point to seek to, and tracks by id', () => {
+    expect(cleanCommand({ type: 'seek', to: 125.6 })).toEqual({ type: 'seek', to: 126 })
+    expect(cleanCommand({ type: 'seek', to: -5 })).toEqual({ type: 'seek', to: 0 })
+    expect(cleanCommand({ type: 'seek', to: 'x' })).toBeNull()
+    expect(cleanCommand({ type: 'audio', id: 2 })).toEqual({ type: 'audio', id: 2 })
+    expect(cleanCommand({ type: 'audio', id: -1 })).toBeNull()
+    expect(cleanCommand({ type: 'subtitle', id: -1 })).toEqual({ type: 'subtitle', id: -1 })
+    expect(cleanCommand({ type: 'subtitle', id: 1.5 })).toBeNull()
+    expect(cleanCommand({ type: 'hold' })).toEqual({ type: 'hold' })
+  })
+
+  it('wakes the cinema in Home Assistant on a Play to Bion, and nothing else', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const waited: Promise<unknown>[] = []
+    const env = { DB: memoryDb().db, HA_BION_WEBHOOK: 'https://ha.example/api/webhook/abc' }
+    const post = (device: string, command: unknown) => onRequest({
+      request: new Request('https://x/api/bion', { method: 'POST', body: JSON.stringify({ device, command }) }),
+      env: env as never,
+      waitUntil: (p) => { waited.push(p) },
+    })
+    await post('bion', { type: 'play', source: 'iptv', profileId: 'elof', itemId: 'm_1' })
+    await post('bion', { type: 'pause' })
+    await post('other', { type: 'play', profileId: 'elof', itemId: 'm_1' })
+    await Promise.all(waited)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]).toMatchObject(['https://ha.example/api/webhook/abc', { method: 'POST', body: '{"source":"iptv"}' }])
+  })
+
+  it('plays as before when Home Assistant does not answer', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('down') }))
+    const env = { DB: memoryDb().db, HA_BION_WEBHOOK: 'https://ha.example/api/webhook/abc' }
+    const res = await call(env, 'POST', '', { device: 'bion', command: { type: 'play', profileId: 'elof', itemId: 'x' } })
+    expect(res.status).toBe(200)
+  })
+
   it('keeps the latest status per device, stamped with server time', async () => {
     const m = memoryDb()
     const env = { DB: m.db }
@@ -121,6 +159,7 @@ describe('reading the status', () => {
   it('shows the remote only while something is on and the kiosk has spoken lately', () => {
     expect(isBionActive({ state: 'playing', updated: now - 1000 }, now)).toBe(true)
     expect(isBionActive({ state: 'paused', updated: now - 1000 }, now)).toBe(true)
+    expect(isBionActive({ state: 'waiting', updated: now - 1000 }, now)).toBe(true)
     expect(isBionActive({ state: 'idle', updated: now - 1000 }, now)).toBe(false)
     // A kiosk that was switched off mid-film leaves "playing" behind; it goes stale.
     expect(isBionActive({ state: 'playing', updated: now - STATUS_FRESH_MS - 1 }, now)).toBe(false)

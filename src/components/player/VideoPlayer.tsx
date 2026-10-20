@@ -6,7 +6,7 @@ import { usePlayerStore } from '@/stores/playerStore'
 import { usePlaylistStore } from '@/stores/playlistStore'
 import { saveProgress, getProgress, clearProgress, getTmdbMeta } from '@/services/db'
 import { isKiosk } from '@/lib/kiosk'
-import { clearPlayerBridge, markPlayerFailed, setPlayerBridge } from '@/lib/playerBridge'
+import { clearPlayerBridge, markPlayerFailed, setPlayerBridge, type BridgeTracks } from '@/lib/playerBridge'
 import { posterUrl, tmdbCacheKey } from '@/services/tmdb'
 import { pushProgress, deleteRemoteProgress } from '@/services/sync'
 import { useProfileStore } from '@/stores/profileStore'
@@ -1603,6 +1603,17 @@ export function VideoPlayer() {
   seekToRef.current = seekTo
   const handleCloseRef = useRef(handleClose)
   handleCloseRef.current = handleClose
+  const tracksRef = useRef<BridgeTracks>({ audio: [], audioActive: -1, subtitles: [], subtitleActive: -1 })
+  tracksRef.current = {
+    audio: audioTracks.map((t) => ({ id: t.id, name: t.name || t.lang })),
+    audioActive: activeAudioTrack,
+    subtitles: subtitleTracks.map((t) => ({ id: t.id, name: t.name || t.lang })),
+    subtitleActive: activeSubtitle,
+  }
+  const selectAudioRef = useRef(selectAudioTrack)
+  selectAudioRef.current = selectAudioTrack
+  const selectSubtitleRef = useRef(selectSubtitle)
+  selectSubtitleRef.current = selectSubtitle
   useEffect(() => {
     const video = videoRef.current
     if (!current || !video) return
@@ -1614,6 +1625,9 @@ export function VideoPlayer() {
       seek: (to) => seekToRef.current(to),
       close: () => handleCloseRef.current(),
       live,
+      tracks: () => tracksRef.current,
+      selectAudio: (id) => selectAudioRef.current(id),
+      selectSubtitle: (id) => selectSubtitleRef.current(id),
     })
     return () => clearPlayerBridge(video)
   }, [current])

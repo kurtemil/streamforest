@@ -18,6 +18,12 @@ interface D1PreparedStatement {
 
 interface Env {
   DB: D1Database
+  /**
+   * Home Assistant's webhook for the cinema, the whole URL (Pages secret). A Play on
+   * Bion calls it, and HA switches the receiver and the projector on, and holds the
+   * film while the lamp warms up. Unset: the kiosk plays as before.
+   */
+  HA_BION_WEBHOOK?: string
 }
 
 const HEADERS = {
@@ -30,7 +36,11 @@ const HEADERS = {
 /** A command older than this is not carried out: a kiosk that was off must not start a film it was asked for an hour ago. */
 export const COMMAND_TTL_MS = 60_000
 const PRUNE_AFTER_MS = 60 * 60 * 1000
-const COMMAND_TYPES = new Set(['play', 'pause', 'resume', 'seek', 'stop'])
+const COMMAND_TYPES = new Set(['play', 'pause', 'resume', 'seek', 'stop', 'audio', 'subtitle', 'hold'])
+/** The longest film there is, near enough. A seek to a point is clamped to it. */
+const MAX_FILM_SECONDS = 24 * 3600
+/** What the kiosk's status may weigh: enough for a film's track lists. */
+const MAX_STATUS_CHARS = 8000
 const DEVICE = /^[a-z0-9-]{1,32}$/
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: HEADERS })
@@ -65,14 +75,43 @@ export function cleanCommand(raw: unknown): Record<string, unknown> | null {
     return { type: 'play', source, profileId: c.profileId, itemId: c.itemId, fromStart: c.fromStart === true }
   }
   if (c.type === 'seek') {
+    // `to` is a point in the film (the remote's scrubber), `by` a step from where it is.
+    if (c.to !== undefined) {
+      const to = Number(c.to)
+      if (!Number.isFinite(to)) return null
+      return { type: 'seek', to: Math.max(0, Math.min(MAX_FILM_SECONDS, Math.round(to))) }
+    }
     const by = Number(c.by)
     if (!Number.isFinite(by) || by === 0) return null
     return { type: 'seek', by: Math.max(-3600, Math.min(3600, by)) }
   }
+  if (c.type === 'audio' || c.type === 'subtitle') {
+    // A track id as the kiosk's status listed it; -1 turns subtitles off.
+    const id = Number(c.id)
+    if (!Number.isInteger(id) || id < (c.type === 'subtitle' ? -1 : 0) || id > 999) return null
+    return { type: c.type, id }
+  }
   return { type: c.type }
 }
 
-export async function onRequest(context: { request: Request; env: Env }): Promise<Response> {
+/** Tells Home Assistant that something was sent to the cinema. Never holds up the answer, never fails it. */
+async function wakeCinema(env: Env, source: unknown): Promise<void> {
+  if (!env.HA_BION_WEBHOOK) return
+  try {
+    await fetch(env.HA_BION_WEBHOOK, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source }),
+      signal: AbortSignal.timeout(10_000),
+    })
+  } catch { /* HA is down or away: the film plays, and the projector stays as it is */ }
+}
+
+export async function onRequest(context: {
+  request: Request
+  env: Env
+  waitUntil?: (promise: Promise<unknown>) => void
+}): Promise<Response> {
   const { request, env } = context
   const url = new URL(request.url)
 
@@ -115,6 +154,11 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       await env.DB.prepare('INSERT INTO bion_commands (device, body, created) VALUES (?, ?, ?)')
         .bind(device, JSON.stringify(command), now).run()
       await env.DB.prepare('DELETE FROM bion_commands WHERE created < ?').bind(now - PRUNE_AFTER_MS).run()
+      if (command.type === 'play' && device === 'bion') {
+        const woken = wakeCinema(env, command.source)
+        if (context.waitUntil) context.waitUntil(woken)
+        else await woken
+      }
       return json({ ok: true })
     }
 
@@ -123,7 +167,7 @@ export async function onRequest(context: { request: Request; env: Env }): Promis
       const device = typeof body?.device === 'string' ? body.device : ''
       if (!DEVICE.test(device) || !body?.status || typeof body.status !== 'object') return json({ error: 'Bad status' }, 400)
       const text = JSON.stringify(body.status)
-      if (text.length > 2000) return json({ error: 'Status too large' }, 413)
+      if (text.length > MAX_STATUS_CHARS) return json({ error: 'Status too large' }, 413)
       await env.DB.prepare(`
         INSERT INTO bion_status (device, body, updated) VALUES (?, ?, ?)
         ON CONFLICT (device) DO UPDATE SET body = excluded.body, updated = excluded.updated
