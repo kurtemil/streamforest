@@ -347,6 +347,12 @@ compositor). Its container lives in the `hemma` repo, `bio/kiosk/`, and opens
   TV has no duration and no seek. On the kiosk neither player shows its controls,
   VideoPlayer's close does not `navigate(-1)` (there is nothing behind the kiosk),
   and an ended film with no next episode is put away after 15 s.
+- **The kiosk's Chromium must not freeze hidden pages.** When the screen goes away
+  (receiver swapped, 2026-10-20) the page counts as hidden, Chromium throttles and then
+  freezes it, and the kiosk stopped polling for 2.7 hours. The flags that stop that are
+  in `hemma/bio/kiosk/start.sh`; nothing in this app can work around a frozen page.
+- **Seeking a paused IPTV film starts it again** on the kiosk, because VideoPlayer's
+  `seekTo` restarts the transcode and plays. Known, not fixed.
 - **The remote** (`components/bion/BionRemote.tsx`) floats above the tab bar while
   the mode is on or something plays on Bion: title and time on one row, the buttons
   on the next (four 44 px buttons beside the title cut the time off on a phone).
