@@ -48,6 +48,37 @@ test('the Bion remote scrubs and switches tracks', async ({ seededPage: page }, 
   }
 })
 
+test("the Bion remote turns the receiver's volume up and down a dB at a time", async ({ seededPage: page }, info) => {
+  const sent: unknown[] = []
+  await stayOffline(page)
+  await page.route('**/api/bion**', async (route) => {
+    const req = route.request()
+    if (req.method() === 'POST') {
+      sent.push(JSON.parse(req.postData() ?? '{}').command)
+      return route.fulfill({ json: { ok: true } })
+    }
+    const now = Date.now()
+    return route.fulfill({ json: { now, latest: 1, commands: [],
+      status: { state: 'playing', source: 'home', title: 'Leif Och Billy · S01E01', position: 600, duration: 1500, updated: now },
+      receiver: { state: 'on', volume: 0.5, muted: false, updated: now },
+    } })
+  })
+  await page.goto('/')
+
+  const remote = page.getByRole('region', { name: 'Remote for Bion' })
+  await expect(remote).toContainText('50 %')
+  // The install prompt lies over the bottom of the remote in a browser tab.
+  const dismiss = page.getByRole('button', { name: 'Dismiss' })
+  if (await dismiss.isVisible()) await dismiss.click()
+  await page.screenshot({ path: info.outputPath('volume.png') })
+  await remote.getByRole('button', { name: 'Volume up' }).click()
+  await remote.getByRole('button', { name: 'Volume up' }).click()
+  await expect(remote).toContainText('54 %')
+  await expect.poll(() => sent).toEqual([{ type: 'volume', to: 0.52 }, { type: 'volume', to: 0.54 }])
+  await remote.getByRole('button', { name: 'Volume down' }).click()
+  await expect.poll(() => sent.at(-1)).toEqual({ type: 'volume', to: 0.52 })
+})
+
 test('the Bion remote says the projector is warming up, and can start anyway', async ({ seededPage: page }) => {
   const sent: unknown[] = []
   await stayOffline(page)

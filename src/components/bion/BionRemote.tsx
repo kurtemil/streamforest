@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { Captions, Check, Pause, Play, RotateCcw, RotateCw, Square, Tv } from 'lucide-react'
-import { bionAlive, bionVisible, useBionStore } from '@/stores/bionStore'
+import { Captions, Check, Minus, Pause, Play, Plus, RotateCcw, RotateCw, Square, Tv, Volume2 } from 'lucide-react'
+import { bionAlive, bionVisible, receiverVolume, useBionStore, VOLUME_STEP } from '@/stores/bionStore'
 import type { BionTrack } from '@/services/bion'
 import { progressPercent } from '@/lib/progress'
 import { useT } from '@/lib/i18n'
@@ -27,7 +27,8 @@ function clock(seconds: number | undefined): string {
  */
 export function BionRemote() {
   const t = useT()
-  const { mode, status, pending, clockSkew, failed, setMode, poll, send } = useBionStore()
+  const { mode, status, pending, clockSkew, failed, receiver, volumeHeld, setMode, poll, send, setVolume } = useBionStore()
+  const volume = receiverVolume({ receiver, volumeHeld })
   const active = bionVisible({ status, pending, clockSkew })
   const alive = bionAlive({ status, clockSkew })
   // Re-render on a timer too, so a status that goes stale takes the remote away.
@@ -207,6 +208,32 @@ export function BionRemote() {
               )}
               <button onClick={() => void send({ type: 'stop' })} aria-label={t('bion.stop')} className={button}>
                 <Square size={16} fill="currentColor" />
+              </button>
+            </div>
+          )}
+          {/* The receiver's volume, through Home Assistant: one dB a tap, shown the way
+              HA's own slider shows it. Only while the receiver is on. */}
+          {volume !== null && (
+            <div className="flex items-center justify-center gap-3 px-2 pb-1.5">
+              <button
+                onClick={() => void setVolume(volume - VOLUME_STEP)}
+                disabled={volume <= 0}
+                aria-label={t('bion.volumeDown')}
+                className={`${button} disabled:opacity-40`}
+              >
+                <Minus size={18} />
+              </button>
+              <p className="w-24 flex items-center justify-center gap-1.5 text-body text-white tabular-nums" aria-live="polite">
+                <Volume2 size={16} className="text-neutral-400" aria-hidden="true" />
+                {receiver?.muted ? t('bion.muted') : `${Math.round(volume * 100)} %`}
+              </p>
+              <button
+                onClick={() => void setVolume(volume + VOLUME_STEP)}
+                disabled={volume >= 0.8}
+                aria-label={t('bion.volumeUp')}
+                className={`${button} disabled:opacity-40`}
+              >
+                <Plus size={18} />
               </button>
             </div>
           )}

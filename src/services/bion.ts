@@ -26,6 +26,8 @@ export type BionCommand =
    * start until a `resume`, or until HOLD_MS has passed. The phone never sends it.
    */
   | { type: 'hold' }
+  /** The receiver's level, 0–1 as Home Assistant counts it (one step per dB). Goes to HA, not the kiosk. */
+  | { type: 'volume'; to: number }
 
 /** `waiting`: the film is ready but held while the projector warms up. */
 export type BionState = 'idle' | 'loading' | 'waiting' | 'playing' | 'paused' | 'failed'
@@ -60,6 +62,18 @@ export interface BionPoll {
   latest: number
   commands: (BionCommand & { seq: number })[]
   status: BionStatus | null
+  /** The receiver as Home Assistant last wrote it. Missing before HA has written it at all. */
+  receiver?: ReceiverStatus | null
+}
+
+/** Written by Home Assistant whenever the receiver is switched or its volume changes. */
+export interface ReceiverStatus {
+  /** HA's state: `on`, `off`, `unavailable`. */
+  state: string
+  /** 0–1, one step per dB: 0.45 is −55 dB. */
+  volume: number
+  muted: boolean
+  updated?: number
 }
 
 export async function pollBion(after?: number): Promise<BionPoll | null> {

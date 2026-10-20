@@ -135,6 +135,31 @@ describe('/api/bion', () => {
     expect(fetchMock.mock.calls[0]).toMatchObject(['https://ha.example/api/webhook/abc', { method: 'POST', body: '{"source":"iptv"}' }])
   })
 
+  it('sends the volume to Home Assistant as a level, and never to the kiosk', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const m = memoryDb()
+    const env = { DB: m.db, HA_BION_WEBHOOK: 'https://ha.example/api/webhook/abc' }
+    const res = await call(env, 'POST', '', { device: 'bion', command: { type: 'volume', to: 0.473 } })
+    expect(res.status).toBe(200)
+    expect(fetchMock.mock.calls[0]).toMatchObject(['https://ha.example/api/webhook/abc', { body: '{"volume":0.47}' }])
+    expect(m.commands).toHaveLength(0)
+    expect(cleanCommand({ type: 'volume', to: 5 })).toEqual({ type: 'volume', to: 0.8 })
+    expect(cleanCommand({ type: 'volume' })).toBeNull()
+    // The phone hears when it did not get there.
+    fetchMock.mockImplementation(async () => { throw new Error('down') })
+    expect((await call(env, 'POST', '', { device: 'bion', command: { type: 'volume', to: 0.5 } })).status).toBe(502)
+    expect((await call({ DB: m.db }, 'POST', '', { device: 'bion', command: { type: 'volume', to: 0.5 } })).status).toBe(502)
+  })
+
+  it("hands the phone the receiver's status beside the kiosk's", async () => {
+    const env = { DB: memoryDb().db }
+    await call(env, 'PUT', '', { device: 'receivern', status: { state: 'on', volume: 0.45, muted: false } })
+    const res = await call(env, 'GET', '?device=bion')
+    expect(res.body.receiver).toMatchObject({ state: 'on', volume: 0.45 })
+    expect((await call(env, 'GET', '?device=receivern')).body.receiver).toBeUndefined()
+  })
+
   it('plays as before when Home Assistant does not answer', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('down') }))
     const env = { DB: memoryDb().db, HA_BION_WEBHOOK: 'https://ha.example/api/webhook/abc' }

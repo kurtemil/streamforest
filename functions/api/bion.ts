@@ -21,7 +21,8 @@ interface Env {
   /**
    * Home Assistant's webhook for the cinema, the whole URL (Pages secret). A Play on
    * Bion calls it, and HA switches the receiver and the projector on, and holds the
-   * film while the lamp warms up. Unset: the kiosk plays as before.
+   * film while the lamp warms up. The remote's volume goes the same way. Unset: the
+   * kiosk plays as before, and there is no volume.
    */
   HA_BION_WEBHOOK?: string
 }
@@ -36,7 +37,11 @@ const HEADERS = {
 /** A command older than this is not carried out: a kiosk that was off must not start a film it was asked for an hour ago. */
 export const COMMAND_TTL_MS = 60_000
 const PRUNE_AFTER_MS = 60 * 60 * 1000
-const COMMAND_TYPES = new Set(['play', 'pause', 'resume', 'seek', 'stop', 'audio', 'subtitle', 'hold'])
+const COMMAND_TYPES = new Set(['play', 'pause', 'resume', 'seek', 'stop', 'audio', 'subtitle', 'hold', 'volume'])
+/** The receiver's own status row, which Home Assistant writes when its volume or power changes. */
+const RECEIVER = 'receivern'
+/** HA's volume is dB + 100 over 100: 0.8 is −20 dB, louder than anyone needs. HA clamps it too. */
+const MAX_VOLUME = 0.8
 /** The longest film there is, near enough. A seek to a point is clamped to it. */
 const MAX_FILM_SECONDS = 24 * 3600
 /** What the kiosk's status may weigh: enough for a film's track lists. */
@@ -91,20 +96,33 @@ export function cleanCommand(raw: unknown): Record<string, unknown> | null {
     if (!Number.isInteger(id) || id < (c.type === 'subtitle' ? -1 : 0) || id > 999) return null
     return { type: c.type, id }
   }
+  if (c.type === 'volume') {
+    // The receiver's level as Home Assistant counts it, 0–1. Always a level, never a
+    // step: taps that arrive close together must not each read a stale level and add to it.
+    const to = Number(c.to)
+    if (!Number.isFinite(to)) return null
+    return { type: 'volume', to: Math.round(Math.max(0, Math.min(MAX_VOLUME, to)) * 100) / 100 }
+  }
   return { type: c.type }
 }
 
-/** Tells Home Assistant that something was sent to the cinema. Never holds up the answer, never fails it. */
-async function wakeCinema(env: Env, source: unknown): Promise<void> {
-  if (!env.HA_BION_WEBHOOK) return
+/**
+ * Tells Home Assistant something for the cinema: `{ source }` for a Play, which
+ * switches it on, or `{ volume }` for the receiver. False when HA could not be reached.
+ */
+async function callHome(env: Env, body: Record<string, unknown>): Promise<boolean> {
+  if (!env.HA_BION_WEBHOOK) return false
   try {
-    await fetch(env.HA_BION_WEBHOOK, {
+    const res = await fetch(env.HA_BION_WEBHOOK, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(10_000),
     })
-  } catch { /* HA is down or away: the film plays, and the projector stays as it is */ }
+    return res.ok
+  } catch {
+    return false
+  }
 }
 
 export async function onRequest(context: {
@@ -143,6 +161,13 @@ export async function onRequest(context: {
         ).bind(device, after, now - COMMAND_TTL_MS).all()).results
         commands = rows.map((r) => ({ ...JSON.parse(String(r.body)), seq: Number(r.seq) }))
       }
+      // The phone's remote shows the receiver's volume beside what the kiosk plays.
+      if (device === 'bion') {
+        const receiverRow = (await env.DB.prepare('SELECT body, updated FROM bion_status WHERE device = ?')
+          .bind(RECEIVER).all()).results[0]
+        const receiver = receiverRow ? { ...JSON.parse(String(receiverRow.body)), updated: Number(receiverRow.updated) } : null
+        return json({ now, latest, commands, status, receiver })
+      }
       return json({ now, latest, commands, status })
     }
 
@@ -151,11 +176,18 @@ export async function onRequest(context: {
       const device = typeof body?.device === 'string' ? body.device : ''
       const command = cleanCommand(body?.command)
       if (!DEVICE.test(device) || !command) return json({ error: 'Bad command' }, 400)
+      // The volume is the receiver's, not the kiosk's: it goes straight to HA, and
+      // the phone hears whether it got there.
+      if (command.type === 'volume') {
+        if (device !== 'bion') return json({ error: 'Bad command' }, 400)
+        return (await callHome(env, { volume: command.to })) ? json({ ok: true }) : json({ error: 'Home Assistant did not answer' }, 502)
+      }
       await env.DB.prepare('INSERT INTO bion_commands (device, body, created) VALUES (?, ?, ?)')
         .bind(device, JSON.stringify(command), now).run()
       await env.DB.prepare('DELETE FROM bion_commands WHERE created < ?').bind(now - PRUNE_AFTER_MS).run()
+      // A Play switches the cinema on. Never holds up the answer: the film is queued either way.
       if (command.type === 'play' && device === 'bion') {
-        const woken = wakeCinema(env, command.source)
+        const woken = callHome(env, { source: command.source })
         if (context.waitUntil) context.waitUntil(woken)
         else await woken
       }

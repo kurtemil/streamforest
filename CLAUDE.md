@@ -340,6 +340,13 @@ compositor). Its container lives in the `hemma` repo, `bio/kiosk/`, and opens
   `hold` keeps every film that starts still on its first frame (a capture listener
   for `playing`), reported as state `waiting` ("Projektorn startar", with a button
   to start anyway); the kiosk lets go by itself after four minutes.
+- **The receiver's volume** goes the same way, never through the kiosk: `POST volume`
+  with `to` (0–1, HA's scale, one step per dB, capped at 0.8 = −20 dB) is passed to
+  the webhook as `{ volume }` and answered 502 if HA did not take it. Always a level,
+  never a step, so quick taps cannot each read a stale level. HA writes the receiver's
+  state, volume and mute to the status row `receivern` when they change, and `GET
+  ?device=bion` returns it as `receiver`. The remote shows − / level / + while the
+  receiver is on, and holds a level just sent for 5 s until HA's report agrees.
 - **`play` carries a source.** `home`: a Jellyfin item id; the kiosk becomes that
   profile, signs in as that Jellyfin user and plays it with `HomePlayer`, so resume
   point, subtitles and the kids' allowlist are the phone's. `iptv`: a playlist id
