@@ -112,7 +112,7 @@ export const en = {
   'bion.tracks': 'Audio and subtitles',
   'bion.scrub': 'Position in the film',
   'bion.sendFailed': 'Bion did not answer. Try again.',
-  'bion.idleHint': 'Pick a film in StreamForest on your phone and tap Play on Bion.',
+  'bion.idleHint': 'Turn on cinema mode in StreamForest with the TV button and start a film.',
   'bion.loading': 'Starting {title}',
   'bion.notFound': '{name} cannot see that film here.',
   'bion.pausedLabel': 'Paused',

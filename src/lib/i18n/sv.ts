@@ -105,7 +105,7 @@ export const sv = {
   'bion.tracks': 'Ljud och undertexter',
   'bion.scrub': 'Var i filmen',
   'bion.sendFailed': 'Bion svarade inte. Försök igen.',
-  'bion.idleHint': 'Välj en film i StreamForest på telefonen och tryck på Spela på Bion.',
+  'bion.idleHint': 'Aktivera bioläget i StreamForest med tv-knappen och starta en film.',
   'bion.loading': 'Startar {title}',
   'bion.notFound': '{name} kan inte se den filmen här.',
   'bion.pausedLabel': 'Pausad',
