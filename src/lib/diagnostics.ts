@@ -7,6 +7,8 @@
 // times a second, and one fetch per event would add network noise to the very
 // thing being measured.
 
+import { fireAndForget } from './fireAndForget'
+
 const FLUSH_INTERVAL_MS = 3000
 const FLUSH_AT_QUEUED = 20
 const MAX_QUEUE = 200
@@ -181,12 +183,13 @@ function flush(useBeacon = false): void {
     } catch { /* fall through to fetch */ }
   }
 
-  fetch(url, {
+  // Never fails: diagnostics must never surface as a user-visible failure.
+  void fireAndForget(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body,
     keepalive: true,
-  }).catch(() => { /* diagnostics must never surface as a user-visible failure */ })
+  })
 }
 
 function enqueue(event: QueuedEvent): void {
