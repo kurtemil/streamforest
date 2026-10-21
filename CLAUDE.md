@@ -370,6 +370,13 @@ compositor). Its container lives in the `hemma` repo, `bio/kiosk/`, and opens
   (receiver swapped, 2026-10-20) the page counts as hidden, Chromium throttles and then
   freezes it, and the kiosk stopped polling for 2.7 hours. The flags that stop that are
   in `hemma/bio/kiosk/start.sh`; nothing in this app can work around a frozen page.
+- **Never leave a response body unread** (`lib/fireAndForget.ts`). In Chromium an
+  unread body keeps a `memfd:shared-memory-region` open until garbage collection, which
+  does not count files. The kiosk's status PUT every 5 s leaked one each; after 80
+  minutes of film the renderer reached its limit of 1 024 open files and died (found
+  2026-10-21 by counting `/proc/<pid>/fd` per episode). Every request whose answer is
+  not used goes through `fireAndForget`, which cancels the body; one whose answer is
+  checked but not read cancels it itself (`pollBion`, `sendBion`).
 - **Seeking a paused IPTV film starts it again** on the kiosk, because VideoPlayer's
   `seekTo` restarts the transcode and plays. Known, not fixed.
 - **The remote** (`components/bion/BionRemote.tsx`) floats above the tab bar while

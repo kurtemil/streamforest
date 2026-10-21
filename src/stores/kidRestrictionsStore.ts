@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import type { ContentType } from '@/stores/exclusionsStore'
+import { fireAndForget } from '@/lib/fireAndForget'
 
 const STORAGE_KEY = 'sf_kid_restrictions_v1'
 const API = '/api/restrictions'
@@ -27,11 +28,11 @@ const _listeners = new Set<() => void>()
 function notify() { _listeners.forEach((fn) => fn()) }
 
 function push(profileId: string, raw: Raw) {
-  fetch(API, {
+  fireAndForget(API, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ profileId, ...raw }),
-  }).catch(() => {})
+  })
 }
 
 export const kidRestrictionsStore = {

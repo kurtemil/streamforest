@@ -1,4 +1,5 @@
 import { trace, traceError } from './diagnostics'
+import { fireAndForget } from './fireAndForget'
 
 // Audio codecs Chrome can't play in MP4/MKV natively — must be re-encoded.
 const UNSUPPORTED_AUDIO_CODECS = new Set([
@@ -166,11 +167,11 @@ export async function tmdbCacheGet(id: string): Promise<unknown> {
 export function tmdbCachePut(meta: object): void {
   const base = proxyBase()
   if (!base) return
-  fetch(`${base}/tmdb`, {
+  fireAndForget(`${base}/tmdb`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(meta),
-  }).catch(() => {})
+  })
 }
 
 let _lastHlsError = ''

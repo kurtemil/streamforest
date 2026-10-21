@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { isSubtitleSize, type SubtitleSize } from '@/lib/subtitleSize'
+import { fireAndForget } from '@/lib/fireAndForget'
 
 export interface PlaybackPrefs {
   preferredSubtitleLang: string  // '' = off
@@ -27,11 +28,11 @@ async function pushPrefs(profileId: string, prefs: Partial<PlaybackPrefs>) {
     autoplay_next: prefs.autoplayNextEpisode ?? true,
     subtitle_size: prefs.subtitleSize ?? 'm',
   })
-  fetch(PREFS_API, {
+  fireAndForget(PREFS_API, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ profileId, key: 'prefs', value }),
-  }).catch(() => {})
+  })
 }
 
 /**

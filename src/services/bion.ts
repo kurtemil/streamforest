@@ -2,6 +2,8 @@
 // commands and reads the status; the kiosk reads commands and writes the status.
 // See functions/api/bion.ts for why this is polling and not a socket.
 
+import { fireAndForget } from '@/lib/fireAndForget'
+
 const API = '/api/bion'
 
 /** The one kiosk there is. A second screen would be a second device name. */
@@ -81,7 +83,11 @@ export async function pollBion(after?: number): Promise<BionPoll | null> {
   if (after !== undefined) q.set('after', String(after))
   try {
     const res = await fetch(`${API}?${q}`, { cache: 'no-store' })
-    return res.ok ? await res.json() as BionPoll : null
+    if (res.ok) return await res.json() as BionPoll
+    // Read or cancelled, never left: the kiosk asks every two seconds, and an unread
+    // body holds a file open (see lib/fireAndForget.ts).
+    res.body?.cancel().catch(() => {})
+    return null
   } catch {
     return null
   }
@@ -94,6 +100,7 @@ export async function sendBion(command: BionCommand): Promise<boolean> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ device: BION_DEVICE, command }),
     })
+    res.body?.cancel().catch(() => {})
     return res.ok
   } catch {
     return false
@@ -101,11 +108,11 @@ export async function sendBion(command: BionCommand): Promise<boolean> {
 }
 
 export function putBionStatus(status: Omit<BionStatus, 'updated'>): void {
-  fetch(API, {
+  fireAndForget(API, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ device: BION_DEVICE, status }),
-  }).catch(() => {})
+  })
 }
 
 /** How long a status counts as current. The kiosk writes every five seconds while a film is on. */

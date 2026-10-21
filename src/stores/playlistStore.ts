@@ -4,6 +4,7 @@ import { db, getPlaylistMeta } from '@/services/db'
 import type { Channel } from '@/types'
 import { t } from '@/lib/i18n'
 import { safeImageUrl } from '@/lib/images'
+import { fireAndForget } from '@/lib/fireAndForget'
 
 interface PlaylistState {
   channels: Channel[]
@@ -97,11 +98,11 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
         if (wasEmpty) get().refresh()
       } else if (!data.m3u_url && get().m3uUrl) {
         // Local has a URL but D1 doesn't — push it up so other devices/PWA can sync
-        fetch('/api/preferences', {
+        fireAndForget('/api/preferences', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ profileId: '_global', key: 'm3u_url', value: get().m3uUrl }),
-        }).catch(() => {})
+        })
       }
     } catch {
       // offline or D1 not configured — silent

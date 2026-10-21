@@ -3,6 +3,7 @@ import type { EpgProgram } from '@/types'
 import { fetchAndParseEpg, epgUrlFromM3u, normalizeChannelName } from '@/services/epg'
 import { saveEpgPrograms, loadEpgFromDB, saveEpgChannelNames, loadEpgChannelNames } from '@/services/db'
 import { t } from '@/lib/i18n'
+import { fireAndForget } from '@/lib/fireAndForget'
 
 const LAST_FETCHED_KEY = 'sf_epg_fetched'
 const EPG_URL_KEY      = 'sf_epg_url'
@@ -40,11 +41,11 @@ export const useEpgStore = create<EpgState>((set, get) => ({
   setEpgUrl: (url: string) => {
     localStorage.setItem(EPG_URL_KEY, url)
     set({ epgUrl: url })
-    fetch('/api/preferences', {
+    fireAndForget('/api/preferences', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ profileId: '_global', key: 'epg_url', value: url }),
-    }).catch(() => {})
+    })
   },
 
   syncEpgUrlFromRemote: async () => {
@@ -57,11 +58,11 @@ export const useEpgStore = create<EpgState>((set, get) => ({
         set({ epgUrl: data.epg_url })
       } else if (!data.epg_url && get().epgUrl) {
         // Local has a URL but D1 doesn't — push it up so other devices/PWA can sync
-        fetch('/api/preferences', {
+        fireAndForget('/api/preferences', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ profileId: '_global', key: 'epg_url', value: get().epgUrl }),
-        }).catch(() => {})
+        })
       }
     } catch {
       // offline or D1 not configured — silent

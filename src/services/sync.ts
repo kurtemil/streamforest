@@ -1,5 +1,6 @@
 import { db } from './db'
 import type { WatchProgress, WatchLater } from '@/types'
+import { fireAndForget } from '@/lib/fireAndForget'
 
 const PROGRESS_API = '/api/progress'
 const WATCH_LATER_API = '/api/watchlater'
@@ -23,37 +24,37 @@ export async function syncFromRemote(profileId: string): Promise<void> {
 }
 
 export function pushProgress(entry: WatchProgress): void {
-  fetch(PROGRESS_API, {
+  fireAndForget(PROGRESS_API, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(entry),
-  }).catch(() => {})
+  })
 }
 
 export function deleteRemoteProgress(profileId: string, channelId: string): void {
-  fetch(`${PROGRESS_API}?profileId=${encodeURIComponent(profileId)}&channelId=${encodeURIComponent(channelId)}`, {
+  fireAndForget(`${PROGRESS_API}?profileId=${encodeURIComponent(profileId)}&channelId=${encodeURIComponent(channelId)}`, {
     method: 'DELETE',
-  }).catch(() => {})
+  })
 }
 
 /** Many entries in batches: one request per 200 instead of one per episode. */
 export async function pushProgressMany(entries: WatchProgress[]): Promise<void> {
   for (let i = 0; i < entries.length; i += 200) {
-    await fetch(PROGRESS_API, {
+    await fireAndForget(PROGRESS_API, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(entries.slice(i, i + 200)),
-    }).catch(() => {})
+    })
   }
 }
 
 export async function deleteRemoteProgressMany(profileId: string, channelIds: string[]): Promise<void> {
   for (let i = 0; i < channelIds.length; i += 200) {
-    await fetch(`${PROGRESS_API}?profileId=${encodeURIComponent(profileId)}`, {
+    await fireAndForget(`${PROGRESS_API}?profileId=${encodeURIComponent(profileId)}`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ channelIds: channelIds.slice(i, i + 200) }),
-    }).catch(() => {})
+    })
   }
 }
 
@@ -78,15 +79,15 @@ export async function syncWatchLaterFromRemote(profileId: string): Promise<void>
 }
 
 export function pushWatchLater(entry: WatchLater): void {
-  fetch(WATCH_LATER_API, {
+  fireAndForget(WATCH_LATER_API, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(entry),
-  }).catch(() => {})
+  })
 }
 
 export function deleteRemoteWatchLater(profileId: string, contentId: string): void {
-  fetch(`${WATCH_LATER_API}?profileId=${encodeURIComponent(profileId)}&contentId=${encodeURIComponent(contentId)}`, {
+  fireAndForget(`${WATCH_LATER_API}?profileId=${encodeURIComponent(profileId)}&contentId=${encodeURIComponent(contentId)}`, {
     method: 'DELETE',
-  }).catch(() => {})
+  })
 }

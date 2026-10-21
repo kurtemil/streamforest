@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { fireAndForget } from '@/lib/fireAndForget'
 
 export type ContentType = 'movie' | 'series' | 'live'
 
@@ -22,11 +23,11 @@ function persist(data: Record<string, Raw>) {
 }
 
 function push(profileId: string, raw: Raw) {
-  fetch(API, {
+  fireAndForget(API, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ profileId, ...raw }),
-  }).catch(() => {})
+  })
 }
 
 interface ExclusionsState {
