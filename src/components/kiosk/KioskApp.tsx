@@ -393,15 +393,17 @@ function Idle({ message }: { message: string | null }) {
   const tag = INTL_TAGS[locale]
   const time = now.toLocaleTimeString(tag, { hour: '2-digit', minute: '2-digit' })
   const date = now.toLocaleDateString(tag, { weekday: 'long', day: 'numeric', month: 'long' })
+  // Sized by the screen's height as well: the living room TV's WebView is 960×540, half
+  // the basement's 1920×1080, and fixed sizes made the date run into the hint there.
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.06),transparent_60%)]">
-      <p className="text-[12rem] leading-none font-extralight tabular-nums tracking-tight text-white/90">{time}</p>
-      <p className="mt-6 text-3xl font-light text-white/45 first-letter:uppercase">{date}</p>
-      <div className="absolute bottom-20 inset-x-0 flex flex-col items-center gap-3 px-16 text-center">
+      <p className="text-[min(12rem,28vh)] leading-none font-extralight tabular-nums tracking-tight text-white/90">{time}</p>
+      <p className="mt-[min(1.5rem,3vh)] text-[min(1.875rem,5.5vh)] font-light text-white/45 first-letter:uppercase">{date}</p>
+      <div className="absolute bottom-[min(5rem,7vh)] inset-x-0 flex flex-col items-center gap-3 px-16 text-center">
         <p className="text-sm font-semibold uppercase tracking-[0.35em] text-white/35">
           {DEVICE === 'vardagsrum' ? tr('bion.livingRoom') : 'Bion'}
         </p>
-        <p className={`text-2xl ${message ? 'text-amber-300/90' : 'text-white/40'}`}>{message ?? tr('bion.idleHint')}</p>
+        <p className={`text-[min(1.5rem,4.4vh)] ${message ? 'text-amber-300/90' : 'text-white/40'}`}>{message ?? tr('bion.idleHint')}</p>
       </div>
     </div>
   )
@@ -414,7 +416,9 @@ function Loading({ title, backdrop }: { title?: string; backdrop: string | null 
       {backdrop && <img src={backdrop} alt="" className="absolute inset-0 w-full h-full object-cover opacity-40" />}
       <div className="relative w-full px-16 pb-16 pt-40 bg-gradient-to-t from-black via-black/70 to-transparent">
         <div className="h-10 w-10 mb-6 rounded-full border-2 border-white/80 border-t-transparent animate-spin" />
-        <p className="text-5xl font-semibold tracking-tight">{title ? tr('bion.loading', { title }) : tr('bion.starting')}</p>
+        <p className="text-5xl font-semibold tracking-tight">
+          {title ? tr('bion.loading', { title }) : tr(DEVICE === 'vardagsrum' ? 'bion.lr.starting' : 'bion.starting')}
+        </p>
       </div>
     </div>
   )
