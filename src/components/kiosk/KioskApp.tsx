@@ -206,18 +206,20 @@ export function KioskApp() {
     let after: number | null = kioskStartCursor()
     let timer = 0
 
-    const become = async (profile: Profile) => {
+    const become = async (profile: Profile, source: BionSource) => {
       useProfileStore.getState().setProfile(profile.id)
       // Subtitle language and size, and (for IPTV) where each film was left, are the
-      // profile's, as on the phone. Home films keep their positions in Jellyfin.
+      // profile's, as on the phone. Home films keep their positions in Jellyfin, so
+      // they do not wait for the IPTV ones: on a new kiosk those queue behind the
+      // playlist's first write, which took minutes on the living room TV.
       await Promise.all([
         usePlaybackPrefsStore.getState().syncFromRemote(profile.id).catch(() => {}),
-        syncFromRemote(profile.id),
+        source === 'iptv' ? syncFromRemote(profile.id) : Promise.resolve(),
       ])
     }
 
     const startHome = async (c: Extract<BionCommand, { type: 'play' }>, profile: Profile) => {
-      await become(profile)
+      await become(profile, 'home')
       const home = useHomeLibraryStore.getState()
       await home.load(profile.id, profile.name)
       const fresh = useHomeLibraryStore.getState()
@@ -229,7 +231,7 @@ export function KioskApp() {
 
     const startIptv = async (c: Extract<BionCommand, { type: 'play' }>, profile: Profile) => {
       setPhase({ state: 'loading' })
-      await become(profile)
+      await become(profile, 'iptv')
       await ensurePlaylist()
       const find = () => usePlaylistStore.getState().channels.find((ch) => ch.id === c.itemId)
       let channel = find()

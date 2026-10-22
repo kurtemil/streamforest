@@ -12,12 +12,12 @@ export async function syncFromRemote(profileId: string): Promise<void> {
     const res = await fetch(`${PROGRESS_API}?profileId=${encodeURIComponent(profileId)}`)
     if (!res.ok) return
     const remote: WatchProgress[] = await res.json()
-    for (const r of remote) {
-      const local = await db.watchProgress.get(r.id)
-      if (!local || r.lastWatched > local.lastWatched) {
-        await db.watchProgress.put(r)
-      }
-    }
+    if (remote.length === 0) return
+    // One read and one write for the lot: a get and a put per entry took minutes
+    // for 873 entries on the living room TV's kiosk, whose storage is slow.
+    const local = await db.watchProgress.bulkGet(remote.map((r) => r.id))
+    const newer = remote.filter((r, i) => !local[i] || r.lastWatched > local[i]!.lastWatched)
+    if (newer.length > 0) await db.watchProgress.bulkPut(newer)
   } catch {
     // silent — offline or D1 not configured yet
   }
