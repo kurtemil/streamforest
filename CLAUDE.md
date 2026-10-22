@@ -312,6 +312,19 @@ and shows StreamForest full screen in Chromium (cage, a one-window Wayland
 compositor). Its container lives in the `hemma` repo, `bio/kiosk/`, and opens
 `/?kiosk=bion`. Nobody touches it: there is no keyboard or mouse in the sofa.
 
+- **Two kiosks since 2026-10-22.** `bion` in the basement and `vardagsrum`, the living
+  room TV: the TV's app in `hemma/tv/startskarm` opens `/?kiosk=vardagsrum` full screen
+  (an Android WebView, `Kiosk.java`). `kioskDevice()` is the name it polls and writes
+  with; anything unknown is `bion`. The phone has a button per kiosk (projector for Bion,
+  sofa for the living room) and `bionStore.target` is the one Plays go to
+  (`sf-bion-mode` holds `bion`, `vardagsrum`, or the old `1` = Bion). The living room's
+  button always shows: that kiosk polls only while it is on screen, so it is not
+  "alive" between films. A Play to it calls the same `HA_BION_WEBHOOK` with
+  `{ device: 'vardagsrum', source, seq }`; HA's automation sends that to
+  `script.vardagsrum_spela`, which wakes the TV and opens the kiosk with `?after=seq−1`
+  (`kioskStartCursor()`), so its first poll reads that Play instead of skipping it.
+  The page calls `window.KioskHost.state(state)` on every change, and the TV's app goes
+  back to its home screen 30 s after a film. Volume and `hold` stay Bion's.
 - **`src/lib/kiosk.ts`** decides it once, from `?kiosk=` kept in localStorage
   (`?kiosk=off` clears it). `main.tsx` then renders `KioskApp` instead of `App`
   (inside the router: VideoPlayer navigates), and registers no service worker:

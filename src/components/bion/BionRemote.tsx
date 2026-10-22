@@ -1,7 +1,7 @@
-import { useEffect, useReducer, useRef, useState } from 'react'
-import { Captions, Check, Minus, Pause, Play, Plus, RotateCcw, RotateCw, Square, Tv, Volume2 } from 'lucide-react'
+import { useEffect, useReducer, useRef, useState, type ReactNode } from 'react'
+import { Captions, Check, Minus, Pause, Play, Plus, Projector, RotateCcw, RotateCw, Sofa, Square, Volume2 } from 'lucide-react'
 import { bionAlive, bionVisible, receiverVolume, useBionStore, VOLUME_STEP } from '@/stores/bionStore'
-import type { BionTrack } from '@/services/bion'
+import type { BionDevice, BionTrack } from '@/services/bion'
 import { progressPercent } from '@/lib/progress'
 import { useT } from '@/lib/i18n'
 
@@ -19,15 +19,30 @@ function clock(seconds: number | undefined): string {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`
 }
 
+/** What the remote calls each kiosk. Bion's own strings came first, the living room's beside them. */
+const WORDS = {
+  bion: {
+    playOn: 'bion.playOn', remote: 'bion.remote', starting: 'bion.starting', playing: 'bion.playing',
+    paused: 'bion.paused', readyHint: 'bion.readyHint', sendFailed: 'bion.sendFailed',
+  },
+  vardagsrum: {
+    playOn: 'bion.lr.playOn', remote: 'bion.lr.remote', starting: 'bion.lr.starting', playing: 'bion.lr.playing',
+    paused: 'bion.lr.paused', readyHint: 'bion.lr.readyHint', sendFailed: 'bion.lr.sendFailed',
+  },
+} as const
+
 /**
- * Bion, the kiosk in the basement, from the phone: the button that turns Bion mode
- * on and off (every Play then goes there), and the remote that floats above the tab
- * bar while the mode is on or something is playing there. The button shows only
- * while the kiosk has been heard from, or the mode is already on.
+ * The kiosks from the phone: a button for each that turns Bion mode on for it
+ * (every Play then goes there) and off, and the remote that floats above the tab
+ * bar while a mode is on or something is playing. Bion's button shows only while
+ * that kiosk has been heard from or a mode is on; the living room's always, since
+ * Home Assistant switches the TV's kiosk on when a Play arrives.
  */
 export function BionRemote() {
   const t = useT()
-  const { mode, status, pending, clockSkew, failed, receiver, volumeHeld, setMode, poll, send, setVolume } = useBionStore()
+  const { target, status, pending, clockSkew, failed, receiver, volumeHeld, setTarget, poll, send, setVolume } = useBionStore()
+  const watched: BionDevice = target ?? 'bion'
+  const words = WORDS[watched]
   const volume = receiverVolume({ receiver, volumeHeld })
   const active = bionVisible({ status, pending, clockSkew })
   const alive = bionAlive({ status, clockSkew })
@@ -45,7 +60,7 @@ export function BionRemote() {
       if (!alive) return
       tick()
       const s = useBionStore.getState()
-      timer = window.setTimeout(loop, bionVisible(s) ? ACTIVE_POLL_MS : s.mode ? MODE_POLL_MS : IDLE_POLL_MS)
+      timer = window.setTimeout(loop, bionVisible(s) ? ACTIVE_POLL_MS : s.target ? MODE_POLL_MS : IDLE_POLL_MS)
     }
     void loop()
     const onVisible = () => { if (document.visibilityState === 'visible') void poll() }
@@ -57,17 +72,21 @@ export function BionRemote() {
     }
   }, [poll])
 
-  const showToggle = mode || alive || active
-  const showBar = active || mode
+  const showBionToggle = target !== null || alive || active
+  const showBar = active || target !== null
+  const name = watched === 'vardagsrum' ? t('bion.livingRoom') : 'Bion'
+  const Icon = watched === 'vardagsrum' ? Sofa : Projector
 
   const state = pending ? 'loading' : active ? status?.state ?? 'loading' : 'idle'
   const title = pending?.title ?? (active ? status?.title : undefined) ?? ''
-  const label = state === 'failed' ? 'Bion'
-    : state === 'paused' ? t('bion.paused')
-    : state === 'playing' ? t('bion.playing')
+  const label = state === 'failed' ? name
+    : state === 'paused' ? t(words.paused)
+    : state === 'playing' ? t(words.playing)
     : state === 'waiting' ? t('bion.waiting')
-    : state === 'loading' ? t('bion.starting')
-    : alive ? `Bion · ${t('bion.ready')}` : t('bion.offline')
+    : state === 'loading' ? t(words.starting)
+    : alive ? `${name} · ${t('bion.ready')}`
+    // The TV's kiosk is off until a Play wakes it, which is not the same as not answering.
+    : watched === 'vardagsrum' ? t('bion.lr.wakes') : t('bion.offline')
   const live = state === 'playing' || state === 'paused'
   const seekable = live && !status?.live
   const duration = status?.duration ?? 0
@@ -91,23 +110,26 @@ export function BionRemote() {
 
   return (
     <>
-      {showToggle && (
-        <button
-          onClick={() => setMode(!mode)}
-          aria-pressed={mode}
-          aria-label={mode ? t('bion.toggleOff') : t('bion.playOn')}
-          title={mode ? t('bion.toggleOff') : t('bion.playOn')}
-          className={`fixed z-40 right-3 bottom-[calc(8.5rem+env(safe-area-inset-bottom,0px))] md:right-4 md:bottom-4 w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-xl ring-1 shadow-cinema active:scale-95 transition-all ${
-            mode ? 'bg-accent-600 ring-accent-400/60 text-white' : 'bg-surface-200/80 ring-white/12 text-neutral-300'
-          }`}
+      {/* Bion lowest, where its one button always was; the living room above it. */}
+      <div className="fixed z-40 right-3 bottom-[calc(8.5rem+env(safe-area-inset-bottom,0px))] md:right-4 md:bottom-4 flex flex-col-reverse gap-2">
+        {showBionToggle && (
+          <KioskToggle on={target === 'bion'} label={t(WORDS.bion.playOn)} offLabel={t('bion.toggleOff')} onClick={() => setTarget(target === 'bion' ? null : 'bion')}>
+            <Projector size={20} />
+          </KioskToggle>
+        )}
+        <KioskToggle
+          on={target === 'vardagsrum'}
+          label={t(WORDS.vardagsrum.playOn)}
+          offLabel={t('bion.toggleOff')}
+          onClick={() => setTarget(target === 'vardagsrum' ? null : 'vardagsrum')}
         >
-          <Tv size={20} />
-        </button>
-      )}
+          <Sofa size={20} />
+        </KioskToggle>
+      </div>
       {showBar && (
         <div
           role="region"
-          aria-label={t('bion.remote')}
+          aria-label={t(words.remote)}
           className="fixed z-40 left-3 right-[4.5rem] bottom-[calc(4.75rem+env(safe-area-inset-bottom,0px))] md:left-auto md:right-20 md:bottom-4 md:w-[26rem] rounded-2xl bg-surface-200/90 backdrop-blur-xl ring-1 ring-white/12 shadow-cinema overflow-hidden"
         >
           {tracksOpen && hasTracks && (
@@ -133,7 +155,7 @@ export function BionRemote() {
           {/* Title on its own row and the buttons under it: four 44px buttons beside
               the title left it about 90px on a phone, and the time was cut off. */}
           <div className="flex items-center gap-2.5 px-3 py-2 min-h-14">
-            <Tv size={18} className={`shrink-0 ${alive || active ? 'text-accent-400' : 'text-neutral-500'}`} aria-hidden="true" />
+            <Icon size={18} className={`shrink-0 ${alive || active ? 'text-accent-400' : 'text-neutral-500'}`} aria-hidden="true" />
             <div className="flex-1 min-w-0">
               <p className="text-caption text-neutral-400 leading-tight truncate">
                 {label}
@@ -142,7 +164,7 @@ export function BionRemote() {
                 )}
               </p>
               <p className="text-body text-white font-medium leading-tight truncate">
-                {failed ? t('bion.sendFailed') : title || t('bion.readyHint')}
+                {failed ? t(words.sendFailed) : title || t(words.readyHint)}
               </p>
             </div>
           </div>
@@ -245,6 +267,28 @@ export function BionRemote() {
         </div>
       )}
     </>
+  )
+}
+
+function KioskToggle({ on, label, offLabel, onClick, children }: {
+  on: boolean
+  label: string
+  offLabel: string
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={on}
+      aria-label={on ? offLabel : label}
+      title={on ? offLabel : label}
+      className={`w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-xl ring-1 shadow-cinema active:scale-95 transition-all ${
+        on ? 'bg-accent-600 ring-accent-400/60 text-white' : 'bg-surface-200/80 ring-white/12 text-neutral-300'
+      }`}
+    >
+      {children}
+    </button>
   )
 }
 

@@ -1,13 +1,19 @@
-// Talking to the kiosk in the basement ("Bion") through /api/bion. The phone sends
-// commands and reads the status; the kiosk reads commands and writes the status.
-// See functions/api/bion.ts for why this is polling and not a socket.
+// Talking to the kiosks through /api/bion: Bion in the basement, and the TV in the
+// living room. The phone sends commands and reads the status; a kiosk reads its
+// commands and writes its status. See functions/api/bion.ts for why this is polling
+// and not a socket.
 
 import { fireAndForget } from '@/lib/fireAndForget'
 
 const API = '/api/bion'
 
-/** The one kiosk there is. A second screen would be a second device name. */
-export const BION_DEVICE = 'bion'
+/**
+ * The kiosks, by the name each one polls with. `bion` is the projector in the
+ * basement; `vardagsrum` the TV upstairs, whose app Home Assistant opens when a Play
+ * is sent to it.
+ */
+export const BION_DEVICES = ['bion', 'vardagsrum'] as const
+export type BionDevice = (typeof BION_DEVICES)[number]
 
 /** Where a film comes from: the home server's Jellyfin, or the IPTV playlist. */
 export type BionSource = 'home' | 'iptv'
@@ -78,8 +84,8 @@ export interface ReceiverStatus {
   updated?: number
 }
 
-export async function pollBion(after?: number): Promise<BionPoll | null> {
-  const q = new URLSearchParams({ device: BION_DEVICE })
+export async function pollBion(device: BionDevice, after?: number): Promise<BionPoll | null> {
+  const q = new URLSearchParams({ device })
   if (after !== undefined) q.set('after', String(after))
   try {
     const res = await fetch(`${API}?${q}`, { cache: 'no-store' })
@@ -93,12 +99,12 @@ export async function pollBion(after?: number): Promise<BionPoll | null> {
   }
 }
 
-export async function sendBion(command: BionCommand): Promise<boolean> {
+export async function sendBion(device: BionDevice, command: BionCommand): Promise<boolean> {
   try {
     const res = await fetch(API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device: BION_DEVICE, command }),
+      body: JSON.stringify({ device, command }),
     })
     res.body?.cancel().catch(() => {})
     return res.ok
@@ -107,11 +113,11 @@ export async function sendBion(command: BionCommand): Promise<boolean> {
   }
 }
 
-export function putBionStatus(status: Omit<BionStatus, 'updated'>): void {
+export function putBionStatus(device: BionDevice, status: Omit<BionStatus, 'updated'>): void {
   fireAndForget(API, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ device: BION_DEVICE, status }),
+    body: JSON.stringify({ device, status }),
   })
 }
 

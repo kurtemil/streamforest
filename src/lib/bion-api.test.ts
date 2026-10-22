@@ -135,6 +135,38 @@ describe('/api/bion', () => {
     expect(fetchMock.mock.calls[0]).toMatchObject(['https://ha.example/api/webhook/abc', { method: 'POST', body: '{"source":"iptv"}' }])
   })
 
+  it('opens the living room TV through Home Assistant at the Play it was sent', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const waited: Promise<unknown>[] = []
+    const env = { DB: memoryDb().db, HA_BION_WEBHOOK: 'https://ha.example/api/webhook/abc' }
+    const post = (device: string, command: unknown) => onRequest({
+      request: new Request('https://x/api/bion', { method: 'POST', body: JSON.stringify({ device, command }) }),
+      env: env as never,
+      waitUntil: (p) => { waited.push(p) },
+    })
+    await post('vardagsrum', { type: 'pause' })
+    await post('vardagsrum', { type: 'play', source: 'home', profileId: 'noah', itemId: 'jf1' })
+    await Promise.all(waited)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)))
+      .toEqual({ device: 'vardagsrum', source: 'home', seq: 2 })
+  })
+
+  it('sends a Play in the living room there when that is the choice', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"ok":true}')))
+    useBionStore.getState().setTarget('vardagsrum')
+    useProfileStore.setState({ activeProfileId: 'vera' })
+    usePlayerStore.getState().play({ id: 'm_7', name: 'Frost', url: 'http://example.invalid/7.mkv', logo: '', groupTitle: 'VOD', type: 'movie', sortIndex: 0 })
+    await Promise.resolve()
+    const posts = (vi.mocked(fetch).mock.calls as [string, RequestInit][]).filter(([, i]) => i?.method === 'POST')
+    expect(JSON.parse(String(posts[0][1].body)).device).toBe('vardagsrum')
+    useBionStore.getState().setTarget(null)
+    expect(useBionStore.getState().target).toBeNull()
+    usePlayerStore.setState({ current: null })
+    vi.unstubAllGlobals()
+  })
+
   it('sends the volume to Home Assistant as a level, and never to the kiosk', async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
@@ -221,7 +253,7 @@ describe('Bion mode', () => {
     .map(([, init]) => JSON.parse(String(init.body)))
 
   afterEach(() => {
-    useBionStore.setState({ mode: false, pending: null })
+    useBionStore.setState({ target: null, pending: null })
     usePlayerStore.setState({ current: null })
     useHomeLibraryStore.setState({ playing: null, profileId: null })
     vi.unstubAllGlobals()
@@ -230,7 +262,7 @@ describe('Bion mode', () => {
   it('sends a Play to Bion instead of opening the player here', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"ok":true}')))
     useProfileStore.setState({ activeProfileId: 'elof' })
-    useBionStore.setState({ mode: true })
+    useBionStore.setState({ target: 'bion' })
     usePlayerStore.getState().play(channel)
     await Promise.resolve()
     expect(usePlayerStore.getState().current).toBeNull()
@@ -240,7 +272,7 @@ describe('Bion mode', () => {
 
   it('sends a home film as the profile the library was loaded for', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"ok":true}')))
-    useBionStore.setState({ mode: true })
+    useBionStore.setState({ target: 'bion' })
     useHomeLibraryStore.setState({ profileId: 'vera' })
     const item = { id: 'jf1', name: 'Paul', durationSec: 6000, positionSec: 0, played: false } as never
     useHomeLibraryStore.getState().play(item, { fromStart: true })

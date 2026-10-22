@@ -11,6 +11,7 @@ import { syncFromRemote } from '@/services/sync'
 import { clearProgress } from '@/services/db'
 import { backdropUrl } from '@/services/jellyfin'
 import { pollBion, putBionStatus, type BionCommand, type BionSource, type BionStatus } from '@/services/bion'
+import { kioskDevice, kioskStartCursor } from '@/lib/kiosk'
 import { getPlayerBridge, seekTarget, type PlayerBridge } from '@/lib/playerBridge'
 import { progressPercent } from '@/lib/progress'
 import { t, useLocale, useT, INTL_TAGS } from '@/lib/i18n'
@@ -34,6 +35,20 @@ const HOLD_MS = 4 * 60_000
 /** What the phone is offered of a film's tracks, so the status stays small. */
 const MAX_TRACKS = 30
 const MAX_TRACK_NAME = 60
+
+declare global {
+  interface Window {
+    /**
+     * The TV's app (hemma/tv/startskarm), when this page runs in it: told the kiosk's
+     * state whenever it changes, so it can keep the screen on during a film and go
+     * back to the TV's home screen when nothing is on.
+     */
+    KioskHost?: { state?: (state: string) => void }
+  }
+}
+
+/** Which kiosk this page is, and so which queue it reads and which status it writes. */
+const DEVICE = kioskDevice()
 
 /**
  * Set while Home Assistant warms the projector up: every film that starts playing
@@ -184,10 +199,11 @@ export function KioskApp() {
   }, [])
 
   // Commands. The first poll only learns where the queue stands, so a restart never
-  // replays a film somebody asked for before it.
+  // replays a film somebody asked for before it; unless the page was opened by that
+  // film (the TV's app, `?after=`), and then it starts just before it.
   useEffect(() => {
     let alive = true
-    let after: number | null = null
+    let after: number | null = kioskStartCursor()
     let timer = 0
 
     const become = async (profile: Profile) => {
@@ -252,7 +268,7 @@ export function KioskApp() {
     }
 
     const loop = async () => {
-      const poll = await pollBion(after ?? undefined)
+      const poll = await pollBion(DEVICE, after ?? undefined)
       if (!alive) return
       if (poll) {
         if (after === null) after = poll.latest
@@ -273,6 +289,7 @@ export function KioskApp() {
   useEffect(() => {
     let sentKey = ''
     let sentAt = 0
+    let hostState = ''
     const timer = window.setInterval(() => {
       // A hold nobody lifted: the film starts, picture or not.
       if (hold && Date.now() > hold.until) {
@@ -306,8 +323,12 @@ export function KioskApp() {
         `${status.audio?.length ?? 0}:${status.audioActive ?? ''}|${status.subtitles?.length ?? 0}:${status.subtitleActive ?? ''}`
       const now = Date.now()
       const every = status.state === 'idle' ? IDLE_STATUS_EVERY_MS : STATUS_EVERY_MS
+      if (status.state !== hostState) {
+        hostState = status.state
+        try { window.KioskHost?.state?.(status.state) } catch { /* not in the TV's app */ }
+      }
       if (key !== sentKey || now - sentAt >= every || writeStatusNow) {
-        putBionStatus(status)
+        putBionStatus(DEVICE, status)
         sentKey = key
         sentAt = now
         writeStatusNow = false
@@ -375,7 +396,9 @@ function Idle({ message }: { message: string | null }) {
       <p className="text-[12rem] leading-none font-extralight tabular-nums tracking-tight text-white/90">{time}</p>
       <p className="mt-6 text-3xl font-light text-white/45 first-letter:uppercase">{date}</p>
       <div className="absolute bottom-20 inset-x-0 flex flex-col items-center gap-3 px-16 text-center">
-        <p className="text-sm font-semibold uppercase tracking-[0.35em] text-white/35">Bion</p>
+        <p className="text-sm font-semibold uppercase tracking-[0.35em] text-white/35">
+          {DEVICE === 'vardagsrum' ? tr('bion.livingRoom') : 'Bion'}
+        </p>
         <p className={`text-2xl ${message ? 'text-amber-300/90' : 'text-white/40'}`}>{message ?? tr('bion.idleHint')}</p>
       </div>
     </div>

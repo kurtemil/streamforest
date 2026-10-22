@@ -1,5 +1,6 @@
-// /api/bion — the phone tells the kiosk in the basement what to play, and the kiosk
-// tells the phone what it is doing. No socket and no push: the kiosk asks every two
+// /api/bion — the phone tells a kiosk what to play (`bion` in the basement, or
+// `vardagsrum`, the TV in the living room), and the kiosk tells the phone what it is
+// doing. No socket and no push: the kiosk asks every two
 // seconds (GET with `after`), the phone posts a command (POST) and reads the status
 // the kiosk keeps writing (PUT). Two small tables in the same D1 as everything else.
 //
@@ -21,8 +22,9 @@ interface Env {
   /**
    * Home Assistant's webhook for the cinema, the whole URL (Pages secret). A Play on
    * Bion calls it, and HA switches the receiver and the projector on, and holds the
-   * film while the lamp warms up. The remote's volume goes the same way. Unset: the
-   * kiosk plays as before, and there is no volume.
+   * film while the lamp warms up. The remote's volume goes the same way. A Play in the
+   * living room calls it too, with `device` and the Play's `seq`: HA then opens the
+   * TV's kiosk at that Play. Unset: the kiosks play as before, and there is no volume.
    */
   HA_BION_WEBHOOK?: string
 }
@@ -107,8 +109,10 @@ export function cleanCommand(raw: unknown): Record<string, unknown> | null {
 }
 
 /**
- * Tells Home Assistant something for the cinema: `{ source }` for a Play, which
- * switches it on, or `{ volume }` for the receiver. False when HA could not be reached.
+ * Tells Home Assistant something: `{ source }` for a Play on Bion, which switches the
+ * cinema on, `{ volume }` for the receiver, or `{ device: 'vardagsrum', source, seq }`
+ * for a Play in the living room, which opens the TV's kiosk at that seq. Bion's body
+ * has no `device`, as before there were two kiosks. False when HA could not be reached.
  */
 async function callHome(env: Env, body: Record<string, unknown>): Promise<boolean> {
   if (!env.HA_BION_WEBHOOK) return false
@@ -185,9 +189,16 @@ export async function onRequest(context: {
       await env.DB.prepare('INSERT INTO bion_commands (device, body, created) VALUES (?, ?, ?)')
         .bind(device, JSON.stringify(command), now).run()
       await env.DB.prepare('DELETE FROM bion_commands WHERE created < ?').bind(now - PRUNE_AFTER_MS).run()
-      // A Play switches the cinema on. Never holds up the answer: the film is queued either way.
-      if (command.type === 'play' && device === 'bion') {
-        const woken = callHome(env, { source: command.source })
+      // A Play switches the cinema on, or opens the TV's kiosk upstairs, which polls
+      // only while it is open. Never holds up the answer: the film is queued either way.
+      if (command.type === 'play' && (device === 'bion' || device === 'vardagsrum')) {
+        let body: Record<string, unknown> = { source: command.source }
+        if (device === 'vardagsrum') {
+          const row = (await env.DB.prepare('SELECT MAX(seq) AS latest FROM bion_commands WHERE device = ?')
+            .bind(device).all()).results[0]
+          body = { device, source: command.source, seq: Number(row?.latest ?? 0) || 0 }
+        }
+        const woken = callHome(env, body)
         if (context.waitUntil) context.waitUntil(woken)
         else await woken
       }

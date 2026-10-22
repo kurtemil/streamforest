@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import {
-  isBionActive, pollBion, sendBion, STATUS_FRESH_MS, type BionCommand, type BionStatus, type ReceiverStatus,
+  isBionActive, pollBion, sendBion, STATUS_FRESH_MS,
+  type BionCommand, type BionDevice, type BionStatus, type ReceiverStatus,
 } from '@/services/bion'
 import { isKiosk } from '@/lib/kiosk'
 import type { HomeItem } from '@/services/jellyfin'
@@ -16,17 +17,27 @@ const VOLUME_HELD_MS = 5_000
 /** One tap on the remote: a step in HA's scale, which is one dB. */
 export const VOLUME_STEP = 0.02
 
-function readMode(): boolean {
-  try { return !isKiosk() && localStorage.getItem(MODE_KEY) === '1' } catch { return false }
+function readTarget(): BionDevice | null {
+  try {
+    if (isKiosk()) return null
+    const stored = localStorage.getItem(MODE_KEY)
+    // '1' is Bion mode from before there were two kiosks.
+    if (stored === '1' || stored === 'bion') return 'bion'
+    return stored === 'vardagsrum' ? 'vardagsrum' : null
+  } catch {
+    return null
+  }
 }
 
 interface BionState {
   /**
-   * Bion mode, per device: every Play in the app goes to the kiosk in the basement
-   * instead of playing here. An old iPad can stay in it and be the cinema's remote.
-   * Never on the kiosk itself, which would send its films to itself.
+   * Bion mode, per device: the kiosk every Play in the app goes to instead of playing
+   * here, Bion in the basement or the TV in the living room. Null plays here. An old
+   * iPad can stay in it and be the cinema's remote. Never set on a kiosk itself,
+   * which would send its films to itself.
    */
-  mode: boolean
+  target: BionDevice | null
+  /** What the watched kiosk (the target, else Bion) last wrote. */
   status: BionStatus | null
   /** Server clock minus this device's, from the last poll: `status.updated` is server time. */
   clockSkew: number
@@ -37,7 +48,7 @@ interface BionState {
   receiver: ReceiverStatus | null
   /** A level just sent, shown until HA reports the receiver at it. */
   volumeHeld: { to: number; at: number } | null
-  setMode: (on: boolean) => void
+  setTarget: (device: BionDevice | null) => void
   /** The receiver to a level, 0–1. */
   setVolume: (to: number) => Promise<void>
   poll: () => Promise<void>
@@ -61,13 +72,13 @@ export function channelTitle(c: Channel): string {
 export const useBionStore = create<BionState>((set, get) => {
   const start = async (title: string, command: Extract<BionCommand, { type: 'play' }>) => {
     set({ pending: { title, at: Date.now() }, failed: false })
-    const ok = await sendBion(command)
+    const ok = await sendBion(get().target ?? 'bion', command)
     if (!ok) set({ pending: null, failed: true })
     return ok
   }
 
   return {
-    mode: readMode(),
+    target: readTarget(),
     status: null,
     clockSkew: 0,
     pending: null,
@@ -75,15 +86,24 @@ export const useBionStore = create<BionState>((set, get) => {
     receiver: null,
     volumeHeld: null,
 
-    setMode(on) {
+    setTarget(device) {
       if (isKiosk()) return
-      try { if (on) localStorage.setItem(MODE_KEY, '1'); else localStorage.removeItem(MODE_KEY) } catch { /* the choice lasts the visit */ }
-      set({ mode: on, failed: false })
+      try {
+        if (device) localStorage.setItem(MODE_KEY, device)
+        else localStorage.removeItem(MODE_KEY)
+      } catch { /* the choice lasts the visit */ }
+      // The status is the watched kiosk's: another kiosk starts from nothing.
+      const watched = get().target ?? 'bion'
+      const fresh = (device ?? 'bion') !== watched
+      set({ target: device, failed: false, ...(fresh ? { status: null, pending: null, receiver: null, volumeHeld: null } : {}) })
+      if (fresh) void get().poll()
     },
 
     async poll() {
-      const result = await pollBion()
-      if (!result) return
+      const device = get().target ?? 'bion'
+      const result = await pollBion(device)
+      // The phone switched kiosks while this one answered.
+      if (!result || (get().target ?? 'bion') !== device) return
       const pending = get().pending
       // The kiosk has taken the film over once it reports anything but idle after it was sent.
       const reported = result.status && result.status.updated !== undefined && pending &&
@@ -102,7 +122,7 @@ export const useBionStore = create<BionState>((set, get) => {
     async setVolume(to) {
       const level = Math.round(Math.max(0, Math.min(1, to)) * 100) / 100
       set({ volumeHeld: { to: level, at: Date.now() } })
-      const ok = await sendBion({ type: 'volume', to: level })
+      const ok = await sendBion('bion', { type: 'volume', to: level })
       set(ok ? { failed: false } : { failed: true, volumeHeld: null })
     },
 
@@ -126,7 +146,7 @@ export const useBionStore = create<BionState>((set, get) => {
         if (command.type === 'subtitle') set({ status: { ...status, subtitleActive: command.id } })
         if (command.type === 'stop') set({ status: { ...status, state: 'idle' }, pending: null })
       }
-      const ok = await sendBion(command)
+      const ok = await sendBion(get().target ?? 'bion', command)
       set({ failed: !ok })
     },
   }

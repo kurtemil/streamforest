@@ -38,7 +38,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
     // This is the one door every Play goes through, so no card needs to know.
     const bion = useBionStore.getState()
     const profileId = useProfileStore.getState().activeProfileId
-    if (bion.mode && profileId) { void bion.playIptv(channel, profileId); return }
+    if (bion.target && profileId) { void bion.playIptv(channel, profileId); return }
     const url = toPlaylistHost(channel.url, usePlaylistStore.getState().m3uUrl)
     set({ current: url === channel.url ? channel : { ...channel, url }, playing: true })
   },

@@ -128,7 +128,7 @@ export const useHomeLibraryStore = create<HomeLibraryState>((set, get) => ({
     // Bion mode sends it to the kiosk, which plays it as this same profile.
     const bion = useBionStore.getState()
     const profileId = get().profileId
-    if (bion.mode && profileId) {
+    if (bion.target && profileId) {
       set({ detail: null })
       void bion.playHome(item, profileId, opts?.fromStart)
       return
