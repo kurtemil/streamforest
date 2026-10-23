@@ -390,6 +390,19 @@ compositor). Its container lives in the `hemma` repo, `bio/kiosk/`, and opens
   2026-10-21 by counting `/proc/<pid>/fd` per episode). Every request whose answer is
   not used goes through `fireAndForget`, which cancels the body; one whose answer is
   checked but not read cancels it itself (`pollBion`, `sendBion`).
+- **The IPTV account allows one connection to the provider** (`max_connections` 1 in
+  `player_api.php`; ask through `/proxy`, never from the home IP). With two open, or
+  one closed a moment ago and still counted, the provider closes one: ffmpeg logs
+  `Stream ends prematurely at …`, the fMP4 response ends, and the `<video>` stops a
+  few seconds in. On 2026-10-23 Gabby's Dollhouse did that on Bion every try. Three
+  layers since: ffmpeg and ffprobe reconnect at the same byte (`PROVIDER_RECONNECT`
+  in `server.mjs`, proven against an origin that cuts: 4.8 of 120 s without, all
+  of it with); `VideoPlayer` asks for the rest when `ended` comes far from the end
+  (`premature-end` in the client log, three in a row at most); and the audio track
+  is chosen in `load()` from the probe, before the first request, so opening a film
+  is one `/transcode`, not two. The old effect also ran on the previous episode's
+  track list and was spent before the new one arrived, so every episode after the
+  first played track 1 (Danish). `e2e/audio-language.spec.ts` holds it.
 - **Seeking a paused IPTV film starts it again** on the kiosk, because VideoPlayer's
   `seekTo` restarts the transcode and plays. Known, not fixed.
 - **The remote** (`components/bion/BionRemote.tsx`) floats above the tab bar while
