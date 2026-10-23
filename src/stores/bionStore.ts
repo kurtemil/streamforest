@@ -1,9 +1,10 @@
 import { create } from 'zustand'
 import {
-  isBionActive, pollBion, sendBion, STATUS_FRESH_MS,
-  type BionCommand, type BionDevice, type BionStatus, type ReceiverStatus,
+  isBionActive, laterEpisodes, pollBion, sendBion, STATUS_FRESH_MS, toBionChannel,
+  type BionChannel, type BionCommand, type BionDevice, type BionStatus, type ReceiverStatus,
 } from '@/services/bion'
 import { isKiosk } from '@/lib/kiosk'
+import { usePlaylistStore } from '@/stores/playlistStore'
 import type { HomeItem } from '@/services/jellyfin'
 import type { Channel } from '@/types'
 
@@ -129,8 +130,20 @@ export const useBionStore = create<BionState>((set, get) => {
     playHome: (item, profileId, fromStart) =>
       start(item.name, { type: 'play', source: 'home', profileId, itemId: item.id, fromStart }),
 
-    playIptv: (channel, profileId) =>
-      start(channelTitle(channel), { type: 'play', source: 'iptv', profileId, itemId: channel.id }),
+    playIptv: (channel, profileId) => {
+      // The film and the episodes after it go along, so the kiosk does not have to
+      // find them in a catalogue of its own (services/bion.ts, BionChannel).
+      const { m3uUrl, channels } = usePlaylistStore.getState()
+      const film = toBionChannel(channel, m3uUrl)
+      const episodes = film
+        ? laterEpisodes(channel, channels).map((c) => toBionChannel(c, m3uUrl)).filter((c): c is BionChannel => c !== null)
+        : []
+      return start(channelTitle(channel), {
+        type: 'play', source: 'iptv', profileId, itemId: channel.id,
+        ...(film ? { channel: film } : {}),
+        ...(episodes.length ? { episodes } : {}),
+      })
+    },
 
     async send(command) {
       // Shown at once; the next poll puts back whatever the kiosk actually did.

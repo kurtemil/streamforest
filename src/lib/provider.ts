@@ -72,3 +72,29 @@ export function toPlaylistHost(url: string, m3uUrl: string | null | undefined): 
   u.hostname = acc.hostname
   return u.toString()
 }
+
+/** What stands for the account's name and password in a stream URL that leaves the device. */
+const REDACTED = '/~/~/'
+
+/**
+ * A stream URL without the account in it, for the kiosks' queue (/api/bion), which
+ * anyone can read. Null when the URL does not carry this playlist's account, since a
+ * kiosk could not fill it back in.
+ */
+export function redactStreamUrl(url: string, m3uUrl: string | null | undefined): string | null {
+  const acc = account(m3uUrl)
+  if (!acc) return null
+  const creds = [
+    `/${acc.user}/${acc.pass}/`,
+    `/${encodeURIComponent(acc.user)}/${encodeURIComponent(acc.pass)}/`,
+  ]
+  const found = creds.find((c) => url.includes(c))
+  return found ? url.replace(found, REDACTED) : null
+}
+
+/** The other way, on a kiosk, from its own playlist address. */
+export function restoreStreamUrl(url: string, m3uUrl: string | null | undefined): string | null {
+  const acc = account(m3uUrl)
+  if (!acc || !url.includes(REDACTED)) return null
+  return url.replace(REDACTED, `/${encodeURIComponent(acc.user)}/${encodeURIComponent(acc.pass)}/`)
+}

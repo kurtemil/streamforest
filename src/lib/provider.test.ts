@@ -1,5 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { needsProviderMove, toPlaylistHost } from './provider'
+import { needsProviderMove, redactStreamUrl, restoreStreamUrl, toPlaylistHost } from './provider'
+
+describe('redactStreamUrl and restoreStreamUrl', () => {
+  const m3u = 'http://iptv.krutofv.se/get.php?username=user1&password=pw1&type=m3u_plus'
+
+  it('takes the account out of a stream URL, and the kiosk puts it back', () => {
+    const url = 'http://iptv.krutofv.se/series/user1/pw1/1202599.mkv'
+    const redacted = redactStreamUrl(url, m3u)
+    expect(redacted).toBe('http://iptv.krutofv.se/series/~/~/1202599.mkv')
+    expect(restoreStreamUrl(redacted!, m3u)).toBe(url)
+    expect(redactStreamUrl('http://iptv.krutofv.se:2095/user1/pw1/1234', m3u)).toBe('http://iptv.krutofv.se:2095/~/~/1234')
+  })
+
+  it('gives nothing it could not carry safely or fill back in', () => {
+    expect(redactStreamUrl('http://iptv.krutofv.se/movie/someone/else/1.mkv', m3u)).toBeNull()
+    expect(redactStreamUrl('http://iptv.krutofv.se/movie/user1/pw1/1.mkv', null)).toBeNull()
+    expect(restoreStreamUrl('http://iptv.krutofv.se/movie/~/~/1.mkv', '')).toBeNull()
+    expect(restoreStreamUrl('http://iptv.krutofv.se/movie/user1/pw1/1.mkv', m3u)).toBeNull()
+  })
+})
 
 describe('needsProviderMove', () => {
   it('is true for a URL naming the provider by IP or by its own domain', () => {

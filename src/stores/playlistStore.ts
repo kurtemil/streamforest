@@ -17,7 +17,8 @@ interface PlaylistState {
   setM3uUrl: (url: string) => Promise<void>
   /** Saves the provider's IPs (in order) and the playlist URL on iptv.krutofv.se. */
   moveProvider: (url: string, ips: string[], pin: string) => Promise<ProviderMove>
-  syncM3uUrlFromRemote: () => Promise<void>
+  /** `fetch: false` only learns the address: a kiosk fills stream URLs from it without the catalogue. */
+  syncM3uUrlFromRemote: (opts?: { fetch?: boolean }) => Promise<void>
   loadFromDB: () => Promise<void>
   refresh: () => Promise<void>
 }
@@ -85,7 +86,7 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
     return result
   },
 
-  async syncM3uUrlFromRemote() {
+  async syncM3uUrlFromRemote(opts) {
     try {
       const res = await fetch('/api/preferences?profileId=_global')
       if (!res.ok) return
@@ -95,7 +96,7 @@ export const usePlaylistStore = create<PlaylistState>((set, get) => ({
         localStorage.setItem(STORAGE_KEY, data.m3u_url)
         set({ m3uUrl: data.m3u_url })
         // Fresh device/PWA with no local data: auto-fetch the playlist
-        if (wasEmpty) get().refresh()
+        if (wasEmpty && opts?.fetch !== false) get().refresh()
       } else if (!data.m3u_url && get().m3uUrl) {
         // Local has a URL but D1 doesn't — push it up so other devices/PWA can sync
         fireAndForget('/api/preferences', {

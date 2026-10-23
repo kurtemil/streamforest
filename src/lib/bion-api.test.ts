@@ -2,7 +2,8 @@
 // read the answers by. Lives here because every file in functions/ is a route.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanCommand, COMMAND_TTL_MS, onRequest } from '../../functions/api/bion'
-import { isBionActive, STATUS_FRESH_MS } from '@/services/bion'
+import { fromBionChannel, isBionActive, STATUS_FRESH_MS, type BionChannel } from '@/services/bion'
+import { usePlaylistStore } from '@/stores/playlistStore'
 import { ALIVE_MS, bionAlive, bionVisible, channelTitle, useBionStore } from '@/stores/bionStore'
 import { usePlayerStore } from '@/stores/playerStore'
 import { useHomeLibraryStore } from '@/stores/homeLibraryStore'
@@ -104,6 +105,26 @@ describe('/api/bion', () => {
     expect(cleanCommand({ type: 'pause', extra: 'x' })).toEqual({ type: 'pause' })
     expect(cleanCommand({ type: 'play', source: 'iptv', profileId: 'elof', itemId: 'm_1' })).toMatchObject({ source: 'iptv' })
     expect(cleanCommand({ type: 'play', source: 'ftp', profileId: 'elof', itemId: 'm_1' })).toMatchObject({ source: 'home' })
+  })
+
+  it('carries an IPTV film only with the account taken out of its address', () => {
+    const film = { id: 's_7', name: 'Show S01E02', url: 'http://iptv.krutofv.se/series/~/~/7.mkv', type: 'series', showName: 'Show', season: 1, episode: 2, logo: 'http://ptv.is/x.png', extra: 'x' }
+    const play = { type: 'play', source: 'iptv', profileId: 'vera', itemId: 's_7' }
+    expect(cleanCommand({ ...play, channel: film, episodes: [{ ...film, id: 's_8', episode: 3 }] })).toEqual({
+      ...play, fromStart: false,
+      channel: { id: 's_7', name: 'Show S01E02', url: film.url, type: 'series', showName: 'Show', season: 1, episode: 2 },
+      episodes: [{ id: 's_8', name: 'Show S01E02', url: film.url, type: 'series', showName: 'Show', season: 1, episode: 3 }],
+    })
+    // The queue is open: an address with the name and password in it is never stored.
+    const leaky = { ...film, url: 'http://iptv.krutofv.se/series/user1/pw1/7.mkv' }
+    expect(cleanCommand({ ...play, channel: leaky })).toEqual({ ...play, fromStart: false })
+    expect(cleanCommand({ ...play, channel: { ...film, url: `${film.url}?password=pw1` } })).toEqual({ ...play, fromStart: false })
+    expect(cleanCommand({ ...play, channel: film, episodes: [leaky] })).not.toHaveProperty('episodes')
+    // Only the film named, and only from the playlist.
+    expect(cleanCommand({ ...play, itemId: 's_9', channel: film })).not.toHaveProperty('channel')
+    expect(cleanCommand({ ...play, source: 'home', channel: film })).not.toHaveProperty('channel')
+    const many = Array.from({ length: 80 }, (_, i) => ({ ...film, id: `s_${100 + i}` }))
+    expect((cleanCommand({ ...play, channel: film, episodes: many })!.episodes as unknown[]).length).toBe(60)
   })
 
   it('takes a point to seek to, and tracks by id', () => {
@@ -268,6 +289,28 @@ describe('Bion mode', () => {
     expect(usePlayerStore.getState().current).toBeNull()
     expect(sent()).toEqual([{ device: 'bion', command: { type: 'play', source: 'iptv', profileId: 'elof', itemId: 'm_42' } }])
     expect(useBionStore.getState().pending?.title).toBe('Arrival')
+  })
+
+  it('sends the film and the episodes after it, without the account, and a kiosk can play them', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"ok":true}')))
+    const m3u = 'http://iptv.krutofv.se/get.php?username=user1&password=pw1&type=m3u_plus'
+    const ep = (n: number): Channel => ({
+      id: `s_${n}`, name: `Gabby S01E0${n}`, url: `http://dead.panel:2095/series/user1/pw1/${n}.mkv`, logo: '',
+      groupTitle: 'Kids', type: 'series', sortIndex: n, showName: 'Gabby', season: 1, episode: n,
+    })
+    usePlaylistStore.setState({ m3uUrl: m3u, channels: [ep(3), ep(1), ep(2), { ...channel }] })
+    useProfileStore.setState({ activeProfileId: 'vera' })
+    useBionStore.setState({ target: 'vardagsrum' })
+    usePlayerStore.getState().play(ep(1))
+    await Promise.resolve()
+    const body = sent()[0]
+    expect(JSON.stringify(body)).not.toContain('pw1')
+    expect(body.command.channel).toMatchObject({ id: 's_1', url: 'http://iptv.krutofv.se:2095/series/~/~/1.mkv', showName: 'Gabby' })
+    expect(body.command.episodes.map((e: { id: string }) => e.id)).toEqual(['s_2', 's_3'])
+    // What the kiosk makes of it, from its own playlist address.
+    const back = fromBionChannel(cleanCommand(body.command)!.channel as BionChannel, m3u, 0)
+    expect(back).toMatchObject({ id: 's_1', url: 'http://iptv.krutofv.se:2095/series/user1/pw1/1.mkv', logo: '', groupTitle: 'Kids' })
+    usePlaylistStore.setState({ m3uUrl: '', channels: [] })
   })
 
   it('sends a home film as the profile the library was loaded for', async () => {

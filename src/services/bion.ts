@@ -4,6 +4,9 @@
 // and not a socket.
 
 import { fireAndForget } from '@/lib/fireAndForget'
+import { redactStreamUrl, restoreStreamUrl, toPlaylistHost } from '@/lib/provider'
+import { normalizeShowKey } from '@/lib/utils'
+import type { Channel, ContentType } from '@/types'
 
 const API = '/api/bion'
 
@@ -18,8 +21,78 @@ export type BionDevice = (typeof BION_DEVICES)[number]
 /** Where a film comes from: the home server's Jellyfin, or the IPTV playlist. */
 export type BionSource = 'home' | 'iptv'
 
+/**
+ * An IPTV film or episode as a Play carries it: what a card knows, and the stream
+ * address with `~` for the account's name and password, which the kiosk fills in
+ * from its own playlist address. The queue is open, so nothing secret goes in.
+ *
+ * The kiosk used to look the id up in its own copy of the catalogue, 205 803 titles.
+ * The TV in the living room needs about seven minutes to write that copy, and it
+ * wrote it again for every film newer than the copy it had (2026-10-23).
+ */
+export interface BionChannel {
+  id: string
+  name: string
+  url: string
+  type: ContentType
+  logo?: string
+  groupTitle?: string
+  tvgId?: string
+  showName?: string
+  season?: number
+  episode?: number
+  episodeTitle?: string
+  year?: number
+  movieTitle?: string
+}
+
+/** How many of a show's later episodes a Play brings, so the next one starts without the catalogue. */
+export const MAX_BION_EPISODES = 60
+
+const OPTIONAL_FIELDS = ['logo', 'groupTitle', 'tvgId', 'showName', 'season', 'episode', 'episodeTitle', 'year', 'movieTitle'] as const
+
+/** A card's channel as a Play carries it. Null when its address does not carry this playlist's account. */
+export function toBionChannel(c: Channel, m3uUrl: string | null | undefined): BionChannel | null {
+  const url = redactStreamUrl(toPlaylistHost(c.url, m3uUrl), m3uUrl)
+  if (!url) return null
+  const out: BionChannel = { id: c.id, name: c.name, url, type: c.type }
+  for (const key of OPTIONAL_FIELDS) {
+    const v = c[key]
+    if (v !== undefined && v !== '') (out as unknown as Record<string, unknown>)[key] = v
+  }
+  return out
+}
+
+/** Back to a channel on the kiosk. Null when this kiosk has no playlist address to fill in from. */
+export function fromBionChannel(b: BionChannel, m3uUrl: string | null | undefined, sortIndex: number): Channel | null {
+  const url = restoreStreamUrl(b.url, m3uUrl)
+  if (!url) return null
+  return { ...b, url, logo: b.logo ?? '', groupTitle: b.groupTitle ?? '', sortIndex }
+}
+
+/** The episodes of `c`'s show after it, in order, as many as a Play brings. */
+export function laterEpisodes(c: Channel, channels: readonly Channel[]): Channel[] {
+  if (c.type !== 'series') return []
+  const show = normalizeShowKey(c.showName ?? c.name)
+  const eps = channels
+    .filter((x) => x.type === 'series' && normalizeShowKey(x.showName ?? x.name) === show)
+    .sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0))
+  const i = eps.findIndex((x) => x.id === c.id)
+  return i === -1 ? [] : eps.slice(i + 1, i + 1 + MAX_BION_EPISODES)
+}
+
 export type BionCommand =
-  | { type: 'play'; source?: BionSource; profileId: string; itemId: string; fromStart?: boolean }
+  | {
+      type: 'play'
+      source?: BionSource
+      profileId: string
+      itemId: string
+      fromStart?: boolean
+      /** IPTV: the film itself, so the kiosk needs no catalogue. Older phones send only the id. */
+      channel?: BionChannel
+      /** IPTV series: the episodes after it, for the next one. */
+      episodes?: BionChannel[]
+    }
   | { type: 'pause' }
   | { type: 'resume' }
   /** A step from where the film is (`by`), or a point in it (`to`, the scrubber). */

@@ -49,6 +49,15 @@ const MAX_FILM_SECONDS = 24 * 3600
 /** What the kiosk's status may weigh: enough for a film's track lists. */
 const MAX_STATUS_CHARS = 8000
 const DEVICE = /^[a-z0-9-]{1,32}$/
+/**
+ * An IPTV stream address as a Play may carry it: `~` where the account's name and
+ * password were, and no query. The queue is open to anyone, so an address with the
+ * account still in it is dropped rather than stored, whatever a phone sends.
+ */
+const REDACTED_STREAM = /^https?:\/\/[^/?#\s]+\/(?:[a-z]+\/)?~\/~\/[^/?#\s]+$/
+const CONTENT_TYPES = new Set(['movie', 'series', 'live'])
+/** As src/services/bion.ts: the episodes after the one played. */
+const MAX_EPISODES = 60
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: HEADERS })
 
@@ -70,6 +79,31 @@ async function ensureTables(env: Env) {
   `).run()
 }
 
+/** An IPTV film or episode in a Play (BionChannel), with only the fields a card has, each bounded. */
+export function cleanChannel(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== 'object') return null
+  const c = raw as Record<string, unknown>
+  const text = (v: unknown, max: number) => (typeof v === 'string' && v.length <= max ? v : undefined)
+  const whole = (v: unknown) => (Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 100_000 ? v : undefined)
+  const id = text(c.id, 64)
+  const name = text(c.name, 300)
+  const url = text(c.url, 400)
+  if (!id || name === undefined || !url || !REDACTED_STREAM.test(url)) return null
+  if (typeof c.type !== 'string' || !CONTENT_TYPES.has(c.type)) return null
+  const out: Record<string, unknown> = { id, name, url, type: c.type }
+  const logo = text(c.logo, 500)
+  if (logo?.startsWith('https://')) out.logo = logo
+  for (const [key, max] of [['groupTitle', 200], ['tvgId', 100], ['showName', 300], ['episodeTitle', 300], ['movieTitle', 300]] as const) {
+    const v = text(c[key], max)
+    if (v) out[key] = v
+  }
+  for (const key of ['season', 'episode', 'year'] as const) {
+    const v = whole(c[key])
+    if (v !== undefined) out[key] = v
+  }
+  return out
+}
+
 /** What a command may carry. Anything else is dropped, so the table holds only what the kiosk understands. */
 export function cleanCommand(raw: unknown): Record<string, unknown> | null {
   if (!raw || typeof raw !== 'object') return null
@@ -79,7 +113,18 @@ export function cleanCommand(raw: unknown): Record<string, unknown> | null {
     if (typeof c.profileId !== 'string' || typeof c.itemId !== 'string') return null
     // `home` is the home server's Jellyfin, `iptv` the playlist. Older phones sent no source.
     const source = c.source === 'iptv' ? 'iptv' : 'home'
-    return { type: 'play', source, profileId: c.profileId, itemId: c.itemId, fromStart: c.fromStart === true }
+    const play: Record<string, unknown> = { type: 'play', source, profileId: c.profileId, itemId: c.itemId, fromStart: c.fromStart === true }
+    // The film itself, and the episodes after it (BionChannel), so a kiosk needs no
+    // catalogue of its own. A film that is not the one named is not carried.
+    const channel = source === 'iptv' ? cleanChannel(c.channel) : null
+    if (channel && channel.id === c.itemId) {
+      play.channel = channel
+      const episodes = Array.isArray(c.episodes)
+        ? c.episodes.slice(0, MAX_EPISODES).map(cleanChannel).filter((e) => e !== null)
+        : []
+      if (episodes.length) play.episodes = episodes
+    }
+    return play
   }
   if (c.type === 'seek') {
     // `to` is a point in the film (the remote's scrubber), `by` a step from where it is.

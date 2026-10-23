@@ -10,7 +10,8 @@ import { channelTitle } from '@/stores/bionStore'
 import { syncFromRemote } from '@/services/sync'
 import { clearProgress } from '@/services/db'
 import { backdropUrl } from '@/services/jellyfin'
-import { pollBion, putBionStatus, type BionCommand, type BionSource, type BionStatus } from '@/services/bion'
+import { fromBionChannel, pollBion, putBionStatus, type BionCommand, type BionSource, type BionStatus } from '@/services/bion'
+import type { Channel } from '@/types'
 import { kioskDevice, kioskStartCursor } from '@/lib/kiosk'
 import { getPlayerBridge, seekTarget, type PlayerBridge } from '@/lib/playerBridge'
 import { progressPercent } from '@/lib/progress'
@@ -118,9 +119,29 @@ function currentBuild(): string | null {
 }
 
 /**
- * The IPTV playlist, on a kiosk that may never have had one. The same steps a new
- * phone takes: what is stored, then the address from D1, then a fetch. Shared, so
- * a play that arrives while it runs waits for the same fetch.
+ * The film a Play carries, with the episodes after it, as channels this kiosk can play.
+ * Only the playlist's address is needed, to fill the account back into the stream
+ * URLs. The episodes join the channels in memory, which is where the player looks for
+ * the next one. Null for a Play from a phone that sent only the id.
+ */
+async function channelFromPlay(c: Extract<BionCommand, { type: 'play' }>): Promise<Channel | null> {
+  if (!c.channel) return null
+  if (!usePlaylistStore.getState().m3uUrl) await usePlaylistStore.getState().syncM3uUrlFromRemote({ fetch: false })
+  const { m3uUrl, channels } = usePlaylistStore.getState()
+  const film = fromBionChannel(c.channel, m3uUrl, Number.MAX_SAFE_INTEGER)
+  if (!film) return null
+  const have = new Set(channels.map((ch) => ch.id))
+  const add = [film, ...(c.episodes ?? []).map((e) => fromBionChannel(e, m3uUrl, Number.MAX_SAFE_INTEGER))]
+    .filter((ch): ch is Channel => ch !== null && !have.has(ch.id))
+  if (add.length) usePlaylistStore.setState({ channels: [...channels, ...add] })
+  return film
+}
+
+/**
+ * The IPTV playlist, for a Play that brought only the id (phones from before
+ * 2026-10-23). The same steps a new phone takes: what is stored, then the address
+ * from D1, then a fetch. Shared, so a play that arrives while it runs waits for the
+ * same fetch. On the living room TV the first fetch takes minutes.
  */
 let playlistReady: Promise<void> | null = null
 function ensurePlaylist(force = false): Promise<void> {
@@ -159,9 +180,6 @@ export function KioskApp() {
   const [live, setLive] = useState<Live | null>(null)
   const phaseRef = useRef(phase)
   phaseRef.current = phase
-
-  // The playlist is fetched once up front, so the first IPTV film starts as fast as a home one.
-  useEffect(() => { void ensurePlaylist() }, [])
 
   // Back to idle when the film is closed or has ended, unless a failure is showing.
   useEffect(() => {
@@ -232,11 +250,14 @@ export function KioskApp() {
     const startIptv = async (c: Extract<BionCommand, { type: 'play' }>, profile: Profile) => {
       setPhase({ state: 'loading' })
       await become(profile, 'iptv')
-      await ensurePlaylist()
-      const find = () => usePlaylistStore.getState().channels.find((ch) => ch.id === c.itemId)
-      let channel = find()
-      // The phone's playlist may be newer than this one.
-      if (!channel) { await ensurePlaylist(true); channel = find() }
+      let channel = (await channelFromPlay(c)) ?? undefined
+      if (!channel) {
+        await ensurePlaylist()
+        const find = () => usePlaylistStore.getState().channels.find((ch) => ch.id === c.itemId)
+        channel = find()
+        // The phone's playlist may be newer than this one.
+        if (!channel) { await ensurePlaylist(true); channel = find() }
+      }
       if (!channel) return setPhase({ state: 'failed', message: t('bion.notFound', { name: profile.name }) })
       if (c.fromStart) await clearProgress(profile.id, channel.id).catch(() => {})
       setPhase({ state: 'loading', title: channelTitle(channel) })
