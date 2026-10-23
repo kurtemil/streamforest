@@ -155,6 +155,8 @@ export function VideoPlayer() {
   const nextEpisodeRef = useRef<typeof current>(null)
   const autoplayRef = useRef(true)
   const autoAudioSelectedRef = useRef(false)
+  // Where the last premature end was picked up, and how many times in a row.
+  const endResumeRef = useRef({ at: -1, tries: 0 })
   const subtitleTracksRef = useRef<Track[]>([])
   const subtitleStreamIndicesRef = useRef<number[]>([])
   const [parsedSubtitles, setParsedSubtitles] = useState<{ start: number; end: number; text: string }[]>([])
@@ -225,6 +227,7 @@ export function VideoPlayer() {
     countdownIntervalRef.current = null
     setNextEpCountdown(null)
     autoAudioSelectedRef.current = false
+    endResumeRef.current = { at: -1, tries: 0 }
     subtitleStreamIndicesRef.current = []
     iosStrategyRef.current = null
     iosHlsRetriedRef.current = false
@@ -442,7 +445,9 @@ export function VideoPlayer() {
     }
   }, [current, detachSubtitleTrack, flashSubtitleNotice])
 
-  const seekTo = useCallback((realTime: number) => {
+  // `restart` skips the native seek and asks the server for a new stream from
+  // `realTime`, even inside what is buffered: the way back after the stream ended early.
+  const seekTo = useCallback((realTime: number, restart = false) => {
     const video = videoRef.current
     if (!video || !current) return
     const clamped = Math.max(0, realTime)
@@ -468,7 +473,7 @@ export function VideoPlayer() {
     // seeks are now a property assignment instead of a new ffmpeg process and a
     // wait of up to twenty seconds. `buffered` still covers the desktop path,
     // where the source is one long fMP4 response.
-    if (localTime >= 0 && (covers(video.buffered) || covers(video.seekable))) {
+    if (!restart && localTime >= 0 && (covers(video.buffered) || covers(video.seekable))) {
       trace('seek', {
         method: covers(video.buffered) ? 'native-buffered' : 'native-seekable',
         from: Number(from.toFixed(1)),
@@ -550,6 +555,9 @@ export function VideoPlayer() {
       if (track) attachSubtitleTrack(track.id, track.name, track.lang, clamped)
     }
   }, [current, attachSubtitleTrack, flashSubtitleNotice])
+  // For listeners attached once per item (the 'ended' handler, the kiosk's bridge).
+  const seekToRef = useRef(seekTo)
+  seekToRef.current = seekTo
 
   // Touch gestures on the video surface.
   //
@@ -721,14 +729,24 @@ export function VideoPlayer() {
 
         if (info) {
           if (info.audioStreams.length > 1) {
-            setAudioTracks(info.audioStreams.map(s => ({
+            const tracks = info.audioStreams.map(s => ({
               id: s.index,
               name: audioStreamLabel(s),
               lang: s.lang ?? '',
-            })))
-            const firstIdx = info.audioStreams[0].index
-            audioStreamIndexRef.current = firstIdx
-            setActiveAudioTrack(firstIdx)
+            }))
+            setAudioTracks(tracks)
+            // The language is chosen here, before the first request, and not by the
+            // effect further down. Switching after the stream has opened is a second
+            // connection to a provider that allows one, and the effect also ran on
+            // the previous episode's list, which spent it before this episode's list
+            // arrived: Gabby's Dollhouse started in Danish on Bion (2026-10-23).
+            const prefs = usePlaybackPrefsStore.getState()
+            const wanted = prefs.getTitlePrefs(profileId, titleKey).audioLang
+              || prefs.getPrefs(profileId).preferredAudioLang
+            const chosen = (wanted && tracks.find(tr => langMatches(wanted, tr))) || tracks[0]
+            audioStreamIndexRef.current = chosen.id
+            setActiveAudioTrack(chosen.id)
+            autoAudioSelectedRef.current = true
           } else if (info.audioStreams.length === 1) {
             audioStreamIndexRef.current = info.audioStreams[0].index
           }
@@ -969,6 +987,22 @@ export function VideoPlayer() {
         if (savedPos > 0) {
           saveProgress(profileId, current.id, savedPos, realDur)
             .then((entry) => pushProgress(entry))
+        }
+      }
+
+      // The response ended before the film: the provider closed the connection
+      // and ffmpeg's own reconnects gave up. Ask for the rest from where it
+      // stopped, rather than stand still on the last frame as Bion did on
+      // 2026-10-23. Three times in a row at most, so a stream that keeps dying
+      // ends up paused instead of looping; any real progress resets the count.
+      if (!isNearEnd && isTranscodedRef.current && realDur > 0) {
+        const last = endResumeRef.current
+        const tries = realPos > last.at + 10 ? 0 : last.tries
+        if (tries < 3) {
+          endResumeRef.current = { at: realPos, tries: tries + 1 }
+          trace('premature-end', { realPosition: Number(realPos.toFixed(1)), realDuration: realDur, tries: tries + 1 })
+          seekToRef.current(realPos, true)
+          return
         }
       }
 
@@ -1577,15 +1611,17 @@ export function VideoPlayer() {
     if (match) selectSubtitle(match.id)
   }, [subtitleTracks, preferredSubtitleLang, titlePrefs.subtitleLang, selectSubtitle])
 
-  // Same for audio, once per item.
+  // Same for audio, once per item. A file through the proxy has its track chosen
+  // in load(), before the stream opens.
   useEffect(() => {
     if (!audioTracks.length || autoAudioSelectedRef.current) return
+    if (current && isProxyVideo(current)) return
     const wanted = titlePrefs.audioLang || preferredAudioLang
     if (!wanted) return
     autoAudioSelectedRef.current = true
     const match = audioTracks.find(t => langMatches(wanted, t))
     if (match && match.id !== activeAudioTrack) selectAudioTrack(match.id)
-  }, [audioTracks, preferredAudioLang, titlePrefs.audioLang, activeAudioTrack, selectAudioTrack])
+  }, [current, audioTracks, preferredAudioLang, titlePrefs.audioLang, activeAudioTrack, selectAudioTrack])
 
   // Restore the saved subtitle offset for this title. A file that is out of sync
   // is normally out of sync by the same amount for a whole season, so having to
@@ -1596,11 +1632,9 @@ export function VideoPlayer() {
 
   // The kiosk ("Bion") drives this player from the phone through the bridge. Refs,
   // so the bridge registered when the stream opened always calls the current
-  // seekTo and handleClose rather than the ones from that render.
+  // seekTo (seekToRef, above) and handleClose rather than the ones from that render.
   const durationRef = useRef(0)
   durationRef.current = duration
-  const seekToRef = useRef(seekTo)
-  seekToRef.current = seekTo
   const handleCloseRef = useRef(handleClose)
   handleCloseRef.current = handleClose
   const tracksRef = useRef<BridgeTracks>({ audio: [], audioActive: -1, subtitles: [], subtitleActive: -1 })

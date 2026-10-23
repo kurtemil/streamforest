@@ -50,6 +50,16 @@ const CLIENT_LOG_TOKEN = process.env.CLIENT_LOG_TOKEN || ''
 
 const HLS_DIR = path.join(os.tmpdir(), 'streamforest-hls')
 
+// The account allows one connection to the provider at a time (player_api says
+// max_connections 1, checked 2026-10-23), and the provider closes one of two when
+// it still counts another: the probe that finished a moment ago, the keyframe
+// lookup that runs beside a resumed film, the stream an audio switch replaced.
+// ffmpeg logged "Stream ends prematurely" a second in, the response ended, and on
+// Bion the film stood still after a few seconds, every try. A file has a length, so
+// ffmpeg can reconnect at the byte it had reached: right away, then after 1 and 3 s.
+// A live channel has no length, and these options leave it alone.
+const PROVIDER_RECONNECT = ['-reconnect', '1', '-reconnect_delay_max', '4']
+
 // ── VAAPI rate control ─────────────────────────────────────────────────────────
 //
 // Which rate-control modes exist is a property of the *driver build*, not of the
@@ -244,7 +254,7 @@ function handleTranscode(reqUrl, res) {
   if (H264_ENCODER === 'h264_vaapi' && mode === 'transcode') {
     args.push('-vaapi_device', VAAPI_DEVICE)
   }
-  args.push('-i', provider.resolve(target),
+  args.push(...PROVIDER_RECONNECT, '-i', provider.resolve(target),
     '-map', '0:v:0',
     '-map', audioIdx !== null ? `0:${audioIdx}` : '0:a:0?',
   )
@@ -454,6 +464,7 @@ function handleProbe(reqUrl, res) {
     '-loglevel', 'error',
     '-show_entries', 'format=duration,start_time:stream=index,codec_type,codec_name,channels:stream_tags=language,title',
     '-of', 'json',
+    ...PROVIDER_RECONNECT,
     provider.resolve(target),
   ]
   const ff = spawn(FFPROBE_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] })
@@ -550,6 +561,7 @@ function handleKeyframe(reqUrl, res) {
     '-show_entries', 'packet=pts_time,flags',
     '-read_intervals', `${lookback.toFixed(3)}%${(start + 0.5).toFixed(3)}`,
     '-of', 'json',
+    ...PROVIDER_RECONNECT,
     provider.resolve(target),
   ]
 
@@ -696,6 +708,7 @@ function startStandaloneSubtitle(target, index, vstart, seekTo, seekBucket, cach
   if (seekTo > 0) args.push('-ss', String(seekTo))
   if (vstart > 0) args.push('-itsoffset', String(-vstart))
   args.push(
+    ...PROVIDER_RECONNECT,
     '-i', provider.resolve(target),
     '-copyts',
     '-map', `0:${index}`,
@@ -942,7 +955,7 @@ function handleHlsStart(reqUrl, res) {
   if (live) args.push('-fflags', '+genpts+discardcorrupt')
   if (!live && start > 0) args.push('-ss', String(mode === 'transcode' ? Math.max(0, start - 5) : start))
   if (mode === 'transcode' && H264_ENCODER === 'h264_vaapi') args.push('-vaapi_device', VAAPI_DEVICE)
-  args.push('-i', provider.resolve(target), '-map', '0:v:0', '-map', audioIdx !== null ? `0:${audioIdx}` : '0:a:0?')
+  args.push(...PROVIDER_RECONNECT, '-i', provider.resolve(target), '-map', '0:v:0', '-map', audioIdx !== null ? `0:${audioIdx}` : '0:a:0?')
   if (!live && start > 0 && mode === 'transcode') args.push('-ss', String(start))
 
   if (mode === 'copy') {
