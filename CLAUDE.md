@@ -363,10 +363,19 @@ compositor). Its container lives in the `hemma` repo, `bio/kiosk/`, and opens
 - **`play` carries a source.** `home`: a Jellyfin item id; the kiosk becomes that
   profile, signs in as that Jellyfin user and plays it with `HomePlayer`, so resume
   point, subtitles and the kids' allowlist are the phone's. `iptv`: a playlist id
-  (`m_…`, `s_…`, `l_…` — parsed from the stream URL, so the same on every device);
-  the kiosk syncs the profile's progress from D1, looks the id up in its own
-  playlist (fetched on first use, and once more if the id is missing — the phone's
-  may be newer) and plays it with `VideoPlayer`, which resumes from that progress.
+  (`m_…`, `s_…`, `l_…` — parsed from the stream URL, so the same on every device),
+  and since 2026-10-23 the film itself as `channel` (`BionChannel`) with up to 60
+  later episodes as `episodes`. Their stream URLs carry `~/~` where the account's
+  name and password were (`redactStreamUrl`), because the queue is open to anyone;
+  `cleanCommand` drops any address that still has them, or a query. The kiosk fills
+  the account back in from its own playlist address (`m3u_url` in D1, fetched without
+  the catalogue), adds the episodes to the channels in memory, where the player looks
+  for the next one, syncs the profile's progress and plays with `VideoPlayer`, which
+  resumes from that progress. It no longer loads the catalogue: the living room TV
+  took minutes to write its 205 803 rows, and did it again for every film newer than
+  its copy. A Play with only the id (an older phone) still goes the old way: the
+  kiosk's own playlist, fetched if it has none and once more if the id is missing.
+  `e2e/kiosk-iptv.spec.ts` holds it.
   A missing source is `home`: what the first phones sent.
 - **Both players register in `lib/playerBridge.ts`**: the `<video>`, film-time
   `position()` and `duration()`, `seek(to)` and `close()`. Film time is across the
