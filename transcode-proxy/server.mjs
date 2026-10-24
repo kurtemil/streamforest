@@ -440,7 +440,10 @@ function handleTranscode(reqUrl, res) {
       const entry = activeTranscodes.get(transKey)
       if (entry?.ff === ff) {
         entry.alive = false
-        if (code === 0) {
+        // The cache is keyed by 300 s bucket, so only a stream that starts at the
+        // bucket's start covers it. One started at 590 would answer a later 310 with
+        // nothing until 585.
+        if (code === 0 && start === seekBucket) {
           // Promote accumulated subtitle buffers to permanent cache.
           for (const [idx, stream] of entry.subtitleStreams) {
             if (stream.chunks.length > 0) {
@@ -499,13 +502,20 @@ function handleProbe(reqUrl, res) {
     }
   }, 20000)
 
+  // A player that closes during the probe lets go of the provider connection with it.
+  res.on('close', () => { if (ff.exitCode === null) ff.kill('SIGKILL') })
+
   ff.on('error', (e) => {
     clearTimeout(probeTimeout)
+    if (res.headersSent) return
     res.writeHead(500, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: e.message }))
   })
 
   ff.on('exit', (code) => {
     clearTimeout(probeTimeout)
+    // The timeout has answered already. A second writeHead throws, and nothing
+    // catches it: the whole proxy went down with every stream it carried.
+    if (res.headersSent) return
     if (code !== 0) {
       // Every playback starts with a probe, so a dead provider shows up here first.
       provider.reportFailure()
@@ -679,7 +689,9 @@ function handleSubtitle(reqUrl, res) {
   const startParam = Number(reqUrl.searchParams.get('start') || 0)
   const start = Number.isFinite(startParam) && startParam > 0 ? startParam : 0
   const seekBucket = start > 0 ? Math.floor(start / 300) * 300 : 0
-  const seekTo = start > 0 ? Math.max(0, start - 5) : 0
+  // From the start of the bucket, not from `start`: the file is cached under the
+  // bucket and has to hold all of it.
+  const seekTo = seekBucket > 0 ? seekBucket - 5 : 0
   const cacheFile = subCachePath(target, index, vstart, seekBucket)
 
   // 1. Permanent cache hit.
@@ -786,7 +798,9 @@ function startStandaloneSubtitle(target, index, vstart, seekTo, seekBucket, cach
     }
   })
 
-  ff.on('exit', (code) => {
+  // 'close', not 'exit': stdout can still deliver data after 'exit', and a write to
+  // the ended file or response is an error nobody catches.
+  ff.on('close', (code) => {
     clearInterval(keepaliveTimer)
     const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1)
     process.stderr.write(`[subtitle] exit code=${code} elapsed=${elapsed}s bytes=${bytesFromFfmpeg} bucket=${seekBucket} stderr=${stderrBuf.slice(0, 200).replace(/\n/g, ' ')}\n`)
@@ -1083,15 +1097,10 @@ function handleHlsStart(reqUrl, res) {
           }
         } catch {}
       }
-      // Only clean up if this session is still current — the poll-loop timeout may have
-      // already deleted the Map entry and the dir, and a new session may have re-used
-      // the same hash+dir. Deleting unconditionally would nuke the new session's dir.
-      setTimeout(() => {
-        if (hlsSessions.get(hash) === sess) {
-          hlsSessions.delete(hash)
-          fs.rmSync(dir, { recursive: true, force: true })
-        }
-      }, 10 * 60_000)
+      // The session stays until the idle reaper or the disk budget takes it. It used to
+      // be deleted ten minutes after ffmpeg finished, watched or not, and a copy-mode
+      // film is written in a few minutes: a quarter of an hour in, every segment
+      // answered 404 and the iPhone started the film over from the beginning.
     }
   })
 

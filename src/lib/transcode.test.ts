@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   pickProxyMode,
   audioStreamLabel,
+  audioStreamLabels,
   subtitleStreamLabel,
 } from './transcode'
 import type { MediaInfo, AudioStream, SubtitleStream } from './transcode'
@@ -67,6 +68,21 @@ describe('audioStreamLabel', () => {
 
   it('uses title if present', () => {
     expect(audioStreamLabel({ ...base, title: 'Director Commentary' })).toBe('Director Commentary')
+  })
+
+  it('puts the language before a title that does not name it', () => {
+    expect(audioStreamLabel({ ...base, title: 'Surround', lang: 'swe', channels: 6, codec: 'ac3' }))
+      .toBe('SWE · Surround · 5.1 AC3')
+    expect(audioStreamLabel({ ...base, title: 'Swe Surround', lang: 'swe' })).toBe('Swe Surround')
+    expect(audioStreamLabel({ ...base, title: 'Surround', lang: 'und' })).toBe('Surround')
+    expect(audioStreamLabel({ ...base, lang: 'und', index: 3 })).toBe('Audio 3')
+  })
+
+  it('numbers the tracks that still read the same', () => {
+    const surround = { ...base, title: 'Surround', channels: 6, codec: 'ac3' }
+    expect(audioStreamLabels([
+      { ...surround, index: 1 }, { ...surround, index: 2, lang: 'swe' }, { ...surround, index: 3 },
+    ])).toEqual(['Surround · 5.1 AC3 (1)', 'SWE · Surround · 5.1 AC3', 'Surround · 5.1 AC3 (2)'])
   })
 
   it('uses lang uppercased when no title', () => {

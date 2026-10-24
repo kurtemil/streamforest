@@ -420,7 +420,14 @@ compositor). Its container lives in the `hemma` repo, `bio/kiosk/`, and opens
   Two layers since: `VideoPlayer` removes `src` and calls `load()` when `current`
   changes or goes away (`e2e/kiosk-iptv.spec.ts`, which fails without it), and
   `/transcode` kills every older ffmpeg when a new one starts, so the newest film wins
-  even when a page dies or a phone sleeps without saying goodbye.
+  even when a page dies or a phone sleeps without saying goodbye. The probe is aborted
+  with the film and its ffprobe killed with the request, and `/keyframe` is asked only
+  in copy mode, where its answer is used. **Still open** (sweep 2026-10-25): iOS HLS
+  sessions are outside newest-wins and keep reading after the player leaves; in copy
+  mode `/keyframe` still runs beside the film; nothing notices a `/transcode` that goes
+  silent after its first bytes (ffmpeg has no `-rw_timeout`); and two players that both
+  stay open take turns stopping each other, since a stopped stream ends cleanly and the
+  loser's premature-end retry takes the connection back.
 - **Seeking a paused IPTV film starts it again** on the kiosk, because VideoPlayer's
   `seekTo` restarts the transcode and plays. Known, not fixed.
 - **The remote** (`components/bion/BionRemote.tsx`) floats above the tab bar while

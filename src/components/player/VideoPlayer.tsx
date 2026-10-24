@@ -13,7 +13,7 @@ import { useProfileStore } from '@/stores/profileStore'
 import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import {
   isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, probeMedia, pickProxyMode,
-  subtitleVttUrl, audioStreamLabel, subtitleStreamLabel, getKeyframeTime, logDiagnostic,
+  subtitleVttUrl, audioStreamLabels, subtitleStreamLabel, getKeyframeTime, logDiagnostic,
   startHlsSession, getLastHlsError,
 } from '@/lib/transcode'
 import type { ProxyMode } from '@/lib/transcode'
@@ -717,21 +717,17 @@ export function VideoPlayer() {
         // expose embedded MKV tracks via the <video> element, so the picker
         // depends on probe + ffmpeg routing. Movie/series URLs from many
         // providers omit the .mkv extension, so we trust the channel type.
-        // Start both fetches in parallel: probe for codec info, keyframe for
-        // copy-mode offset correction. getKeyframeTime is cheap if start=0.
-        const probeP = isProxyVideo(current) ? probeMedia(current.url) : Promise.resolve(null)
-        const keyframeP = isProxyVideo(current) && startTime > 0
-          ? getKeyframeTime(current.url, startTime)
-          : Promise.resolve(startTime)
-
-        const info = await probeP
+        // The probe is aborted with the film, so a closed film's ffprobe does not
+        // hold the provider's one connection while the next film starts.
+        const info = isProxyVideo(current) ? await probeMedia(current.url, probeAbort.signal) : null
         if (usePlayerStore.getState().current !== current) return // navigated away during probe
 
         if (info) {
           if (info.audioStreams.length > 1) {
-            const tracks = info.audioStreams.map(s => ({
+            const labels = audioStreamLabels(info.audioStreams)
+            const tracks = info.audioStreams.map((s, i) => ({
               id: s.index,
-              name: audioStreamLabel(s),
+              name: labels[i],
               lang: s.lang ?? '',
             }))
             setAudioTracks(tracks)
@@ -774,10 +770,12 @@ export function VideoPlayer() {
           videoStartTimeRef.current = info?.startTime ?? 0
           playbackOffsetRef.current = startTime
           // For copy mode, correct the offset to the actual keyframe K async so
-          // video starts immediately (no extra wait on top of the probe).
+          // video starts immediately (no extra wait on top of the probe). Only copy
+          // mode asks: it used to start beside every resumed probe, and in transcode
+          // mode its answer was thrown away while it took a provider connection.
           if (mode === 'copy' && startTime > 0) {
             const capturedCurrent = current
-            keyframeP.then(keyframe => {
+            getKeyframeTime(current.url, startTime).then(keyframe => {
               if (usePlayerStore.getState().current === capturedCurrent) {
                 playbackOffsetRef.current = keyframe
               }
@@ -892,7 +890,9 @@ export function VideoPlayer() {
       attemptPlay(video, 'load-tail')
     }
 
+    const probeAbort = new AbortController()
     load()
+    return () => probeAbort.abort()
   }, [current, activeProfileId, destroyHls, detachSubtitleTrack])
 
   // Progress saving; for live channels save once on start (just records lastWatched — no resume point)

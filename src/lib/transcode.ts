@@ -305,7 +305,13 @@ export async function probeMedia(url: string, signal?: AbortSignal): Promise<Med
 }
 
 export function audioStreamLabel(s: AudioStream): string {
-  const head = s.title ?? (s.lang ? s.lang.toUpperCase() : `Audio ${s.index}`)
+  // The language goes first even when there is a title. A title such as "Surround"
+  // says nothing about it, and Coco on Bion listed five tracks as "Surround · 5.1
+  // AC3" and nothing else (2026-10-24). `und` is ffmpeg's word for no language.
+  const lang = s.lang && s.lang.toLowerCase() !== 'und' ? s.lang.toUpperCase() : null
+  const head = s.title
+    ? (lang && !s.title.toUpperCase().includes(lang) ? `${lang} · ${s.title}` : s.title)
+    : lang ?? `Audio ${s.index}`
   const meta: string[] = []
   if (s.channels === 6) meta.push('5.1')
   else if (s.channels === 8) meta.push('7.1')
@@ -313,6 +319,14 @@ export function audioStreamLabel(s: AudioStream): string {
   else if (s.channels) meta.push(`${s.channels}ch`)
   if (s.codec) meta.push(s.codec.toUpperCase())
   return meta.length > 0 ? `${head} · ${meta.join(' ')}` : head
+}
+
+/** Every track's label, with the ones that would still read the same numbered 1, 2, 3. */
+export function audioStreamLabels(streams: AudioStream[]): string[] {
+  const labels = streams.map(audioStreamLabel)
+  return labels.map((label, i) => labels.indexOf(label) === labels.lastIndexOf(label)
+    ? label
+    : `${label} (${labels.slice(0, i + 1).filter((l) => l === label).length})`)
 }
 
 export function subtitleStreamLabel(s: SubtitleStream): string {
