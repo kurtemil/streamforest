@@ -1489,11 +1489,22 @@ export function VideoPlayer() {
         subtitleNoticeTimerRef.current = null
       }
       setSubtitleNotice(null)
-      if (videoRef.current) {
-        videoRef.current.src = ''
-      }
     }
   }, [current, destroyHls, detachSubtitleTrack])
+
+  // Let go of the stream when the film closes or changes. The <video> unmounts with
+  // the film, and a detached element keeps its request open until garbage collection:
+  // on Bion a closed film went on downloading for 40 s. The account allows one
+  // connection, so the next film never got a frame (2026-10-24). The cleanup holds the
+  // element itself, because videoRef is already null when the effect above runs.
+  useEffect(() => {
+    const video = videoRef.current
+    if (!current || !video) return
+    return () => {
+      video.removeAttribute('src')
+      video.load()
+    }
+  }, [current])
 
   const selectAudioTrack = useCallback((id: number) => {
     if (hlsRef.current) {

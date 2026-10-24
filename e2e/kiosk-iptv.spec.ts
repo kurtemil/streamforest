@@ -65,3 +65,53 @@ test('the kiosk plays an IPTV film from the Play alone, without the catalogue', 
   expect(ids).toEqual(['s_1', 's_2', 's_3'])
   expect(catalogue).toEqual([])
 })
+
+// A closed film lets go of its stream. The <video> unmounts with the film, and a
+// detached element kept its request open until garbage collection: on Bion the closed
+// film went on downloading for 40 s, and the account allows one connection, so the
+// next film never got a frame (2026-10-24).
+test('the kiosk lets go of the stream when the film stops', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'the kiosks are a TV and a desktop Chromium')
+  await stayOffline(page)
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/api/bion' && route.request().method() === 'GET') {
+      const after = url.searchParams.get('after')
+      const commands = after === '4'
+        ? [{ seq: 5, type: 'play', source: 'iptv', profileId: 'vera', itemId: 's_1', channel: ep(1), episodes: [] }]
+        : after === '5' ? [{ seq: 6, type: 'stop' }] : []
+      return route.fulfill({ json: { now: Date.now(), latest: 6, commands, status: null } })
+    }
+    if (url.pathname === '/api/preferences' && url.searchParams.get('profileId') === '_global') {
+      return route.fulfill({ json: { m3u_url: M3U } })
+    }
+    return route.fulfill({ json: {} })
+  })
+  await page.route('**/proxy?**', (route) => route.abort())
+  await page.route(`${PROXY}/**`, (route) => {
+    const url = new URL(route.request().url())
+    if (url.pathname === '/probe') {
+      return route.fulfill({ json: { duration: 1448, startTime: 0, audioCodec: 'aac', videoCodec: 'h264', audioStreams: [], subtitleStreams: [] } })
+    }
+    return route.abort()
+  })
+  // Every element that was given a stream, so it can be asked after it has left the page.
+  await page.addInitScript(() => {
+    const els: HTMLMediaElement[] = []
+    ;(window as unknown as { __els: HTMLMediaElement[] }).__els = els
+    const desc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src')!
+    Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+      ...desc,
+      set(v: string) { if (v.includes('/transcode')) els.push(this); desc.set!.call(this, v) },
+    })
+  })
+
+  await page.goto('/?kiosk=bion&after=4')
+
+  const holding = () => page.evaluate(() => (window as unknown as { __els: HTMLMediaElement[] }).__els
+    .filter((el) => el.hasAttribute('src')).length)
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __els: HTMLMediaElement[] }).__els.length),
+    { timeout: 15_000 }).toBeGreaterThan(0)
+  await expect.poll(holding, { timeout: 15_000 }).toBe(0)
+  await expect(page.locator('video')).toHaveCount(0)
+})

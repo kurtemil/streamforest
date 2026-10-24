@@ -412,6 +412,15 @@ compositor). Its container lives in the `hemma` repo, `bio/kiosk/`, and opens
   is one `/transcode`, not two. The old effect also ran on the previous episode's
   track list and was spent before the new one arrived, so every episode after the
   first played track 1 (Danish). `e2e/audio-language.spec.ts` holds it.
+- **A closed film must let go of its stream.** On 2026-10-24 the kids on Bion closed
+  Coco, tried another film, closed that, and opened Coco again, which never showed a
+  frame. Each closed film's ffmpeg went on reading for up to 40 s, and the reconnects
+  above made the two films take turns cutting each other. The `<video>` unmounts with
+  the film, and a detached element keeps its request open until garbage collection.
+  Two layers since: `VideoPlayer` removes `src` and calls `load()` when `current`
+  changes or goes away (`e2e/kiosk-iptv.spec.ts`, which fails without it), and
+  `/transcode` kills every older ffmpeg when a new one starts, so the newest film wins
+  even when a page dies or a phone sleeps without saying goodbye.
 - **Seeking a paused IPTV film starts it again** on the kiosk, because VideoPlayer's
   `seekTo` restarts the transcode and plays. Known, not fixed.
 - **The remote** (`components/bion/BionRemote.tsx`) floats above the tab bar while

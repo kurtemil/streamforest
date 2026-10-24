@@ -190,6 +190,15 @@ setInterval(() => {
 // SubStream: { chunks: Buffer[], ended: bool, readers: Set<ServerResponse> }
 const activeTranscodes = new Map()
 
+// The running /transcode ffmpegs. Every allowed host is the provider under one name
+// or another, and the account allows one connection (PROVIDER_RECONNECT), so the
+// newest film wins and the older ones are killed. Two films that both stay open only
+// starve each other: the provider closes one, both reconnect, and on Bion 2026-10-24
+// the film that had closed a minute earlier kept the next one from ever showing a
+// frame. The player lets go of a closed film, but a page that dies or a phone that
+// sleeps never says goodbye.
+const providerTranscodes = new Set()
+
 function hostAllowed(targetUrl) {
   return ALLOWED_HOSTS.some((h) => targetUrl.hostname === h || targetUrl.hostname.endsWith('.' + h))
 }
@@ -326,9 +335,17 @@ function handleTranscode(reqUrl, res) {
     )
   }
 
+  for (const older of providerTranscodes) {
+    process.stderr.write('[transcode] a newer film takes the provider connection — stopping the older one\n')
+    older.kill('SIGKILL')
+  }
+  providerTranscodes.clear()
+
   const ff = spawn(FFMPEG_PATH, args, {
     stdio: ['ignore', 'pipe', 'pipe', ...subtitlePipeEntries],
   })
+  providerTranscodes.add(ff)
+  ff.on('exit', () => providerTranscodes.delete(ff))
 
   if (subtitleIndices.length > 0) {
     const entry = activeTranscodes.get(transKey)
@@ -418,8 +435,10 @@ function handleTranscode(reqUrl, res) {
       console.error('ffmpeg exit', { code, signal })
     }
     if (subtitleIndices.length > 0) {
+      // Only its own entry: a newer stream of the same film (an audio switch) has
+      // the same key, and it stopped this one before this one could exit.
       const entry = activeTranscodes.get(transKey)
-      if (entry) {
+      if (entry?.ff === ff) {
         entry.alive = false
         if (code === 0) {
           // Promote accumulated subtitle buffers to permanent cache.
@@ -430,7 +449,7 @@ function handleTranscode(reqUrl, res) {
             }
           }
         }
-        setTimeout(() => activeTranscodes.delete(transKey), 15_000)
+        setTimeout(() => { if (activeTranscodes.get(transKey) === entry) activeTranscodes.delete(transKey) }, 15_000)
       }
     }
   })
@@ -439,7 +458,7 @@ function handleTranscode(reqUrl, res) {
     if (!ff.killed) ff.kill('SIGKILL')
     if (subtitleIndices.length > 0) {
       const entry = activeTranscodes.get(transKey)
-      if (entry) {
+      if (entry?.ff === ff) {
         entry.alive = false
         for (const stream of entry.subtitleStreams.values()) {
           stream.ended = true
