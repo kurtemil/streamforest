@@ -892,10 +892,12 @@ VITE_TMDB_API_KEY=<your key>
 ```bash
 # SSH to server (LAN, see below), then:
 cd ~/streamforest && git pull
-cd ~/services && docker compose up -d --build --force-recreate
+cd ~/services && docker compose up -d --build transcode-proxy
 ```
 
-The repo lives at `~/streamforest` on the ProDesk. Docker Compose lives at `~/services/docker-compose.yml` and builds from `~/streamforest/transcode-proxy/`. The `--build` flag is required because the Dockerfile COPYs server.mjs at image build time.
+The repo lives at `~/streamforest` on the ProDesk. Docker Compose lives at `~/services/docker-compose.yml` and builds from `~/streamforest/transcode-proxy/`. The `--build` flag is required because the Dockerfile COPYs server.mjs at image build time. Rebuild only this service (`docker compose up -d --build transcode-proxy`): `--force-recreate` without a name restarts everything on the server, the kiosk and Jellyfin included.
+
+The client log and the subtitle, TMDB and EPG caches live in the volume `transcode-data`, mounted at `/data` (`CLIENT_LOG_FILE`, `SUB_CACHE_DIR`, `TMDB_CACHE_DIR`, `EPG_CACHE_DIR` in compose). Until 2026-10-25 they were in the container's `/tmp`, and every rebuild threw away the diagnostics `npm run logs` reads. HLS sessions stay in `/tmp`.
 
 ---
 
