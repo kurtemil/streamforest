@@ -6,6 +6,7 @@ import { KioskApp } from './components/kiosk/KioskApp'
 import { isKiosk } from './lib/kiosk'
 import { registerSW } from 'virtual:pwa-register'
 import { traceSessionStart } from './lib/diagnostics'
+import { registered, reloadOnce } from './lib/launchUpdate'
 import './index.css'
 
 // One record per app load of which engine, browser shell and display mode we are
@@ -24,7 +25,9 @@ traceSessionStart()
 // with, which is what sent me looking.
 //
 // So: check when the app comes back to the foreground, and hourly while it is
-// open. `autoUpdate` reloads once the new worker takes control.
+// open. `autoUpdate` reloads once the new worker takes control. At launch the
+// catalogue waits for that check, so the reload comes before the home screen
+// rather than after it (lib/launchUpdate.ts).
 // The kiosk ("Bion", in the basement) runs without one: `autoUpdate` reloads the page
 // when a new worker takes over, which on the kiosk would be in the middle of a film.
 // It picks up new builds itself, while idle (KioskApp). One left from before the
@@ -38,7 +41,10 @@ if (kiosk) {
 
 const updateServiceWorker = kiosk ? undefined : registerSW({
   immediate: true,
+  onNeedReload: reloadOnce,
+  onRegisterError() { registered() },
   onRegisteredSW(_swUrl, registration) {
+    registered(registration)
     if (!registration) return
     const check = () => { void registration.update().catch(() => {}) }
     document.addEventListener('visibilitychange', () => {

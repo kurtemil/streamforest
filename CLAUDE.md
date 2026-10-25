@@ -214,6 +214,42 @@ while actually meaning "the default rows view". It is `browseLabel` / "Browse".
 
 ---
 
+## The app started twice after every deploy
+
+Fixed on 2026-10-25. The report: the app loads, shows Home for a couple of
+seconds, then loads again. The client log had two `session-start`s from the
+iPhone nine seconds apart with nothing in between, on the first launch after
+7c6bb16.
+
+A home-screen app starts from the service worker's copy. The browser finds the
+new build in the background, the new worker takes over (`autoUpdate` means
+`skipWaiting` + `clientsClaim`), and `registerSW` reloads the page — after the
+old build had read the 205 803-row catalogue and drawn Home. So it happened once
+per deploy, which in October was every day.
+
+`src/lib/launchUpdate.ts`: on a launch from the copy, `App` reads the catalogue
+only after `registration.update()` has answered. If a new worker is installing,
+the spinner stays until it takes control and the page reloads into it. Offline,
+or with no answer in 3 s, the app starts from the copy and `autoUpdate` reloads
+later as before. A launch with no controller came from the network and does not
+wait. The check listens for `controllerchange` itself: an update found by the
+navigation before workbox-window attaches `updatefound` never reaches the
+plugin's `activated` handler, so the plugin alone would not reload.
+
+Measured with two production builds behind a switchable local server: deploy B
+over A's installed copy, then reload.
+
+| | Chromium | WebKit |
+|---|---|---|
+| before: Home drawn by A, then reload into B | 0.04 s, 3.1 s | 0.15 s, 1.3 s |
+| after: Home drawn once, by B | 1.1 s | 0.4 s |
+| after, no new build: Home drawn | 0.05 s (was 0.04) | 0.17 s (was 0.15) |
+
+`launchUpdate.test.ts` covers the branches. The real-browser check is not in
+`e2e/` because Playwright runs against `npm run dev`, which registers no worker.
+
+---
+
 ## The home library (Jellyfin)
 
 Added 2026-10-11. The films on the home server's disks appear as a "Hemma" row on

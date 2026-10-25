@@ -31,6 +31,7 @@ import { PROFILES } from '@/stores/profileStore'
 import { PageTransition } from '@/ui'
 import { useWatchStateSync } from '@/stores/watchStateStore'
 import { useT } from '@/lib/i18n'
+import { launchChecked } from '@/lib/launchUpdate'
 
 export default function App() {
   const t = useT()
@@ -42,7 +43,9 @@ export default function App() {
   useWatchStateSync()
 
   useEffect(() => {
-    loadFromDB()
+    // After the version check: a new build reloads the page before the catalogue is
+    // read, rather than after (lib/launchUpdate.ts).
+    void launchChecked.then(loadFromDB)
     PROFILES.filter((p) => p.role === 'kid').forEach((p) => kidRestrictionsStore.syncFromRemote(p.id))
     syncEpgUrl()
     syncM3uUrlFromRemote()
