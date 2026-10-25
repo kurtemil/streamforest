@@ -42,6 +42,33 @@ function proxyBase(): string | null {
   return base.replace(/\/+$/, '')
 }
 
+// The id of the film being played, sent as `sid` with every stream request for it.
+// The provider allows one connection and the proxy gives it to the newest film; by
+// the id it knows which playback lost it, so a player can tell a takeover from a
+// dropped connection (`wasDisplaced`). Seeks and audio switches keep the id.
+let playbackId = ''
+
+export function newPlaybackId(): void {
+  playbackId = Math.random().toString(36).slice(2, 12)
+}
+
+/** Whether another film has taken this playback's provider connection. */
+export async function wasDisplaced(): Promise<boolean> {
+  const base = proxyBase()
+  if (!base || !playbackId) return false
+  try {
+    const res = await fetch(`${base}/displaced?${new URLSearchParams({ sid: playbackId }).toString()}`, { cache: 'no-store' })
+    if (!res.ok) {
+      await res.body?.cancel()
+      return false
+    }
+    const data = (await res.json()) as { displaced?: boolean }
+    return data.displaced === true
+  } catch {
+    return false
+  }
+}
+
 export interface ProviderStatus {
   active: string | null
   ips: string[]
@@ -95,6 +122,7 @@ export function transcodeUrl(url: string, opts: TranscodeOptions = {}): string {
   if (opts.vstart && opts.vstart > 0.01) {
     params.set('vstart', String(opts.vstart))
   }
+  if (playbackId) params.set('sid', playbackId)
   return `${base}/transcode?${params.toString()}`
 }
 
@@ -106,6 +134,7 @@ export function liveStreamUrl(url: string, mode: ProxyMode = 'copy'): string | n
   if (!base) return null
   const params = new URLSearchParams({ url, live: '1' })
   if (mode === 'copy') params.set('mode', 'copy')
+  if (playbackId) params.set('sid', playbackId)
   return `${base}/transcode?${params.toString()}`
 }
 
@@ -206,6 +235,7 @@ export async function startHlsSession(
   if (opts.startSeconds && opts.startSeconds > 0) params.set('start', String(Math.floor(opts.startSeconds)))
   if (opts.videoCodec) params.set('vcodec', opts.videoCodec)
   if (opts.audioCodec) params.set('acodec', opts.audioCodec)
+  if (playbackId) params.set('sid', playbackId)
 
   // Wall-clock here is the number that matters: it is the gap between the user's
   // tap and anything appearing, and the reason play() lands outside the gesture.

@@ -276,6 +276,7 @@ export const sv = {
     'Live-TV kräver transkodningsservern. Ange VITE_TRANSCODE_PROXY_URL.',
   'player.errSavedPosition': 'Sparad position är otillgänglig — startar om från början…',
   'player.errHlsUnsupported': 'HLS stöds inte i den här webbläsaren',
+  'player.errDisplaced': 'En annan film tog över IPTV-anslutningen. Kontot klarar en film i taget.',
   'player.errStreamRetry': 'Strömfel — försöker igen från början…',
   'player.errReconnecting': 'Anslutningen bröts — återansluter ({retry})…',
   'player.errLiveReconnect': 'Kunde inte återansluta till livekanalen',

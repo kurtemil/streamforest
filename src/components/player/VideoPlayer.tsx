@@ -13,7 +13,7 @@ import { useProfileStore } from '@/stores/profileStore'
 import { usePlaybackPrefsStore } from '@/stores/playbackPrefsStore'
 import {
   isTranscodeProxyConfigured, transcodeUrl, liveStreamUrl, probeMedia, pickProxyMode,
-  subtitleVttUrl, audioStreamLabels, subtitleStreamLabel, getKeyframeTime, logDiagnostic,
+  subtitleVttUrl, audioStreamLabels, subtitleStreamLabel, getKeyframeTime, logDiagnostic, newPlaybackId, wasDisplaced,
   startHlsSession, getLastHlsError,
 } from '@/lib/transcode'
 import type { ProxyMode } from '@/lib/transcode'
@@ -157,6 +157,8 @@ export function VideoPlayer() {
   const autoAudioSelectedRef = useRef(false)
   // Where the last premature end was picked up, and how many times in a row.
   const endResumeRef = useRef({ at: -1, tries: 0 })
+  // When a live channel's stream last ended and was started again, and how many times in a row.
+  const liveEndRef = useRef({ at: 0, tries: 0 })
   const subtitleTracksRef = useRef<Track[]>([])
   const subtitleStreamIndicesRef = useRef<number[]>([])
   const [parsedSubtitles, setParsedSubtitles] = useState<{ start: number; end: number; text: string }[]>([])
@@ -228,6 +230,7 @@ export function VideoPlayer() {
     setNextEpCountdown(null)
     autoAudioSelectedRef.current = false
     endResumeRef.current = { at: -1, tries: 0 }
+    liveEndRef.current = { at: 0, tries: 0 }
     subtitleStreamIndicesRef.current = []
     iosStrategyRef.current = null
     iosHlsRetriedRef.current = false
@@ -639,6 +642,7 @@ export function VideoPlayer() {
   useEffect(() => {
       if (!current || !videoRef.current) return
     const video = videoRef.current
+    newPlaybackId()
     setError(null)
     setDuration(0)
     setCurrentTime(0)
@@ -961,7 +965,32 @@ export function VideoPlayer() {
       setMuted(video.muted)
     }
     const onEnded = () => {
-      if (!current || current.type === 'live') return
+      if (!current) return
+      // A live channel has no end. Its stream ends when the provider's socket goes quiet
+      // (the proxy's -rw_timeout) or another film takes the connection; it used to stand
+      // still on the last frame. Start it again unless another film took over, three
+      // times in a minute at most.
+      if (current.type === 'live') {
+        if (IS_IOS) return
+        const now = Date.now()
+        const tries = now - liveEndRef.current.at > 60_000 ? 0 : liveEndRef.current.tries
+        if (tries >= 3) return
+        liveEndRef.current = { at: now, tries: tries + 1 }
+        void wasDisplaced().then((displaced) => {
+          if (usePlayerStore.getState().current !== current || !videoRef.current) return
+          if (displaced) {
+            trace('displaced', {})
+            setError(t('player.errDisplaced'))
+            return
+          }
+          const liveUrl = liveStreamUrl(current.url, 'copy')
+          if (!liveUrl) return
+          trace('live-ended', { tries: tries + 1 })
+          videoRef.current.src = liveUrl
+          attemptPlay(videoRef.current, 'live-ended')
+        })
+        return
+      }
       const localDur = Number.isFinite(video.duration) ? video.duration : 0
       const realPos = playbackOffsetRef.current + video.currentTime
       const realDur = transcodedDurationRef.current ?? (playbackOffsetRef.current + localDur)
@@ -1000,8 +1029,19 @@ export function VideoPlayer() {
         const tries = realPos > last.at + 10 ? 0 : last.tries
         if (tries < 3) {
           endResumeRef.current = { at: realPos, tries: tries + 1 }
-          trace('premature-end', { realPosition: Number(realPos.toFixed(1)), realDuration: realDur, tries: tries + 1 })
-          seekToRef.current(realPos, true)
+          // Unless another film took the connection: the proxy keeps the newest, and
+          // taking it back would stop that film in turn. Two players that both stayed
+          // open did that to each other for as long as they played. This one stops.
+          void wasDisplaced().then((displaced) => {
+            if (usePlayerStore.getState().current !== current) return
+            if (displaced) {
+              trace('displaced', { realPosition: Number(realPos.toFixed(1)) })
+              setError(t('player.errDisplaced'))
+              return
+            }
+            trace('premature-end', { realPosition: Number(realPos.toFixed(1)), realDuration: realDur, tries: tries + 1 })
+            seekToRef.current(realPos, true)
+          })
           return
         }
       }

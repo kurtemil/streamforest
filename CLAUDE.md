@@ -422,12 +422,20 @@ compositor). Its container lives in the `hemma` repo, `bio/kiosk/`, and opens
   `/transcode` kills every older ffmpeg when a new one starts, so the newest film wins
   even when a page dies or a phone sleeps without saying goodbye. The probe is aborted
   with the film and its ffprobe killed with the request, and `/keyframe` is asked only
-  in copy mode, where its answer is used. **Still open** (sweep 2026-10-25): iOS HLS
-  sessions are outside newest-wins and keep reading after the player leaves; in copy
-  mode `/keyframe` still runs beside the film; nothing notices a `/transcode` that goes
-  silent after its first bytes (ffmpeg has no `-rw_timeout`); and two players that both
-  stay open take turns stopping each other, since a stopped stream ends cleanly and the
-  loser's premature-end retry takes the connection back.
+  in copy mode, where its answer is used. Since 2026-10-25:
+  - **HLS sessions are in newest-wins too** (`providerStreams` holds both kinds). A
+    killed session has `exitCode` null like a running one, so reuse checks `isRunning`
+    and a killed session starts afresh.
+  - **A copy-mode resume waits for its keyframe.** `/transcode` and the player's
+    `/keyframe` share one `lookupKeyframe`, and ffmpeg starts when it is done, so the
+    two never hold the provider at once. It costs the lookup's time on such a resume.
+  - **A silent provider socket times out** (`-rw_timeout` 15 s in `PROVIDER_RECONNECT`):
+    ffmpeg reconnects at the byte for a film, and a live channel's stream ends, which
+    the player now starts again (three times a minute at most).
+  - **The player that lost the connection stops.** Every stream request carries the
+    playback id `sid` (`newPlaybackId` in `lib/transcode.ts`); the proxy records whose
+    stream it killed, and before a premature-end retry or a live restart the player
+    asks `GET /displaced`. Before this, two open players took turns taking it back.
 - **Seeking a paused IPTV film starts it again** on the kiosk, because VideoPlayer's
   `seekTo` restarts the transcode and plays. Known, not fixed.
 - **The remote** (`components/bion/BionRemote.tsx`) floats above the tab bar while

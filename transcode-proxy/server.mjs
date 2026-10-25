@@ -58,7 +58,14 @@ const HLS_DIR = path.join(os.tmpdir(), 'streamforest-hls')
 // Bion the film stood still after a few seconds, every try. A file has a length, so
 // ffmpeg can reconnect at the byte it had reached: right away, then after 1 and 3 s.
 // A live channel has no length, and these options leave it alone.
-const PROVIDER_RECONNECT = ['-reconnect', '1', '-reconnect_delay_max', '4']
+//
+// -rw_timeout: a provider socket that goes quiet without closing held ffmpeg in its
+// read for good, and a film on Bion stood on its spinner. Not even SIGTERM gets
+// through a blocked read. Proven with ffmpeg 5.1 from this image against an origin
+// that stops after 1 MB: hung until killed without it, and with it "Will reconnect at
+// 1048576 ... Connection timed out" after the timeout, then the whole file. A live
+// channel ends instead, and the player starts it again.
+const PROVIDER_RECONNECT = ['-reconnect', '1', '-reconnect_delay_max', '4', '-rw_timeout', '15000000']
 
 // ── VAAPI rate control ─────────────────────────────────────────────────────────
 //
@@ -190,14 +197,100 @@ setInterval(() => {
 // SubStream: { chunks: Buffer[], ended: bool, readers: Set<ServerResponse> }
 const activeTranscodes = new Map()
 
-// The running /transcode ffmpegs. Every allowed host is the provider under one name
-// or another, and the account allows one connection (PROVIDER_RECONNECT), so the
-// newest film wins and the older ones are killed. Two films that both stay open only
-// starve each other: the provider closes one, both reconnect, and on Bion 2026-10-24
-// the film that had closed a minute earlier kept the next one from ever showing a
-// frame. The player lets go of a closed film, but a page that dies or a phone that
-// sleeps never says goodbye.
-const providerTranscodes = new Set()
+// The ffmpegs that read a film from the provider: /transcode streams and HLS
+// sessions. Every allowed host is the provider under one name or another, and the
+// account allows one connection (PROVIDER_RECONNECT), so the newest film wins and the
+// older ones are killed. Two films that both stay open only starve each other: the
+// provider closes one, both reconnect, and on Bion 2026-10-24 the film that had
+// closed a minute earlier kept the next one from ever showing a frame. The player
+// lets go of a closed film, but a page that dies or a phone that sleeps never says
+// goodbye. Entries are { proc, sid }; `sid` is the player's playback id.
+const providerStreams = new Set()
+// Playback id → when another playback took its connection. The player that lost asks
+// GET /displaced before it fetches the rest, instead of taking the connection back:
+// two players that stayed open did that to each other for as long as both played.
+const displacedSids = new Map()
+const DISPLACED_KEEP_MS = 10 * 60_000
+
+function takeProviderConnection(sid) {
+  const now = Date.now()
+  for (const [s, at] of displacedSids) if (now - at > DISPLACED_KEEP_MS) displacedSids.delete(s)
+  for (const stream of providerStreams) {
+    if (stream.proc.exitCode !== null || stream.proc.signalCode !== null) continue
+    process.stderr.write('[provider] a newer film takes the connection — stopping the older one\n')
+    stream.proc.kill('SIGKILL')
+    // A seek or an audio switch replaces the playback's own stream; that is no loss.
+    if (stream.sid && stream.sid !== sid) displacedSids.set(stream.sid, now)
+  }
+  providerStreams.clear()
+  if (sid) displacedSids.delete(sid)
+}
+
+function holdProviderConnection(proc, sid) {
+  const stream = { proc, sid }
+  providerStreams.add(stream)
+  proc.on('exit', () => providerStreams.delete(stream))
+}
+
+const isRunning = (proc) => proc.exitCode === null && proc.signalCode === null
+
+// Where a copy-mode stream really starts: ffmpeg's -ss with -c copy begins at the
+// keyframe before `start`, and the player needs that keyframe as its offset. The
+// lookup is an ffprobe on the provider, so it must not run beside the film: the
+// player's GET /keyframe and the /transcode that needs it share one lookup, and the
+// stream starts when it is done. `start` is in whole seconds, as the player sends it.
+const keyframeLookups = new Map() // `${target}|${start}` → { promise, at }
+const KEYFRAME_KEEP_MS = 10 * 60_000
+
+function lookupKeyframe(target, start) {
+  const key = `${target}|${start}`
+  const now = Date.now()
+  for (const [k, v] of keyframeLookups) if (now - v.at > KEYFRAME_KEEP_MS) keyframeLookups.delete(k)
+  const known = keyframeLookups.get(key)
+  if (known) return known.promise
+  const promise = new Promise((resolve) => {
+    const lookback = Math.max(0, start - 10)
+    const ff = spawn(FFPROBE_PATH, [
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-show_entries', 'packet=pts_time,flags',
+      '-read_intervals', `${lookback.toFixed(3)}%${(start + 0.5).toFixed(3)}`,
+      '-of', 'json',
+      ...PROVIDER_RECONNECT,
+      provider.resolve(target),
+    ], { stdio: ['ignore', 'pipe', 'ignore'] })
+    let out = ''
+    let timedOut = false
+    // A lookup that failed is not kept: the next one may well get through.
+    const fallBack = () => { keyframeLookups.delete(key); resolve(start) }
+    const timeout = setTimeout(() => {
+      timedOut = true
+      ff.kill('SIGKILL')
+      process.stderr.write(`[keyframe] timeout start=${start} — falling back\n`)
+    }, 8000)
+    ff.stdout.on('data', (d) => { out += d.toString() })
+    ff.on('error', () => { clearTimeout(timeout); fallBack() })
+    ff.on('close', () => {
+      clearTimeout(timeout)
+      if (timedOut) return fallBack()
+      try {
+        const data = JSON.parse(out)
+        const candidates = (data?.packets ?? [])
+          .filter(p => typeof p.pts_time === 'string' && p.flags?.includes('K'))
+          .map(p => Number(p.pts_time))
+          .filter(t => Number.isFinite(t) && t <= start + 0.1)
+        const keyframe = candidates.length > 0 ? candidates[candidates.length - 1] : start
+        process.stderr.write(`[keyframe] start=${start} → keyframe=${keyframe.toFixed(3)} (${candidates.length} candidates)\n`)
+        if (candidates.length > 0) resolve(keyframe)
+        else fallBack()
+      } catch {
+        fallBack()
+      }
+    })
+  })
+  keyframeLookups.set(key, { promise, at: now })
+  return promise
+}
 
 function hostAllowed(targetUrl) {
   return ALLOWED_HOSTS.some((h) => targetUrl.hostname === h || targetUrl.hostname.endsWith('.' + h))
@@ -231,7 +324,19 @@ function parseTargetUrl(reqUrl, res) {
 function handleTranscode(reqUrl, res) {
   const target = parseTargetUrl(reqUrl, res)
   if (!target) return
+  // A copy-mode resume waits for its keyframe lookup, so that ffprobe and ffmpeg do
+  // not hold the provider at the same time (see lookupKeyframe).
+  const resumeAt = Math.floor(Number(reqUrl.searchParams.get('start') || 0))
+  if (reqUrl.searchParams.get('mode') === 'copy' && reqUrl.searchParams.get('live') !== '1' && resumeAt > 0) {
+    let gone = false
+    res.on('close', () => { gone = true })
+    lookupKeyframe(target, resumeAt).then(() => { if (!gone) startTranscode(reqUrl, res, target) })
+    return
+  }
+  startTranscode(reqUrl, res, target)
+}
 
+function startTranscode(reqUrl, res, target) {
   const startParam = Number(reqUrl.searchParams.get('start') || 0)
   const start = Number.isFinite(startParam) && startParam > 0 ? startParam : 0
   const audioParam = reqUrl.searchParams.get('audio')
@@ -335,17 +440,12 @@ function handleTranscode(reqUrl, res) {
     )
   }
 
-  for (const older of providerTranscodes) {
-    process.stderr.write('[transcode] a newer film takes the provider connection — stopping the older one\n')
-    older.kill('SIGKILL')
-  }
-  providerTranscodes.clear()
-
+  const sid = reqUrl.searchParams.get('sid') || ''
+  takeProviderConnection(sid)
   const ff = spawn(FFMPEG_PATH, args, {
     stdio: ['ignore', 'pipe', 'pipe', ...subtitlePipeEntries],
   })
-  providerTranscodes.add(ff)
-  ff.on('exit', () => providerTranscodes.delete(ff))
+  holdProviderConnection(ff, sid)
 
   if (subtitleIndices.length > 0) {
     const entry = activeTranscodes.get(transKey)
@@ -583,58 +683,10 @@ function handleKeyframe(reqUrl, res) {
     return
   }
 
-  const lookback = Math.max(0, start - 10)
-  const args = [
-    '-v', 'error',
-    '-select_streams', 'v:0',
-    '-show_entries', 'packet=pts_time,flags',
-    '-read_intervals', `${lookback.toFixed(3)}%${(start + 0.5).toFixed(3)}`,
-    '-of', 'json',
-    ...PROVIDER_RECONNECT,
-    provider.resolve(target),
-  ]
-
-  const ff = spawn(FFPROBE_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] })
-  let out = ''
-
-  const timeout = setTimeout(() => {
-    ff.kill('SIGKILL')
-    process.stderr.write(`[keyframe] timeout start=${start} — falling back\n`)
-    if (!res.headersSent) {
-      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ keyframe: start }))
-    }
-  }, 8000)
-
-  ff.stdout.on('data', d => { out += d.toString() })
-
-  ff.on('error', () => {
-    clearTimeout(timeout)
-    if (!res.headersSent) {
-      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ keyframe: start }))
-    }
-  })
-
-  ff.on('exit', () => {
-    clearTimeout(timeout)
-    if (res.headersSent) return
-    try {
-      const data = JSON.parse(out)
-      const candidates = (data?.packets ?? [])
-        .filter(p => typeof p.pts_time === 'string' && p.flags?.includes('K'))
-        .map(p => Number(p.pts_time))
-        .filter(t => Number.isFinite(t) && t <= start + 0.1)
-      const keyframe = candidates.length > 0 ? candidates[candidates.length - 1] : start
-      process.stderr.write(`[keyframe] start=${start} → keyframe=${keyframe.toFixed(3)} (${candidates.length} candidates)\n`)
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' })
-        .end(JSON.stringify({ keyframe }))
-    } catch {
-      res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ keyframe: start }))
-    }
-  })
-
-  res.on('close', () => {
-    clearTimeout(timeout)
-    if (!ff.killed) ff.kill('SIGKILL')
+  lookupKeyframe(target, Math.floor(start)).then((keyframe) => {
+    if (res.destroyed) return
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' })
+      .end(JSON.stringify({ keyframe }))
   })
 }
 
@@ -968,7 +1020,8 @@ function handleHlsStart(reqUrl, res) {
   if (existing) {
     // Only reuse if ffmpeg is still running or exited cleanly (exit 0 = ENDLIST written).
     // Non-zero exit means provider truncated the stream — delete and start a fresh session.
-    if (existing.proc.exitCode === null || existing.proc.exitCode === 0) {
+    // So does a kill: a newer film took the connection, and exitCode stays null then.
+    if (isRunning(existing.proc) || existing.proc.exitCode === 0) {
       existing.lastAccess = Date.now()
       res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ hash }))
       return
@@ -1066,7 +1119,10 @@ function handleHlsStart(reqUrl, res) {
   // the working directory, not against the segment path — with the server's own
   // cwd it wrote init.mp4 next to the source tree, leaving every fMP4 segment in
   // the session unplayable because the playlist's EXT-X-MAP pointed at nothing.
+  const sid = reqUrl.searchParams.get('sid') || ''
+  takeProviderConnection(sid)
   const proc = spawn(FFMPEG_PATH, args, { stdio: ['ignore', 'ignore', 'pipe'], cwd: dir })
+  holdProviderConnection(proc, sid)
   proc.stderr.on('data', (d) => process.stderr.write(`[hls:${hash.slice(0, 8)}] ${d}`))
 
   const sess = { proc, dir, lastAccess: Date.now(), live }
@@ -1295,6 +1351,14 @@ const server = http.createServer((req, res) => {
 
   if (reqUrl.pathname === '/transcode') {
     handleTranscode(reqUrl, res)
+    return
+  }
+
+  // Whether a newer film took this playback's provider connection (see displacedSids).
+  if (reqUrl.pathname === '/displaced') {
+    const sid = reqUrl.searchParams.get('sid') || ''
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+      .end(JSON.stringify({ displaced: displacedSids.has(sid) }))
     return
   }
 

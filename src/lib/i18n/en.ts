@@ -282,6 +282,7 @@ export const en = {
   'player.errLiveNeedsProxy': 'Live TV requires the transcode proxy. Set VITE_TRANSCODE_PROXY_URL.',
   'player.errSavedPosition': 'Saved position unavailable — loading from start…',
   'player.errHlsUnsupported': 'HLS not supported in this browser',
+  'player.errDisplaced': 'Another film took over the IPTV connection. The account allows one film at a time.',
   'player.errStreamRetry': 'Stream error — retrying from start…',
   'player.errReconnecting': 'Connection lost — reconnecting ({retry})…',
   'player.errLiveReconnect': 'Live stream reconnect failed',
